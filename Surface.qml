@@ -106,9 +106,54 @@ Item {
         exclusionMode: ExclusionMode.Normal
         exclusiveZone: 0
 
-        // Visual only: no input region at all, so nothing here can intercept
-        // a click meant for the desktop or a window.
-        mask: Region {}
+        // Input region: empty by default, so nothing here can intercept a
+        // click meant for the desktop or a window. A widget type that asks
+        // for input by declaring `interactive` in the catalogue gets its own
+        // rectangle back, and nothing else — a music card can be pressed
+        // without the clock beside it swallowing a click on the desktop.
+        //
+        // Built by hand rather than declared, because the set of rectangles
+        // depends on the config. Nested regions combine, which is the union
+        // of the interactive widgets and exactly what is wanted.
+        mask: Region { id: inputMask }
+
+        readonly property var interactive: root.config
+          ? Model.interactiveWidgetsForScreen(root.config, surface.screenName)
+          : []
+
+        function rebuildInputRegions() {
+          var made = []
+          for (var i = 0; i < surface.interactive.length; i++) {
+            var rect = Model.widgetRect(root.layout, surface.interactive[i], surface.width)
+            var region = regionComponent.createObject(surface, {
+              x: rect.x, y: rect.y, width: rect.width, height: rect.height
+            })
+            if (region) made.push(region)
+          }
+          for (var old = 0; old < surface.ownedRegions.length; old++) {
+            if (surface.ownedRegions[old]) surface.ownedRegions[old].destroy()
+          }
+          surface.ownedRegions = made
+          inputMask.regions = made
+        }
+
+        property var ownedRegions: []
+
+        Component {
+          id: regionComponent
+          Region {}
+        }
+
+        onInteractiveChanged: rebuildInputRegions()
+        onWidthChanged: rebuildInputRegions()
+        Component.onCompleted: rebuildInputRegions()
+
+        Connections {
+          target: root
+          // The grid can move without the widget list changing at all — a
+          // side or column change relays every rectangle.
+          function onLayoutChanged() { surface.rebuildInputRegions() }
+        }
 
         Repeater {
           model: surface.placed

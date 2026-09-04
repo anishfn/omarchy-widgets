@@ -1,38 +1,70 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="Widgets" width="140">
+  <img src="assets/logo.svg" alt="Widgets" width="132">
 </p>
 
 <h1 align="center">Widgets</h1>
 
-<p align="center"><strong>Desktop widgets for Omarchy, in your theme's colors.</strong></p>
+<p align="center">
+  <strong>Desktop widgets for Omarchy, in your theme's colors.</strong><br>
+  A grid on your wallpaper, arranged by drag and drop.
+</p>
 
-Cards that sit on your wallpaper, under your windows, and take every color
-from the Omarchy theme you are running. Pick which ones are on screen from a
-button in the bar.
+<p align="center">
+  <a href="#install"><img alt="Install" src="https://img.shields.io/badge/install-omarchy%20plugin%20add-7fbbb3?style=for-the-badge"></a>
+  <a href="https://github.com/anishfn/omarchy-widgets/releases"><img alt="Releases" src="https://img.shields.io/github/v/release/anishfn/omarchy-widgets?style=for-the-badge&color=e8845f&label=release"></a>
+  <a href="CONTRIBUTING.md"><img alt="Contributing" src="https://img.shields.io/badge/widgets-welcome-dfd8c8?style=for-the-badge"></a>
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-8a9a9a?style=for-the-badge"></a>
+</p>
+
+---
+
+## Get it
+
+```bash
+omarchy plugin add https://github.com/anishfn/omarchy-widgets.git
+omarchy plugin enable io.github.anishfn.widgets
+```
+
+That is the whole install. Plugins land disabled so you can read the code
+before it runs; `enable` puts the **Widgets** button in your bar and the clock
+on your desktop.
+
+| | |
+|---|---|
+| **Clone URL** | `https://github.com/anishfn/omarchy-widgets.git` |
+| **Plugin id** | `io.github.anishfn.widgets` |
+| **Requires** | Omarchy 4 (the Quickshell shell) |
+| **Update** | `omarchy plugin update io.github.anishfn.widgets` |
+| **Remove** | `omarchy plugin remove io.github.anishfn.widgets` |
+
+<sub>Removing the plugin leaves `~/.config/omarchy/widgets.json` alone.</sub>
+
+---
+
+## The widgets
+
+| | | |
+|---|---|---|
+| **Clock** | The time in any timezone, and how far that is from your own | local |
+| **Weather** | Now, today's range, and the condition | `wttr.in` |
+| **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
+| **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
+| **Music** | What is playing, how far in, and a play/pause button | local (MPRIS) |
 
 ```
    ┌─────────┬─────────┐        side: left | right
-   │   BLR   │  London │        columns: 2
+   │   BLR   │  London │        columns: 1-6
    │  13:15  │   12°   │
-   ├─────────┼─────────┤        drag to move
-   │ Sunrise │  Timer  │        drag to the tray to take one off
-   ├─────────┴─────────┤
-   │   13:00  in 9h    │        some widgets span two columns
-   └───────────────────┘
+   ├─────────┴─────────┤        drag to move
+   │ ▪▫▪▪▫▪▪▫▪▪▫▪▪▫▪▪ │        drag to the tray to take one off
+   ├─────────┬─────────┤
+   │  omara  │ ♪ track │        some widgets span two columns
+   └─────────┴─────────┘
 ```
 
-No account, no telemetry. Three widgets ship — a **clock**, the **weather**,
-and a **GitHub contribution graph** — and the catalogue is built to grow.
-
-The clock touches nothing outside your machine. Two widgets do make requests,
-each only while it is switched on, each to one host and no third party:
-
-| Widget | Talks to | |
-|---|---|---|
-| Weather | `wttr.in` | where the rest of Omarchy already gets its weather |
-| GitHub | `github.com` | the contribution page, directly; no proxy in between |
-
-Nothing else here talks to anything.
+No account, no telemetry. The clock and the music widget touch nothing outside
+your machine. Three widgets do make requests, **each only while it is switched
+on**, each to one host and no third party — the table above says which.
 
 ---
 
@@ -47,10 +79,12 @@ Nothing else here talks to anything.
 - [The clock](#the-clock)
 - [The weather](#the-weather)
 - [The contribution graph](#the-contribution-graph)
+- [Repo pulse](#repo-pulse)
+- [Music](#music)
 - [Config file](#config-file)
   - [The layout block](#the-layout-block)
   - [Each widget](#each-widget)
-  - [Clock settings](#clock-settings)
+  - [Widget settings](#widget-settings)
 - [Command line](#command-line)
 - [Adding a widget type](#adding-a-widget-type)
 - [Contributing](#contributing)
@@ -67,7 +101,7 @@ Draws widget cards on the desktop:
 |---|---|
 | **Where** | A grid down the left or right edge, on the Bottom layer — above the wallpaper, beneath every window |
 | **Colors** | From the active theme's palette; switching themes re-colors them live |
-| **Input** | None. The surface has an empty input region, so clicks pass through |
+| **Input** | None, unless a widget asks for it — see [Music](#music) |
 | **Space** | Reserves none, and stays inside the area the bar has already claimed |
 | **Screens** | Every output by default, or one you name |
 | **Network** | Only the weather and GitHub widgets, only while they are on |
@@ -78,26 +112,15 @@ editor of its own, so the widgets themselves never have to take input.
 
 ## Install
 
-Requires Omarchy 4 (the Quickshell shell) — `omarchy-shell`, `omarchy plugin`.
+Everything you need is at the [top of this page](#get-it). Two extra notes:
 
-```bash
-omarchy plugin add https://github.com/anishfn/omarchy-widgets.git
-omarchy plugin enable io.github.anishfn.widgets
-```
-
-Plugins land **disabled** so you can read the code before it runs; `enable`
-is the step that turns it on. Enabling puts the **Widgets** button in the bar
-and the clock on your desktop.
-
-To install from a local copy instead, put the folder at
+To install from a **local copy** instead of git, put the folder at
 `~/.config/omarchy/plugins/io.github.anishfn.widgets/` and enable the same id.
 
 ```bash
 omarchy plugin disable io.github.anishfn.widgets   # off, config kept
 omarchy plugin remove io.github.anishfn.widgets    # gone
 ```
-
-Removing the plugin leaves `~/.config/omarchy/widgets.json` alone.
 
 ## Turning widgets on and off
 
@@ -250,6 +273,84 @@ set up.
 It shows **public contributions**, which is what that page shows. One request
 per username, refreshed every half hour, and only while a GitHub widget is on.
 
+## Repo pulse
+
+A repository at a glance: stars, forks, issues, open pull requests, and how
+long since anything was pushed to it.
+
+Click it in the editor and set a **Repository** as `owner/name`. **Stars and
+issues** turns the figures underneath on and off.
+
+Four numbers and no chart. A sparkline on a card this size says less than the
+numbers do — you cannot read a week off it — so the space goes to figures you
+can act on. The time since the last push takes the accent, because it is the
+one thing on the card that says whether the project is alive.
+
+Each figure is written out — `6 stars`, `0 forks` — rather than shown as an
+icon. A star is recognisable, but a fork and an open issue are two small
+outlines that look alike at this size, and a bare `0` beside a shape you have
+to decode is worse than `0 forks`.
+
+**`issues` is the count with pull requests taken back out of it.** GitHub's
+`open_issues_count` includes them, which is a quirk of the API and not what
+anybody means by the word — `cli/cli` reports 1076 "issues" of which 66 are
+pull requests. Getting that right costs a second request to the search
+endpoint; until it answers, the card shows GitHub's combined figure rather
+than a wrong smaller one.
+
+**The name opens the repository.** Click it and GitHub opens in your browser
+— it underlines and takes the accent colour on hover, so you can see which
+part of the card is live. The link uses GitHub's canonical name once it has
+been fetched, so a repository that has since been renamed opens where it
+actually lives rather than at a redirect.
+
+That makes this the second widget you can click, after [Music](#music). The
+whole card is an input region while a widget is interactive, so clicks
+anywhere on it are caught — only the name does anything with them.
+
+Data comes from the public REST API, unauthenticated: sixty requests an hour
+per address, two per repository every half hour.
+
+## Music
+
+What is playing, from **MPRIS** — so it is whatever is actually playing,
+Spotify or a browser tab or mpv, rather than any one application. Album art,
+title, artist, a progress bar, and a play/pause button.
+
+**This is one of the two widgets you can click** — the other is
+[Repo pulse](#repo-pulse). Every other card here is click-through: the desktop surface has no input region, so a click lands on
+whatever is underneath it. A type that needs a control declares `interactive`
+in the catalogue and gets *its own rectangle* back, and nothing else changes.
+A play/pause you have to go somewhere else to reach is not a play/pause; that
+is the whole justification, and it is meant to be a hard one to meet.
+
+Two things follow from widgets living under your windows: the button is only
+clickable where no window is covering the card, and it is drawn big enough to
+hit without aiming.
+
+**Album art** and **Progress** can each be turned off in the editor. Nothing
+here leaves your machine.
+
+### Two shapes, not one stretched
+
+A **wide** card puts the art down the left and the words beside it, with the
+elapsed and total times under a progress bar. A **square** card has no room
+for that — the art alone would take the whole thing — so the cover fills the
+card, the title and artist sit over a scrim along the bottom, and the progress
+becomes a hairline at the very edge.
+
+### Which player it follows
+
+Whatever is actually playing, preferring a real player over `playerctld` —
+that proxy mirrors the others and lags behind them, so following it is the
+difference between a card that changes with the track and one that changes a
+moment later. Omarchy's own media widget deprioritises it for the same reason,
+and this follows the same rules so the bar and the card agree.
+
+A card is drawn as soon as there is a title **or** an artist, rather than
+waiting for both, for the same reason: some players publish one slightly
+before the other.
+
 ## Config file
 
 `~/.config/omarchy/widgets.json`, created with sensible defaults the first
@@ -332,7 +433,9 @@ much larger than the bar chrome that value was chosen for, and a sharp theme
 should not square off a 200px card unless you ask it to. Set `-1` if you want
 the widget to match your windows exactly.
 
-### Clock settings
+### Widget settings
+
+#### Clock
 
 | Key | Meaning |
 |---|---|
@@ -344,6 +447,35 @@ the widget to match your windows exactly.
 An unrecognized `timezone` shows `unknown zone` under the time rather than
 quietly showing you the wrong hour, and one that is not a plain zoneinfo name
 is refused outright.
+
+#### Weather
+
+| Key | Meaning |
+|---|---|
+| `units` | `celsius` or `fahrenheit` |
+| `label` | Overrides the place name. `""` follows the report |
+| `showRange` | Today's high and low |
+
+#### GitHub
+
+| Key | Meaning |
+|---|---|
+| `login` | GitHub username |
+| `showLegend` | The week count and the Less–More scale |
+
+#### Repo pulse
+
+| Key | Meaning |
+|---|---|
+| `repo` | `owner/name` |
+| `showStats` | The figures along the bottom |
+
+#### Music
+
+| Key | Meaning |
+|---|---|
+| `showArt` | Album art |
+| `showProgress` | The progress bar and times |
 
 ## Command line
 
@@ -368,6 +500,7 @@ omarchy-shell widgets edit          # open the layout editor
 omarchy-shell widgets done          # close it
 omarchy-shell widgets weather       # the current reading
 omarchy-shell widgets github        # the fetched graphs
+omarchy-shell widgets repos         # the fetched repositories
 omarchy-shell widgets reload        # re-read the file now
 
 omarchy-shell shell toggle io.github.anishfn.widgets   # open the bar popup

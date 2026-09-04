@@ -68,6 +68,26 @@ test("no hand-written signal collides with a property's change signal", () => {
 // appears. Depth has to be tracked with braces, not indentation: two sibling
 // Timers both saying onTriggered are perfectly fine and look identical to a
 // whitespace-only check.
+// Nerd Font glyphs live in the Unicode private use area, and a private-use
+// character pasted into a source file survives only as long as every tool
+// that touches it preserves it. One that does not leaves an empty string,
+// which renders as nothing, reports no error, and looks like a font problem.
+// Writing them as \uXXXX escapes makes them ordinary ASCII in the file.
+test("glyphs are escapes, not literal private-use characters", () => {
+  for (const file of qmlFiles()) {
+    const src = read(file)
+    for (let i = 0; i < src.length; i++) {
+      const code = src.codePointAt(i)
+      const isPrivate = (code >= 0xe000 && code <= 0xf8ff)
+        || (code >= 0xf0000 && code <= 0xffffd)
+      if (!isPrivate) continue
+      const line = src.slice(0, i).split("\n").length
+      assert.fail(`${file}:${line}: literal private-use character U+${code.toString(16).toUpperCase()}`
+        + ` — write it as a \\u escape instead`)
+    }
+  }
+})
+
 test("no QML object declares the same handler twice", () => {
   for (const file of qmlFiles()) {
     // Strip line comments and string literals first, so a brace inside
@@ -805,6 +825,297 @@ test("used rows counts what is on the grid, not what is configured", () => {
     ]
   })
   assert.equal(Model.usedRows(config), 3)
+})
+
+// ------------------------------------------------------------- repo pulse
+
+test("a repository name is checked as the two path segments it becomes", () => {
+  for (const good of ["cli/cli", "omarchy/omarchy", "a/b", "user-name/repo.name_1", "o/" + "x".repeat(100)]) {
+    assert.equal(Model.isSafeRepo(good), true, `${good} should be allowed`)
+  }
+  for (const bad of ["", "noslash", "a/b/c", "/leading", "trailing/", "../../etc/passwd",
+                     "o/..", "o/.", "a b/c", "o/re po", "$(id)/x", "o/" + "x".repeat(101),
+                     "-bad/repo", null, undefined, 7]) {
+    assert.equal(Model.isSafeRepo(bad), false, `${bad} should be refused`)
+  }
+})
+
+test("repositories in use are unique, safe, and include the ones switched off", () => {
+  const config = Model.normalizeConfig({
+    widgets: [
+      { id: "a", type: "repo-pulse", enabled: true, col: 0, row: 0, settings: { repo: "cli/cli" } },
+      { id: "b", type: "repo-pulse", enabled: false, col: 0, row: 1, settings: { repo: "cli/cli" } },
+      { id: "c", type: "repo-pulse", enabled: false, col: 0, row: 2, settings: { repo: "o/two" } },
+      { id: "d", type: "repo-pulse", enabled: true, col: 0, row: 3, settings: { repo: "../../etc" } },
+      { id: "e", type: "clock", enabled: true, col: 1, row: 0 }
+    ]
+  })
+  assert.deepEqual(Model.reposInUse(config), ["cli/cli", "o/two"])
+})
+
+test("a repository response becomes the numbers the card shows", () => {
+  const r = Model.parseRepo({
+    full_name: "cli/cli", description: "GitHub's official CLI",
+    stargazers_count: 46148, forks_count: 8965, open_issues_count: 1076,
+    pushed_at: "2026-09-04T16:07:18Z"
+  })
+  assert.equal(r.fullName, "cli/cli")
+  assert.equal(r.stars, 46148)
+  assert.equal(r.forks, 8965)
+  assert.equal(r.issues, 1076)
+  assert.equal(r.pushedAt, "2026-09-04T16:07:18Z")
+})
+
+test("a response that is not a repository is refused", () => {
+  for (const junk of [null, undefined, "", "not json", "[]", 7, {},
+                      { message: "Not Found" }, { full_name: "" }]) {
+    assert.equal(Model.parseRepo(junk), null, `${JSON.stringify(junk)} should be refused`)
+  }
+})
+
+// GitHub's open_issues_count counts pull requests as issues. Showing it as
+// "issues" is wrong by however many pull requests are open, which on a busy
+// repository is a lot.
+test("pull requests are taken back out of the issue count", () => {
+  const info = { stars: 46148, forks: 8965, issues: 1076 }
+  const s = Model.repoStats(info, 66)
+  assert.equal(s.issues, 1010, "1076 combined minus 66 pull requests")
+  assert.equal(s.pulls, 66)
+  assert.equal(s.stars, 46148)
+})
+
+test("an unknown pull request count is unknown, not zero", () => {
+  const info = { stars: 1, forks: 2, issues: 10 }
+  for (const missing of [null, undefined]) {
+    const s = Model.repoStats(info, missing)
+    assert.equal(s.pulls, null, "Number(null) is 0, which would read as 'none open'")
+    assert.equal(s.issues, 10, "and the combined count is shown until the real one arrives")
+  }
+  // A genuine zero is a genuine zero.
+  assert.equal(Model.repoStats(info, 0).pulls, 0)
+  assert.equal(Model.repoStats(null, 5), null)
+})
+
+test("the pull request count is read out of the search response", () => {
+  assert.equal(Model.parsePullCount({ total_count: 66 }), 66)
+  assert.equal(Model.parsePullCount('{"total_count":0}'), 0)
+  for (const junk of [null, undefined, "", "{}", "junk", [], { total_count: -1 },
+                      { total_count: "many" }]) {
+    assert.equal(Model.parsePullCount(junk), null, `${JSON.stringify(junk)} should be refused`)
+  }
+})
+
+// The name on the card opens the repository, so this string becomes a URL
+// handed to the browser. It is built from a value that arrived over the
+// network, so it is checked again rather than trusted.
+test("the repo link prefers GitHub's canonical name", () => {
+  // A repository that has been renamed: the config still says the old name,
+  // and the API answers with the new one. The link should go to the new one.
+  assert.equal(
+    Model.repoUrl({ fullName: "Nuu-maan/Filly-Discord-Token-Filler" }, "nuu-maan/filly"),
+    "https://github.com/Nuu-maan/Filly-Discord-Token-Filler")
+
+  // Before the API has answered, the configured name is enough to link to.
+  assert.equal(Model.repoUrl(null, "cli/cli"), "https://github.com/cli/cli")
+})
+
+test("a link is not built from anything that is not a repository name", () => {
+  for (const bad of [
+    { info: { fullName: "../../etc/passwd" }, repo: "also/../bad" },
+    { info: { fullName: "" }, repo: "" },
+    { info: null, repo: "noslash" },
+    { info: null, repo: "a/b/c" },
+    { info: { fullName: 7 }, repo: null },
+    { info: undefined, repo: undefined }
+  ]) {
+    assert.equal(Model.repoUrl(bad.info, bad.repo), "",
+      `${JSON.stringify(bad)} should produce no link`)
+  }
+})
+
+test("a bad canonical name falls back rather than blocking the link", () => {
+  // If GitHub ever answered with something unusable, a configured name that
+  // is fine should still work.
+  assert.equal(Model.repoUrl({ fullName: "not a repo" }, "cli/cli"),
+    "https://github.com/cli/cli")
+})
+
+test("the repo card is square by default", () => {
+  assert.deepEqual(Model.defaultSize("repo-pulse"), [1, 1],
+    "four numbers do not need a wide card")
+})
+
+test("counts are shortened for scale, not for arithmetic", () => {
+  assert.equal(Model.compactCount(0), "0")
+  assert.equal(Model.compactCount(999), "999")
+  assert.equal(Model.compactCount(1000), "1k")
+  assert.equal(Model.compactCount(1500), "1.5k")
+  assert.equal(Model.compactCount(46148), "46k")
+  assert.equal(Model.compactCount(1250000), "1.3M")
+  assert.equal(Model.compactCount(-5), "0")
+  assert.equal(Model.compactCount("nonsense"), "0")
+})
+
+test("how long ago is the coarsest true thing", () => {
+  const now = Date.parse("2026-09-05T00:00:00Z")
+  const ago = (iso) => Model.sinceLabel(iso, now)
+  assert.equal(ago("2026-09-04T23:30:00Z"), "30m")
+  assert.equal(ago("2026-09-04T16:07:18Z"), "7h")
+  assert.equal(ago("2026-09-02T00:00:00Z"), "3d")
+  assert.equal(ago("2026-08-20T00:00:00Z"), "2w")
+  assert.equal(ago("2026-06-05T00:00:00Z"), "3mo")
+  assert.equal(ago("2024-09-05T00:00:00Z"), "2y")
+  // Under a minute still reads as a minute rather than as zero.
+  assert.equal(ago("2026-09-04T23:59:50Z"), "1m")
+  // A clock ahead of ours is not a negative age.
+  assert.equal(ago("2026-09-06T00:00:00Z"), "now")
+  assert.equal(ago("nonsense"), "")
+  assert.equal(ago(""), "")
+})
+
+// ------------------------------------------------------------------ music
+
+test("track times read as times", () => {
+  assert.equal(Model.trackTime(0), "0:00")
+  assert.equal(Model.trackTime(9), "0:09")
+  assert.equal(Model.trackTime(65), "1:05")
+  assert.equal(Model.trackTime(600), "10:00")
+  assert.equal(Model.trackTime(3725), "1:02:05", "past an hour the minutes pad")
+  assert.equal(Model.trackTime(-5), "0:00")
+  assert.equal(Model.trackTime("nonsense"), "0:00")
+})
+
+test("progress is a fraction, and never a division by nothing", () => {
+  assert.equal(Model.trackFraction(30, 120), 0.25)
+  assert.equal(Model.trackFraction(0, 120), 0)
+  assert.equal(Model.trackFraction(120, 120), 1)
+  // A player that has not said how long the track is gets no progress bar
+  // rather than an infinite one.
+  assert.equal(Model.trackFraction(30, 0), 0)
+  assert.equal(Model.trackFraction(30, -1), 0)
+  assert.equal(Model.trackFraction(NaN, 120), 0)
+  // Past the end, which players do report, stays at the end.
+  assert.equal(Model.trackFraction(200, 120), 1)
+})
+
+test("the player followed is the one actually playing", () => {
+  const players = [
+    { identity: "Firefox", isPlaying: false, canControl: true },
+    { identity: "Spotify", isPlaying: true, canControl: true }
+  ]
+  assert.equal(Model.pickPlayerIndex(players, ""), 1, "playing wins over order")
+
+  // Nothing playing: the first that can be controlled.
+  const idle = [
+    { identity: "A", isPlaying: false, canControl: false },
+    { identity: "B", isPlaying: false, canControl: true }
+  ]
+  assert.equal(Model.pickPlayerIndex(idle, ""), 1)
+
+  // A named preference beats both.
+  assert.equal(Model.pickPlayerIndex(players, "firefox"), 0, "matched case-insensitively")
+  assert.equal(Model.pickPlayerIndex(players, "spot"), 1, "and on a prefix")
+  // A name nobody answers to falls back rather than showing nothing.
+  assert.equal(Model.pickPlayerIndex(players, "vlc"), 1)
+
+  assert.equal(Model.pickPlayerIndex([], ""), -1)
+  assert.equal(Model.pickPlayerIndex(null, ""), -1)
+})
+
+// What arrives at runtime is Mpris.players.values — a QML list that indexes
+// and measures like an array but is not one. Array.isArray says false for it,
+// so a guard written that way finds no players at all while the desktop is
+// quite plainly playing something. A test fed only real arrays never sees it.
+// playerctld mirrors whatever else is on the bus and lags behind it, so
+// following it is the difference between a card that updates with the track
+// and one that updates a moment later. Omarchy's own media service
+// deprioritises it; these pin the same behaviour.
+test("a proxy player is followed only when nothing else can be", () => {
+  const proxy = { identity: "playerctld", dbusName: "org.mpris.MediaPlayer2.playerctld",
+    isPlaying: true, trackTitle: "Track", canTogglePlaying: true }
+  const real = { identity: "Firefox", dbusName: "org.mpris.MediaPlayer2.firefox",
+    isPlaying: true, trackTitle: "Track", canTogglePlaying: true }
+
+  assert.equal(Model.isProxyPlayer(proxy), true)
+  assert.equal(Model.isProxyPlayer(real), false)
+  assert.equal(Model.isProxyPlayer({ desktopEntry: "playerctld" }), true)
+
+  // Even listed first, the proxy loses to an equal real player.
+  assert.equal(Model.pickPlayerIndex([proxy, real], ""), 1)
+  assert.equal(Model.pickPlayerIndex([real, proxy], ""), 0)
+  // But it is better than nothing.
+  assert.equal(Model.pickPlayerIndex([proxy], ""), 0)
+})
+
+test("something playing beats something merely loaded", () => {
+  const loaded = { identity: "A", isPlaying: false, trackTitle: "Track", canTogglePlaying: true }
+  const playing = { identity: "B", isPlaying: true, canTogglePlaying: true }
+  assert.ok(Model.playerScore(playing) > Model.playerScore(loaded))
+  assert.equal(Model.pickPlayerIndex([loaded, playing], ""), 1)
+})
+
+test("a card is drawn from a title or an artist, not only a title", () => {
+  // Players publish one a moment before the other, and waiting for both is
+  // what makes a widget look slower than the bar beside it.
+  assert.equal(Model.hasPlayable({ trackTitle: "Track" }), true)
+  assert.equal(Model.hasPlayable({ trackArtist: "Artist" }), true)
+  assert.equal(Model.hasPlayable({ trackAlbum: "Album" }), false, "an album alone is not a track")
+  assert.equal(Model.hasPlayable({}), false)
+  assert.equal(Model.hasPlayable(null), false)
+})
+
+test("an array-like list of players works as well as an array", () => {
+  const arrayLike = {
+    length: 2,
+    0: { identity: "Firefox", isPlaying: false, canControl: true },
+    1: { identity: "Spotify", isPlaying: true, canControl: true }
+  }
+  assert.equal(Array.isArray(arrayLike), false, "this is the shape Qt hands us")
+  assert.equal(Model.pickPlayerIndex(arrayLike, ""), 1)
+  assert.equal(Model.pickPlayerIndex(arrayLike, "firefox"), 0)
+  assert.equal(Model.pickPlayerIndex({ length: 0 }, ""), -1)
+  assert.equal(Model.pickPlayerIndex({ length: "two" }, ""), -1)
+  assert.equal(Model.pickPlayerIndex({}, ""), -1)
+})
+
+// ------------------------------------------------------------ interactivity
+
+// The desktop surface has no input region, so a click lands on whatever is
+// underneath. A widget type opts its own rectangle back in, and only its own.
+test("only a type that asks for input is interactive", () => {
+  // Both of these have one obvious action about the thing on the card:
+  // play/pause what is playing, open the repository being described.
+  for (const clickable of ["music", "repo-pulse"]) {
+    assert.equal(Model.isInteractiveType(clickable), true)
+  }
+  for (const passive of ["clock", "weather", "github", "nope"]) {
+    assert.equal(Model.isInteractiveType(passive), false, `${passive} must stay click-through`)
+  }
+})
+
+test("the input region covers interactive widgets and nothing else", () => {
+  const config = Model.normalizeConfig({
+    widgets: [
+      { id: "clock", type: "clock", enabled: true, col: 0, row: 0 },
+      { id: "music", type: "music", enabled: true, col: 0, row: 1, cols: 2, rows: 1 },
+      { id: "off", type: "music", enabled: false, col: 0, row: 3, cols: 2, rows: 1 },
+      { id: "weather", type: "weather", enabled: true, col: 1, row: 0 },
+      { id: "other", type: "music", enabled: true, col: 0, row: 2, cols: 2, rows: 1, monitor: "DP-9" }
+    ]
+  })
+  assert.deepEqual(Model.interactiveWidgetsForScreen(config, "DP-1").map((w) => w.id), ["music"],
+    "not the clock, not the one switched off, not the one on another screen")
+  assert.deepEqual(Model.interactiveWidgetsForScreen(config, "DP-9").map((w) => w.id).sort(),
+    ["music", "other"])
+})
+
+test("the widgets that reach the network each name where they go", () => {
+  assert.equal(Model.catalogEntry("repo-pulse").network, "api.github.com")
+  assert.equal(Model.catalogEntry("github").network, "github.com")
+  assert.equal(Model.catalogEntry("weather").network, "wttr.in")
+  // Music is local and must not claim otherwise.
+  assert.equal(Model.catalogEntry("music").network, undefined)
+  assert.equal(Model.catalogEntry("clock").network, undefined)
 })
 
 // ----------------------------------------------------- github contributions

@@ -162,10 +162,31 @@ you are working is a distraction you cannot turn off without deleting it.
 
 ## What a widget is not
 
-- **Not interactive.** The desktop surface has an empty input region by
-  design, so clicks reach the desktop underneath. A `MouseArea` in your widget
-  is dead code. Anything the user has to operate belongs in a bar widget or a
-  panel, not here.
+- **Not interactive, unless it has to be.** The desktop surface has an empty
+  input region by default, so clicks reach the desktop underneath and a
+  `MouseArea` in your widget is dead code. A type can opt its own rectangle
+  back in with `interactive: true` in the catalogue — and only its own; every
+  other widget stays click-through.
+
+  The test a click has to pass: **one obvious action, about the thing already
+  on the card.** Play/pause what is playing. Open the repository being
+  described. Both are the single thing you would reach for while looking at
+  that card, and neither needs anything drawn to explain it.
+
+  What fails the test: a settings button, a menu, a list to scroll, anything
+  that opens more interface. That is a bar widget or a panel. A wallpaper is
+  not somewhere to put controls.
+
+  Three things follow, and all three are on you:
+
+  - **The whole card becomes an input region,** not just your control. So make
+    the part that does something *look* like it does — a hover state is the
+    only thing telling the user which bit is live.
+  - **Clicks only land where no window covers the widget.** These sit under
+    your windows; that is the point of them.
+  - **Targets have to be hittable without aiming.** This is a wallpaper, not a
+    toolbar.
+
 - **Not a notification.** No demands for attention, no urgent colour for
   things that are merely notable.
 - **Not a dashboard.** One idea per card. If it needs a legend, it is the

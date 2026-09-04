@@ -36,10 +36,22 @@ building, check it is the right shape:
 | Something that needs to interrupt you | A notification |
 | A full-screen thing | An overlay plugin |
 
-The desktop surface has **no input region at all** — clicks pass straight
-through to whatever is underneath. That is deliberate, and it is not
-negotiable: a wallpaper decoration that eats clicks is a bug the user cannot
-see the cause of. If your idea needs a button, it is not a widget.
+The desktop surface has **no input region by default** — clicks pass straight
+through to whatever is underneath, because a wallpaper decoration that eats
+clicks is a bug the user cannot see the cause of.
+
+A type that genuinely needs a control can set `interactive: true` in its
+catalogue entry, and the surface turns *that widget's rectangle* back into an
+input region. Nothing else changes: every other widget stays click-through.
+
+The test a click has to pass is **one obvious action, about the thing already
+on the card**. `music` passes it — a play/pause you have to go somewhere else
+to reach is not a play/pause. `repo-pulse` passes it — the name opens the
+repository it is describing. A settings button, a menu, or anything that
+opens more interface does not; that is a bar widget or a panel.
+
+Note that the *whole card* becomes an input region, not just your control, so
+whatever is live has to look live. See [DESIGN.md](DESIGN.md).
 
 Good candidates: a clock in another timezone, the weather, disk or battery
 headroom, next calendar event, now playing, a countdown, moon phase, a
@@ -206,6 +218,7 @@ this shape; read it alongside.
 | `sizes` | Footprints you allow, `[cols, rows]` in cells. First is the default |
 | `settings` | Your whole tunable surface, as a schema. See [Settings](#settings) |
 | `network` | The host you talk to, if you talk to one. Omit it if you do not |
+| `interactive` | `true` if the widget needs clicks. Omit it unless it does |
 
 ## What your widget is handed
 
@@ -396,7 +409,8 @@ Design (see [DESIGN.md](DESIGN.md)):
 
 Behaviour:
 
-- [ ] No `MouseArea`, no `Behavior`, no running animation
+- [ ] No `MouseArea` unless the type declares `interactive`; no `Behavior`,
+      no running animation
 - [ ] Timers wake as slowly as what is on screen allows
 - [ ] Nothing blocks the shell — no synchronous reads, no waiting on a process
 - [ ] Subprocesses go through `timeout` with absolute paths

@@ -116,8 +116,11 @@ Item {
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
       anchors.rightMargin: trigger.borderRight + Style.spacing.controlGap
-      // Points the way the list will actually go.
-      text: popup.opened && root.openUp ? "󰅃" : "󰅀"
+      // Points the way the list will actually go. Written as surrogate pairs
+      // because these chevrons live above the basic plane, where \uXXXX
+      // cannot reach them — and as escapes at all because a literal
+      // private-use character renders as nothing if any tool drops it.
+      text: popup.opened && root.openUp ? "\udb80\udd43" : "\udb80\udd40"
       color: Qt.darker(root.foreground, 1.2)
       font.family: root.fontFamily
       font.pixelSize: Style.font.body

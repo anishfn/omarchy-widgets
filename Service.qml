@@ -71,6 +71,8 @@ Item {
     if (service.selectedId && !Model.findInstance(next, service.selectedId)) service.selectedId = ""
     saveTimer.restart()
     refreshZones()
+    // A username is typed into the config, so this is where one arrives.
+    refreshContributions(false)
   }
 
   function setEnabled(id, enabled) { apply(Model.setEnabled(config, id, enabled)) }
@@ -355,6 +357,98 @@ Item {
     onTriggered: service.refreshWeather()
   }
 
+  // ---------------------------------------------------- github contributions
+  //
+  // GitHub does not publish the contribution calendar through its REST API,
+  // but the page that draws it is served on its own at
+  // /users/<login>/contributions and needs no token. So this goes to
+  // github.com directly rather than through a third party that would
+  // otherwise learn whose graph is on someone's wallpaper.
+  //
+  // One request per distinct login, run one at a time: two of these widgets
+  // is a plausible thing to want, four simultaneous curls at startup is not.
+
+  // login -> { total, days: [{date, level}], at }
+  property var contributions: ({})
+  property string contributionsError: ""
+  property var contributionQueue: []
+
+  readonly property bool githubWanted: {
+    for (var i = 0; i < widgets.length; i++)
+      if (widgets[i].enabled && widgets[i].type === "github") return true
+    return false
+  }
+
+  onGithubWantedChanged: if (githubWanted) refreshContributions(false)
+
+  // `force` re-fetches everything, which is what the timer wants. Without it
+  // only logins with nothing drawn yet are queued, which is what a config
+  // change wants: typing a username should fetch it, and dragging a widget
+  // across the grid should not re-fetch anything at all.
+  function refreshContributions(force) {
+    if (!service.githubWanted) return
+    var logins = Model.loginsInUse(config)
+    var queue = []
+    for (var i = 0; i < logins.length; i++) {
+      if (force === true || !service.contributions[logins[i]]) queue.push(logins[i])
+    }
+    if (queue.length === 0) return
+    service.contributionQueue = queue
+    startNextContribution()
+  }
+
+  function startNextContribution() {
+    if (contributionProc.running) return
+    var queue = service.contributionQueue
+    if (!queue || queue.length === 0) return
+    var login = String(queue[0])
+    service.contributionQueue = queue.slice(1)
+    // Checked again here rather than trusted from the queue: this string is
+    // about to become a URL path segment.
+    if (!Model.isSafeLogin(login)) { startNextContribution(); return }
+    contributionProc.login = login
+    contributionProc.command = ["/usr/bin/timeout", "-k", "2", "25",
+      "/usr/bin/curl", "-fsS", "--max-time", "20",
+      "https://github.com/users/" + login + "/contributions"]
+    contributionProc.running = true
+  }
+
+  Process {
+    id: contributionProc
+    running: false
+    property string login: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var parsed = Model.parseContributions(text)
+        if (parsed) {
+          // Reassign whole, never mutate: a binding reading one login's graph
+          // only re-evaluates when the property itself changes.
+          var next = ({})
+          for (var key in service.contributions) next[key] = service.contributions[key]
+          next[contributionProc.login] = parsed
+          service.contributions = next
+          service.contributionsError = ""
+        } else {
+          // Keep whatever is already drawn. A graph from an hour ago beats a
+          // card that has emptied itself because one request failed.
+          service.contributionsError = service.contributions[contributionProc.login]
+            ? "stale" : "unavailable"
+        }
+      }
+    }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextContribution)
+  }
+
+  Timer {
+    // Contributions move on the scale of a working day, not a minute.
+    interval: 1800000
+    repeat: true
+    running: service.githubWanted
+    triggeredOnStart: true
+    onTriggered: service.refreshContributions(true)
+  }
+
   // ----------------------------------------------------------------- IPC
 
   IpcHandler {
@@ -465,6 +559,24 @@ Item {
       return w.place + "  " + w.tempC + "C / " + w.tempF + "F  " + w.condition
         + "  (H:" + w.highC + " L:" + w.lowC + ")"
         + (service.weatherError ? "  [" + service.weatherError + "]" : "")
+    }
+
+    function github(): string {
+      var logins = Model.loginsInUse(service.config)
+      if (logins.length === 0) return "no github widget has a username set"
+      var out = []
+      for (var i = 0; i < logins.length; i++) {
+        var data = service.contributions[logins[i]]
+        out.push(logins[i] + ": " + (data
+          ? data.total + " in the last year, " + data.days.length + " days"
+          : (service.contributionsError || "not fetched yet")))
+      }
+      return out.join("\n")
+    }
+
+    function refreshGithub(): string {
+      service.refreshContributions(true)
+      return "ok"
     }
 
     function refreshWeather(): string {

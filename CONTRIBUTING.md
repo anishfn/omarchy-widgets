@@ -313,6 +313,10 @@ Most interesting widgets want something the shell does not already have.
   because that is where the rest of Omarchy gets it; a second provider would
   mean a second place to configure and a second party learning where the user
   lives.
+- **Where there is no such source, go to the origin.** The contribution graph
+  is read from github.com itself rather than from one of the JSON proxies that
+  wrap it — a proxy would be a third party learning whose graph is on someone's
+  wallpaper, in exchange for a slightly easier parse.
 - **Poll slowly.** A clock that shows minutes wakes once a minute, not sixty
   times. Match the timer to what is actually on screen.
 

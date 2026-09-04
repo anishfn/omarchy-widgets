@@ -49,7 +49,7 @@ Item {
     // part of a card that is live all over.
     color: root.prominent
       ? root.accent
-      : Util.alpha(root.accent, mouse.pressed ? 1.0 : (mouse.containsMouse ? 0.95 : 0.62))
+      : Util.alpha(root.accent, mouse.pressed ? 1.0 : (mouse.containsMouse ? 1.0 : 0.8))
     font.family: root.fontFamily
     font.pixelSize: Math.max(8, Math.round(root.size * (root.prominent ? 0.46 : 0.62)))
     renderType: Text.NativeRendering

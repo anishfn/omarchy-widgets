@@ -200,12 +200,14 @@ Item {
     Text {
       id: compactArtist
       anchors.left: parent.left
-      anchors.right: compactControls.left
+      anchors.right: parent.right
       anchors.leftMargin: root.pad
-      anchors.rightMargin: Math.round(root.unit * 0.04)
-      anchors.bottom: parent.bottom
-      anchors.bottomMargin: root.pad + (root.showProgress && root.length > 0
-        ? Math.round(root.unit * 0.05) : 0)
+      anchors.rightMargin: root.pad
+      anchors.bottom: compactControls.visible ? compactControls.top : parent.bottom
+      anchors.bottomMargin: compactControls.visible
+        ? Math.round(root.unit * 0.03)
+        : root.pad + (root.showProgress && root.length > 0
+          ? Math.round(root.unit * 0.05) : 0)
       textFormat: Text.PlainText
       text: root.artist
       color: root.dim
@@ -215,20 +217,24 @@ Item {
       renderType: Text.NativeRendering
     }
 
-    // The controls sit on the artist's line, right of it, and the artist
-    // elides into whatever is left. A square card cannot afford three pills
-    // side by side — they would leave no room for the words underneath the
-    // cover — so the skips are the quiet weight and only play/pause is drawn
-    // as a target.
+    // The controls get a line of their own, centred, with the words stacked
+    // above them. Sharing the artist's line is what a single button could
+    // afford; three of them left the artist five characters wide, and a card
+    // that cannot say who is playing is not worth the buttons.
+    //
+    // Only play/pause is drawn as a target. Three pills on a tile this size
+    // would read as a control panel rather than a card you can pause.
     Row {
       id: compactControls
-      anchors.right: parent.right
-      anchors.rightMargin: root.pad
-      anchors.verticalCenter: compactArtist.verticalCenter
-      spacing: Math.round(root.unit * 0.025)
+      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: Math.round(root.pad * 0.7)
+        + (root.showProgress && root.length > 0 ? Math.round(root.unit * 0.05) : 0)
+      visible: root.canToggle || root.canPrevious || root.canNext
+      spacing: Math.round(root.unit * 0.045)
 
       readonly property real toggleSize: Math.max(20, Math.round(root.unit * 0.18))
-      readonly property real skipSize: Math.max(14, Math.round(toggleSize * 0.66))
+      readonly property real skipSize: Math.max(14, Math.round(toggleSize * 0.78))
 
       MusicButton {
         anchors.verticalCenter: parent.verticalCenter
@@ -343,6 +349,7 @@ Item {
     }
 
     Text {
+      id: wideArtist
       x: parent.textLeft
       y: wideTitle.y + wideTitle.height + Math.round(root.unit * 0.025)
       width: Math.max(0, parent.width - x - root.pad)
@@ -356,16 +363,25 @@ Item {
     }
 
     // There is room for the row here, so it sits under the words with the
-    // progress bar below it, in the reading order the card already has.
+    // progress bar below it, in the reading order the card already has —
+    // centred in what the words leave rather than dropped to the floor,
+    // which is what left a hole under a short title.
     Row {
       id: wideControls
       x: parent.textLeft
-      y: parent.height - root.pad - height
-        - (wideProgress.visible ? wideProgress.height + Math.round(root.unit * 0.055) : 0)
-      spacing: Math.round(root.unit * 0.03)
+      y: {
+        var top = wideArtist.y + wideArtist.height
+        var bottom = wideProgress.visible
+          ? wideProgress.y - Math.round(root.unit * 0.02)
+          : parent.height - root.pad
+        var centred = Math.round((top + bottom - height) / 2)
+        // Never closer to the artist than the line spacing above it.
+        return Math.max(top + Math.round(root.unit * 0.045), centred)
+      }
+      spacing: Math.round(root.unit * 0.035)
 
       readonly property real toggleSize: Math.max(18, Math.round(root.unit * 0.16))
-      readonly property real skipSize: Math.max(14, Math.round(toggleSize * 0.72))
+      readonly property real skipSize: Math.max(14, Math.round(toggleSize * 0.82))
 
       MusicButton {
         anchors.verticalCenter: parent.verticalCenter

@@ -65,14 +65,21 @@ Item {
   // Two columns on a square card, four across when there is room, so the
   // same four figures stay one glance either way.
 
-  readonly property real labelSize: Math.max(8, Math.round(unit * 0.075))
+  readonly property real valueSize: Math.max(9, Math.round(unit * 0.08))
+  readonly property real wordSize: Math.max(8, Math.round(unit * 0.065))
   readonly property int columns: width > unit * 1.4 ? 4 : 2
 
+  // Words rather than icons. A star is recognisable, but a fork and an open
+  // issue are two small outlines that look alike at this size, and "0" beside
+  // a shape you have to decode is worse than "0 forks".
   readonly property var figures: stats ? [
-    { glyph: "\uf005", value: Model.compactCount(stats.stars) },                        // star
-    { glyph: "\uf126", value: Model.compactCount(stats.forks) },                        // fork
-    { glyph: "\uf41b", value: Model.compactCount(stats.issues) },                       // open issue
-    { glyph: "\uf407", value: stats.pulls === null ? "–" : Model.compactCount(stats.pulls) }  // pull request
+    { value: Model.compactCount(stats.stars), word: stats.stars === 1 ? "star" : "stars" },
+    { value: Model.compactCount(stats.forks), word: stats.forks === 1 ? "fork" : "forks" },
+    { value: Model.compactCount(stats.issues), word: stats.issues === 1 ? "issue" : "issues" },
+    {
+      value: stats.pulls === null ? "\u2013" : Model.compactCount(stats.pulls),
+      word: stats.pulls === 1 ? "PR" : "PRs"
+    }
   ] : []
 
   // ---------------------------------------------------------------- paint
@@ -145,25 +152,25 @@ Item {
           required property var modelData
           width: Math.max(0, (figureGrid.width
             - figureGrid.columnSpacing * (root.columns - 1)) / root.columns)
-          spacing: Math.round(root.unit * 0.03)
+          spacing: Math.round(root.unit * 0.028)
 
           Text {
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: modelData.glyph
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: root.labelSize
-            renderType: Text.NativeRendering
-          }
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.baseline: wordLabel.baseline
             textFormat: Text.PlainText
             text: modelData.value
             color: root.foreground
             font.family: root.fontFamily
-            font.pixelSize: root.labelSize
+            font.pixelSize: root.valueSize
+            renderType: Text.NativeRendering
+          }
+
+          Text {
+            id: wordLabel
+            textFormat: Text.PlainText
+            text: modelData.word
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: root.wordSize
             elide: Text.ElideRight
             renderType: Text.NativeRendering
           }

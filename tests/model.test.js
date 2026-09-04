@@ -991,6 +991,44 @@ test("the player followed is the one actually playing", () => {
 // and measures like an array but is not one. Array.isArray says false for it,
 // so a guard written that way finds no players at all while the desktop is
 // quite plainly playing something. A test fed only real arrays never sees it.
+// playerctld mirrors whatever else is on the bus and lags behind it, so
+// following it is the difference between a card that updates with the track
+// and one that updates a moment later. Omarchy's own media service
+// deprioritises it; these pin the same behaviour.
+test("a proxy player is followed only when nothing else can be", () => {
+  const proxy = { identity: "playerctld", dbusName: "org.mpris.MediaPlayer2.playerctld",
+    isPlaying: true, trackTitle: "Track", canTogglePlaying: true }
+  const real = { identity: "Firefox", dbusName: "org.mpris.MediaPlayer2.firefox",
+    isPlaying: true, trackTitle: "Track", canTogglePlaying: true }
+
+  assert.equal(Model.isProxyPlayer(proxy), true)
+  assert.equal(Model.isProxyPlayer(real), false)
+  assert.equal(Model.isProxyPlayer({ desktopEntry: "playerctld" }), true)
+
+  // Even listed first, the proxy loses to an equal real player.
+  assert.equal(Model.pickPlayerIndex([proxy, real], ""), 1)
+  assert.equal(Model.pickPlayerIndex([real, proxy], ""), 0)
+  // But it is better than nothing.
+  assert.equal(Model.pickPlayerIndex([proxy], ""), 0)
+})
+
+test("something playing beats something merely loaded", () => {
+  const loaded = { identity: "A", isPlaying: false, trackTitle: "Track", canTogglePlaying: true }
+  const playing = { identity: "B", isPlaying: true, canTogglePlaying: true }
+  assert.ok(Model.playerScore(playing) > Model.playerScore(loaded))
+  assert.equal(Model.pickPlayerIndex([loaded, playing], ""), 1)
+})
+
+test("a card is drawn from a title or an artist, not only a title", () => {
+  // Players publish one a moment before the other, and waiting for both is
+  // what makes a widget look slower than the bar beside it.
+  assert.equal(Model.hasPlayable({ trackTitle: "Track" }), true)
+  assert.equal(Model.hasPlayable({ trackArtist: "Artist" }), true)
+  assert.equal(Model.hasPlayable({ trackAlbum: "Album" }), false, "an album alone is not a track")
+  assert.equal(Model.hasPlayable({}), false)
+  assert.equal(Model.hasPlayable(null), false)
+})
+
 test("an array-like list of players works as well as an array", () => {
   const arrayLike = {
     length: 2,

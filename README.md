@@ -286,6 +286,11 @@ numbers do — you cannot read a week off it — so the space goes to figures yo
 can act on. The time since the last push takes the accent, because it is the
 one thing on the card that says whether the project is alive.
 
+Each figure is written out — `6 stars`, `0 forks` — rather than shown as an
+icon. A star is recognisable, but a fork and an open issue are two small
+outlines that look alike at this size, and a bare `0` beside a shape you have
+to decode is worse than `0 forks`.
+
 **`issues` is the count with pull requests taken back out of it.** GitHub's
 `open_issues_count` includes them, which is a quirk of the API and not what
 anybody means by the word — `cli/cli` reports 1076 "issues" of which 66 are
@@ -315,6 +320,26 @@ hit without aiming.
 
 **Album art** and **Progress** can each be turned off in the editor. Nothing
 here leaves your machine.
+
+### Two shapes, not one stretched
+
+A **wide** card puts the art down the left and the words beside it, with the
+elapsed and total times under a progress bar. A **square** card has no room
+for that — the art alone would take the whole thing — so the cover fills the
+card, the title and artist sit over a scrim along the bottom, and the progress
+becomes a hairline at the very edge.
+
+### Which player it follows
+
+Whatever is actually playing, preferring a real player over `playerctld` —
+that proxy mirrors the others and lags behind them, so following it is the
+difference between a card that changes with the track and one that changes a
+moment later. Omarchy's own media widget deprioritises it for the same reason,
+and this follows the same rules so the bar and the card agree.
+
+A card is drawn as soon as there is a title **or** an artist, rather than
+waiting for both, for the same reason: some players publish one slightly
+before the other.
 
 ## Config file
 

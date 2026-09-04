@@ -8,12 +8,14 @@ import "../Model.js" as Model
 // What is playing: the art, the title, who by, how far through, and a button
 // to stop it.
 //
+// Two compositions, not one stretched. A wide card puts the art down the left
+// and the words beside it. A square card has no room for that — the art alone
+// would take everything — so it fills the card instead and the words sit over
+// it, which is what a small music tile wants to be anyway.
+//
 // This is the one widget in the set that takes a click, which it gets by
-// declaring `interactive` in the catalogue — the desktop surface then turns
-// this rectangle, and only this rectangle, back into an input region. The
-// rule everywhere else still holds: a card you can click is the exception,
-// and it has to earn it. This one does, because a transport control you have
-// to go somewhere else to reach is not a transport control.
+// declaring `interactive` in the catalogue: the desktop surface then turns
+// this rectangle, and only this rectangle, back into an input region.
 //
 // The player comes from MPRIS, so it is whatever is actually playing —
 // Spotify, a browser tab, mpv — rather than any one application.
@@ -37,11 +39,17 @@ Item {
   readonly property bool showArt: settings.showArt !== false
   readonly property bool showProgress: settings.showProgress !== false
 
+  // Square-ish cards get the compact layout.
+  readonly property bool compact: width < unit * 1.4
+
+  readonly property int cardRadius: card ? card.radius : 20
+
   // ------------------------------------------------------------ the player
 
-  readonly property var players: Mpris.players ? Mpris.players.values : []
+  readonly property var players: Mpris.players ? Mpris.players.values : null
   readonly property int index: Model.pickPlayerIndex(players, "")
-  readonly property var player: index >= 0 && index < players.length ? players[index] : null
+  readonly property var player: players && index >= 0 && index < players.length
+    ? players[index] : null
 
   readonly property bool hasPlayer: player !== null
   readonly property string title: hasPlayer ? String(player.trackTitle || "") : ""
@@ -54,7 +62,11 @@ Item {
   readonly property real length: hasPlayer && player.lengthSupported ? player.length : 0
   readonly property real fraction: Model.trackFraction(position, length)
 
-  readonly property bool ready: hasPlayer && title !== ""
+  // A title or an artist is enough. Some players publish one a moment before
+  // the other, and waiting for both is what makes a card look slow.
+  readonly property bool ready: Model.hasPlayable(player)
+
+  readonly property bool artReady: root.showArt && artUrl !== "" && cover.status === Image.Ready
 
   // The position only ticks while something is playing, and only while a
   // progress bar is on screen to show it.
@@ -62,11 +74,6 @@ Item {
     running: root.playing && root.showProgress && root.ready
     onTriggered: if (root.player) root.player.positionChanged()
   }
-
-  // ---------------------------------------------------------------- layout
-
-  readonly property real artSize: showArt ? Math.round(height - pad * 2) : 0
-  readonly property real textLeft: pad + (showArt ? artSize + Math.round(unit * 0.075) : 0)
 
   // ----------------------------------------------------------------- paint
 
@@ -84,52 +91,188 @@ Item {
     renderType: Text.NativeRendering
   }
 
+  // The image is loaded once and drawn by whichever layout is up.
+  Image {
+    id: cover
+    source: root.showArt ? root.artUrl : ""
+    fillMode: Image.PreserveAspectCrop
+    asynchronous: true
+    cache: true
+    visible: false
+    // Decoded no larger than the card needs it.
+    sourceSize.width: Math.max(64, Math.round(root.width))
+    sourceSize.height: Math.max(64, Math.round(root.height))
+  }
+
+  // ------------------------------------------------------- compact layout
+  //
+  // Art edge to edge, words over a scrim along the bottom. Nothing is inset
+  // from the card here: the cover is the card.
+
   Item {
     anchors.fill: parent
-    visible: root.ready
+    visible: root.ready && root.compact
 
-    // Album art, square, down the left. Kept as a rounded tile so it sits
-    // inside the card rather than fighting its corners.
-    // Album art, square, down the left. ClippingRectangle rounds the image
-    // to the tile rather than the image being rounded itself, so a cover of
-    // any aspect crops to the same shape.
     ClippingRectangle {
-      id: art
-      x: root.pad
-      y: root.pad
-      width: root.artSize
-      height: root.artSize
-      visible: root.showArt && root.artSize > 0
-      radius: Math.max(2, Math.round(root.artSize * 0.1))
-      color: Util.alpha(root.foreground, 0.1)
+      anchors.fill: parent
+      radius: root.cardRadius
+      color: "transparent"
 
-      // A note, for a track whose art has not loaded or does not exist.
+      Image {
+        anchors.fill: parent
+        source: cover.source
+        fillMode: Image.PreserveAspectCrop
+        asynchronous: true
+        cache: true
+        visible: root.artReady
+        sourceSize.width: cover.sourceSize.width
+        sourceSize.height: cover.sourceSize.height
+      }
+
+      // A note where there is no cover, so the card is never simply blank.
       Text {
         anchors.centerIn: parent
-        visible: cover.status !== Image.Ready
-        text: "\uf001"  // a note, for art that has not loaded or does not exist
+        visible: !root.artReady
+        text: "\uf001"
+        color: Util.alpha(root.foreground, 0.25)
+        font.family: root.fontFamily
+        font.pixelSize: Math.round(root.unit * 0.3)
+        renderType: Text.NativeRendering
+      }
+
+      // Words go over a photograph, so they need a floor to stand on. The
+      // gradient is the card's own background colour, which keeps the tile
+      // in the theme however bright the cover is.
+      Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: Math.round(parent.height * 0.62)
+        visible: root.artReady
+        gradient: Gradient {
+          GradientStop { position: 0.0; color: Util.alpha(Color.background, 0.0) }
+          GradientStop { position: 0.45; color: Util.alpha(Color.background, 0.72) }
+          GradientStop { position: 1.0; color: Util.alpha(Color.background, 0.94) }
+        }
+      }
+    }
+
+    Text {
+      id: compactTitle
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.leftMargin: root.pad
+      anchors.rightMargin: root.pad
+      anchors.bottom: compactArtist.top
+      anchors.bottomMargin: Math.round(root.unit * 0.01)
+      textFormat: Text.PlainText
+      text: root.title
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Math.max(10, Math.round(root.unit * 0.085))
+      elide: Text.ElideRight
+      maximumLineCount: 2
+      wrapMode: Text.Wrap
+      renderType: Text.NativeRendering
+    }
+
+    Text {
+      id: compactArtist
+      anchors.left: parent.left
+      anchors.right: toggleCompact.left
+      anchors.leftMargin: root.pad
+      anchors.rightMargin: Math.round(root.unit * 0.04)
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: root.pad + (root.showProgress && root.length > 0
+        ? Math.round(root.unit * 0.05) : 0)
+      textFormat: Text.PlainText
+      text: root.artist
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Math.max(8, Math.round(root.unit * 0.065))
+      elide: Text.ElideRight
+      renderType: Text.NativeRendering
+    }
+
+    MusicButton {
+      id: toggleCompact
+      anchors.right: parent.right
+      anchors.rightMargin: root.pad
+      anchors.verticalCenter: compactArtist.verticalCenter
+      size: Math.max(20, Math.round(root.unit * 0.18))
+      playing: root.playing
+      accent: root.accent
+      fontFamily: root.fontFamily
+      visible: root.canToggle
+      onPressed: if (root.player && root.canToggle) root.player.togglePlaying()
+    }
+
+    // A hairline along the very bottom of the card, edge to edge — there is
+    // no room for a bar with numbers beside it here.
+    Rectangle {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      anchors.margins: Math.round(root.unit * 0.045)
+      height: Math.max(2, Math.round(root.unit * 0.016))
+      radius: height / 2
+      visible: root.showProgress && root.length > 0
+      color: Util.alpha(root.foreground, 0.2)
+
+      Rectangle {
+        width: parent.width * root.fraction
+        height: parent.height
+        radius: parent.radius
+        color: root.accent
+      }
+    }
+  }
+
+  // ---------------------------------------------------------- wide layout
+
+  Item {
+    anchors.fill: parent
+    visible: root.ready && !root.compact
+
+    readonly property real artSize: root.showArt ? Math.round(root.height - root.pad * 2) : 0
+    readonly property real textLeft: root.pad
+      + (root.showArt ? artSize + Math.round(root.unit * 0.075) : 0)
+
+    ClippingRectangle {
+      id: wideArt
+      x: root.pad
+      y: root.pad
+      width: parent.artSize
+      height: parent.artSize
+      visible: root.showArt && parent.artSize > 0
+      radius: Math.max(2, Math.round(parent.artSize * 0.1))
+      color: Util.alpha(root.foreground, 0.1)
+
+      Text {
+        anchors.centerIn: parent
+        visible: !root.artReady
+        text: "\uf001"
         color: Util.alpha(root.foreground, 0.35)
         font.family: root.fontFamily
-        font.pixelSize: Math.max(10, Math.round(root.artSize * 0.4))
+        font.pixelSize: Math.max(10, Math.round(wideArt.width * 0.4))
         renderType: Text.NativeRendering
       }
 
       Image {
-        id: cover
         anchors.fill: parent
-        source: root.artUrl
+        source: cover.source
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
         cache: true
-        smooth: true
-        visible: status === Image.Ready
+        visible: root.artReady
+        sourceSize.width: cover.sourceSize.width
+        sourceSize.height: cover.sourceSize.height
       }
     }
 
-    // Title, then who by.
     Text {
-      id: titleText
-      x: root.textLeft
+      id: wideTitle
+      x: parent.textLeft
       y: root.pad
       width: Math.max(0, parent.width - x - root.pad)
       textFormat: Text.PlainText
@@ -144,9 +287,8 @@ Item {
     }
 
     Text {
-      id: artistText
-      x: root.textLeft
-      y: titleText.y + titleText.height + Math.round(root.unit * 0.025)
+      x: parent.textLeft
+      y: wideTitle.y + wideTitle.height + Math.round(root.unit * 0.025)
       width: Math.max(0, parent.width - x - root.pad)
       textFormat: Text.PlainText
       text: root.artist
@@ -157,56 +299,28 @@ Item {
       renderType: Text.NativeRendering
     }
 
-    // Play/pause. The one accent on the card, because it is the one thing
-    // here you can do something with.
-    Rectangle {
-      id: toggle
-      width: Math.max(18, Math.round(root.unit * 0.16))
-      height: width
-      radius: width / 2
-      x: root.textLeft
-      y: parent.height - root.pad - height - (root.showProgress ? progress.height + Math.round(root.unit * 0.055) : 0)
+    MusicButton {
+      id: toggleWide
+      x: parent.textLeft
+      y: parent.height - root.pad - size
+        - (wideProgress.visible ? wideProgress.height + Math.round(root.unit * 0.055) : 0)
+      size: Math.max(18, Math.round(root.unit * 0.16))
+      playing: root.playing
+      accent: root.accent
+      fontFamily: root.fontFamily
       visible: root.canToggle
-      color: press.pressed
-        ? Util.alpha(root.accent, 0.5)
-        : (press.containsMouse ? Util.alpha(root.accent, 0.3) : Util.alpha(root.accent, 0.18))
-      border.width: 1
-      border.color: Util.alpha(root.accent, press.containsMouse ? 0.9 : 0.55)
-
-      Text {
-        anchors.centerIn: parent
-        // Pause while it plays, play while it does not, so the button shows
-        // what pressing it will do. Escapes rather than literal glyphs: a
-        // private-use character in a source file renders as nothing at all if
-        // any tool along the way drops it, and nothing reports the loss.
-        text: root.playing ? "\uf04c" : "\uf04b"
-        color: root.accent
-        font.family: root.fontFamily
-        font.pixelSize: Math.max(9, Math.round(toggle.width * 0.5))
-        renderType: Text.NativeRendering
-      }
-
-      MouseArea {
-        id: press
-        anchors.fill: parent
-        anchors.margins: -Math.round(root.unit * 0.02)
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        onClicked: if (root.player && root.canToggle) root.player.togglePlaying()
-      }
+      onPressed: if (root.player && root.canToggle) root.player.togglePlaying()
     }
 
-    // How far through, and how long that is.
     Item {
-      id: progress
-      x: root.textLeft
+      id: wideProgress
+      x: parent.textLeft
       y: parent.height - root.pad - height
       width: Math.max(0, parent.width - x - root.pad)
       height: Math.max(10, Math.round(root.unit * 0.06))
       visible: root.showProgress && root.length > 0
 
       Rectangle {
-        id: track
         anchors.left: parent.left
         anchors.right: elapsed.left
         anchors.rightMargin: Math.round(root.unit * 0.04)

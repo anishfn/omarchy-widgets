@@ -43,10 +43,15 @@ clicks is a bug the user cannot see the cause of.
 A type that genuinely needs a control can set `interactive: true` in its
 catalogue entry, and the surface turns *that widget's rectangle* back into an
 input region. Nothing else changes: every other widget stays click-through.
-Expect to justify it in review. `music` is the one that has: a play/pause you
-have to go somewhere else to reach is not a play/pause. A click that opens
-something, configures something, or drills into a detail is a bar widget or a
-panel, not this.
+
+The test a click has to pass is **one obvious action, about the thing already
+on the card**. `music` passes it — a play/pause you have to go somewhere else
+to reach is not a play/pause. `repo-pulse` passes it — the name opens the
+repository it is describing. A settings button, a menu, or anything that
+opens more interface does not; that is a bar widget or a panel.
+
+Note that the *whole card* becomes an input region, not just your control, so
+whatever is live has to look live. See [DESIGN.md](DESIGN.md).
 
 Good candidates: a clock in another timezone, the weather, disk or battery
 headroom, next calendar event, now playing, a countdown, moon phase, a

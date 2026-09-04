@@ -174,6 +174,10 @@ function catalog() {
       source: "widgets/RepoPulse.qml",
       sizes: [[1, 1], [2, 1]],
       network: "api.github.com",
+      // The name opens the repository. Same exception the music card takes,
+      // and the same justification: the action is about the thing on the
+      // card, and there is exactly one of it.
+      interactive: true,
       settings: [
         {
           key: "repo",
@@ -964,6 +968,21 @@ function repoStats(info, pulls) {
   }
 }
 
+// Where the name on the card points. GitHub's own `full_name` is preferred
+// over whatever was typed into the config: it is canonical, so a repository
+// that has since been renamed resolves to where it actually lives rather than
+// to a redirect. Either way it is checked again before becoming a URL — this
+// one arrives over the network.
+function repoUrl(info, configured) {
+  var candidates = []
+  if (isPlainObject(info) && typeof info.fullName === "string") candidates.push(info.fullName)
+  if (typeof configured === "string") candidates.push(configured)
+  for (var i = 0; i < candidates.length; i++) {
+    if (isSafeRepo(candidates[i])) return "https://github.com/" + candidates[i]
+  }
+  return ""
+}
+
 // 46148 -> "46.1k". Counts on this card are for scale, not for arithmetic.
 function compactCount(value) {
   var n = Number(value)
@@ -1484,6 +1503,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseRepo: parseRepo,
     parsePullCount: parsePullCount,
     repoStats: repoStats,
+    repoUrl: repoUrl,
     compactCount: compactCount,
     sinceLabel: sinceLabel,
     trackTime: trackTime,

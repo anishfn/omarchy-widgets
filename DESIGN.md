@@ -168,17 +168,25 @@ you are working is a distraction you cannot turn off without deleting it.
   back in with `interactive: true` in the catalogue — and only its own; every
   other widget stays click-through.
 
-  That is an exception, not a door left open. Ask whether the control has to
-  be *here*: a transport button on a now-playing card earns it, because a
-  play/pause you have to go somewhere else to reach is not a play/pause.
-  Almost nothing else does. If your widget wants a click to open something,
-  configure something, or drill into a detail, it wants to be a bar widget or
-  a panel instead.
+  The test a click has to pass: **one obvious action, about the thing already
+  on the card.** Play/pause what is playing. Open the repository being
+  described. Both are the single thing you would reach for while looking at
+  that card, and neither needs anything drawn to explain it.
 
-  Two things follow from being on the Bottom layer, and both are on you:
-  clicks only reach the widget where no window is covering it, and the target
-  has to be big enough to hit without aiming — this is a wallpaper, not a
-  toolbar.
+  What fails the test: a settings button, a menu, a list to scroll, anything
+  that opens more interface. That is a bar widget or a panel. A wallpaper is
+  not somewhere to put controls.
+
+  Three things follow, and all three are on you:
+
+  - **The whole card becomes an input region,** not just your control. So make
+    the part that does something *look* like it does — a hover state is the
+    only thing telling the user which bit is live.
+  - **Clicks only land where no window covers the widget.** These sit under
+    your windows; that is the point of them.
+  - **Targets have to be hittable without aiming.** This is a wallpaper, not a
+    toolbar.
+
 - **Not a notification.** No demands for attention, no urgent colour for
   things that are merely notable.
 - **Not a dashboard.** One idea per card. If it needs a legend, it is the

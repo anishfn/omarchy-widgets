@@ -48,7 +48,7 @@ on your desktop.
 | **Clock** | The time in any timezone, and how far that is from your own | local |
 | **Weather** | Now, today's range, and the condition | `wttr.in` |
 | **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
-| **Repo pulse** | Stars, forks, issues and open pull requests | `api.github.com` |
+| **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
 | **Music** | What is playing, how far in, and a play/pause button | local (MPRIS) |
 
 ```
@@ -298,6 +298,16 @@ pull requests. Getting that right costs a second request to the search
 endpoint; until it answers, the card shows GitHub's combined figure rather
 than a wrong smaller one.
 
+**The name opens the repository.** Click it and GitHub opens in your browser
+— it underlines and takes the accent colour on hover, so you can see which
+part of the card is live. The link uses GitHub's canonical name once it has
+been fetched, so a repository that has since been renamed opens where it
+actually lives rather than at a redirect.
+
+That makes this the second widget you can click, after [Music](#music). The
+whole card is an input region while a widget is interactive, so clicks
+anywhere on it are caught — only the name does anything with them.
+
 Data comes from the public REST API, unauthenticated: sixty requests an hour
 per address, two per repository every half hour.
 
@@ -307,8 +317,8 @@ What is playing, from **MPRIS** — so it is whatever is actually playing,
 Spotify or a browser tab or mpv, rather than any one application. Album art,
 title, artist, a progress bar, and a play/pause button.
 
-**This is the one widget you can click.** Every other card here is
-click-through: the desktop surface has no input region, so a click lands on
+**This is one of the two widgets you can click** — the other is
+[Repo pulse](#repo-pulse). Every other card here is click-through: the desktop surface has no input region, so a click lands on
 whatever is underneath it. A type that needs a control declares `interactive`
 in the catalogue and gets *its own rectangle* back, and nothing else changes.
 A play/pause you have to go somewhere else to reach is not a play/pause; that

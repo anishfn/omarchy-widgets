@@ -47,6 +47,17 @@ Item {
     return parts.length === 2 ? parts[1] : String(info.fullName)
   }
 
+  // Where the name points, and whether it points anywhere. Built from
+  // GitHub's canonical name once it has arrived, so a repository that has
+  // been renamed opens where it actually lives rather than at a redirect.
+  readonly property string url: Model.repoUrl(info, repo)
+  readonly property bool canOpen: url !== ""
+
+  function openRepo() {
+    if (root.url === "") return
+    Qt.openUrlExternally(root.url)
+  }
+
   property date now: clockTick.date
   readonly property string pushed: info ? Model.sinceLabel(info.pushedAt, now.getTime()) : ""
 
@@ -107,20 +118,48 @@ Item {
     // The name, and how long since anything happened to it — the only thing
     // on the card that says whether the project is alive, so it takes the
     // accent.
-    Text {
-      id: nameText
+    // The name opens the repository. Drawn as a link rather than as a button
+    // because the name is already the subject of the card — a button beside
+    // it would be a second thing saying the same word.
+    //
+    // The whole card is an input region once a type declares itself
+    // interactive, so the hover state matters more than usual: it is the only
+    // thing telling you which part of the card actually does something.
+    Item {
+      id: nameLink
       x: root.pad
       y: root.pad
       width: Math.max(0, pushedText.x - x - Style.space(6))
-      textFormat: Text.PlainText
-      text: root.shortName
-      color: root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: Math.max(10, Math.round(root.unit * 0.095))
-      elide: Text.ElideRight
-      maximumLineCount: 2
-      wrapMode: Text.Wrap
-      renderType: Text.NativeRendering
+      height: nameText.implicitHeight
+
+      Text {
+        id: nameText
+        width: parent.width
+        textFormat: Text.PlainText
+        text: root.shortName
+        color: root.canOpen && nameMouse.containsMouse ? root.accent : root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Math.max(10, Math.round(root.unit * 0.095))
+        font.underline: root.canOpen && nameMouse.containsMouse
+        elide: Text.ElideRight
+        maximumLineCount: 2
+        wrapMode: Text.Wrap
+        renderType: Text.NativeRendering
+
+        Behavior on color { ColorAnimation { duration: 90 } }
+      }
+
+      MouseArea {
+        id: nameMouse
+        anchors.fill: parent
+        // Reaching a little past the letters: this is a wallpaper, not a
+        // toolbar, and the pointer should not have to be aimed.
+        anchors.margins: -Math.round(root.unit * 0.03)
+        enabled: root.canOpen
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.openRepo()
+      }
     }
 
     Text {

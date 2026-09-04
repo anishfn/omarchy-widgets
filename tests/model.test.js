@@ -905,6 +905,41 @@ test("the pull request count is read out of the search response", () => {
   }
 })
 
+// The name on the card opens the repository, so this string becomes a URL
+// handed to the browser. It is built from a value that arrived over the
+// network, so it is checked again rather than trusted.
+test("the repo link prefers GitHub's canonical name", () => {
+  // A repository that has been renamed: the config still says the old name,
+  // and the API answers with the new one. The link should go to the new one.
+  assert.equal(
+    Model.repoUrl({ fullName: "Nuu-maan/Filly-Discord-Token-Filler" }, "nuu-maan/filly"),
+    "https://github.com/Nuu-maan/Filly-Discord-Token-Filler")
+
+  // Before the API has answered, the configured name is enough to link to.
+  assert.equal(Model.repoUrl(null, "cli/cli"), "https://github.com/cli/cli")
+})
+
+test("a link is not built from anything that is not a repository name", () => {
+  for (const bad of [
+    { info: { fullName: "../../etc/passwd" }, repo: "also/../bad" },
+    { info: { fullName: "" }, repo: "" },
+    { info: null, repo: "noslash" },
+    { info: null, repo: "a/b/c" },
+    { info: { fullName: 7 }, repo: null },
+    { info: undefined, repo: undefined }
+  ]) {
+    assert.equal(Model.repoUrl(bad.info, bad.repo), "",
+      `${JSON.stringify(bad)} should produce no link`)
+  }
+})
+
+test("a bad canonical name falls back rather than blocking the link", () => {
+  // If GitHub ever answered with something unusable, a configured name that
+  // is fine should still work.
+  assert.equal(Model.repoUrl({ fullName: "not a repo" }, "cli/cli"),
+    "https://github.com/cli/cli")
+})
+
 test("the repo card is square by default", () => {
   assert.deepEqual(Model.defaultSize("repo-pulse"), [1, 1],
     "four numbers do not need a wide card")
@@ -1048,8 +1083,12 @@ test("an array-like list of players works as well as an array", () => {
 // The desktop surface has no input region, so a click lands on whatever is
 // underneath. A widget type opts its own rectangle back in, and only its own.
 test("only a type that asks for input is interactive", () => {
-  assert.equal(Model.isInteractiveType("music"), true)
-  for (const passive of ["clock", "weather", "github", "repo-pulse", "nope"]) {
+  // Both of these have one obvious action about the thing on the card:
+  // play/pause what is playing, open the repository being described.
+  for (const clickable of ["music", "repo-pulse"]) {
+    assert.equal(Model.isInteractiveType(clickable), true)
+  }
+  for (const passive of ["clock", "weather", "github", "nope"]) {
     assert.equal(Model.isInteractiveType(passive), false, `${passive} must stay click-through`)
   }
 })
@@ -1060,6 +1099,7 @@ test("the input region covers interactive widgets and nothing else", () => {
       { id: "clock", type: "clock", enabled: true, col: 0, row: 0 },
       { id: "music", type: "music", enabled: true, col: 0, row: 1, cols: 2, rows: 1 },
       { id: "off", type: "music", enabled: false, col: 0, row: 3, cols: 2, rows: 1 },
+      { id: "weather", type: "weather", enabled: true, col: 1, row: 0 },
       { id: "other", type: "music", enabled: true, col: 0, row: 2, cols: 2, rows: 1, monitor: "DP-9" }
     ]
   })

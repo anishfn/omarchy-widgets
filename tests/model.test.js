@@ -1064,6 +1064,26 @@ test("a card is drawn from a title or an artist, not only a title", () => {
   assert.equal(Model.hasPlayable(null), false)
 })
 
+test("a transport control is only offered where the player answers it", () => {
+  const full = { canTogglePlaying: true, canGoPrevious: true, canGoNext: true }
+  assert.deepEqual(Model.playerTransport(full), { toggle: true, previous: true, next: true })
+
+  // A stream has somewhere to pause and nowhere to skip to.
+  const stream = { canTogglePlaying: true, canGoPrevious: false, canGoNext: false }
+  assert.deepEqual(Model.playerTransport(stream), { toggle: true, previous: false, next: false })
+
+  // The last track of a queue: back yes, forward no.
+  const last = { canTogglePlaying: true, canGoPrevious: true, canGoNext: false }
+  assert.deepEqual(Model.playerTransport(last), { toggle: true, previous: true, next: false })
+
+  // MPRIS is a bus, so a flag can arrive as anything or not at all. Only a
+  // player that said yes gets a button drawn for it.
+  assert.deepEqual(Model.playerTransport({ canGoNext: "yes" }),
+    { toggle: false, previous: false, next: false }, "truthy is not true")
+  assert.deepEqual(Model.playerTransport({}), { toggle: false, previous: false, next: false })
+  assert.deepEqual(Model.playerTransport(null), { toggle: false, previous: false, next: false })
+})
+
 test("an array-like list of players works as well as an array", () => {
   const arrayLike = {
     length: 2,

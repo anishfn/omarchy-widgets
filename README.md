@@ -49,7 +49,7 @@ on your desktop.
 | **Weather** | Now, today's range, and the condition | `wttr.in` |
 | **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
 | **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
-| **Music** | What is playing, how far in, and a play/pause button | local (MPRIS) |
+| **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
 
 ```
    ┌─────────┬─────────┐        side: left | right
@@ -315,7 +315,8 @@ per address, two per repository every half hour.
 
 What is playing, from **MPRIS** — so it is whatever is actually playing,
 Spotify or a browser tab or mpv, rather than any one application. Album art,
-title, artist, a progress bar, and a play/pause button.
+title, artist, a progress bar, and the transport: back, play or pause,
+forward.
 
 **This is one of the two widgets you can click** — the other is
 [Repo pulse](#repo-pulse). Every other card here is click-through: the desktop surface has no input region, so a click lands on
@@ -324,12 +325,18 @@ in the catalogue and gets *its own rectangle* back, and nothing else changes.
 A play/pause you have to go somewhere else to reach is not a play/pause; that
 is the whole justification, and it is meant to be a hard one to meet.
 
-Two things follow from widgets living under your windows: the button is only
-clickable where no window is covering the card, and it is drawn big enough to
-hit without aiming.
+Two things follow from widgets living under your windows: the buttons are only
+clickable where no window is covering the card, and they are drawn big enough
+to hit without aiming.
 
-**Album art** and **Progress** can each be turned off in the editor. Nothing
-here leaves your machine.
+Play/pause is the one drawn as a target; back and forward sit quietly either
+side of it, because a wallpaper should still have one obvious action on it.
+Each button appears only if the player says it will answer — a stream has
+somewhere to pause and nowhere to skip to, so it gets no skip buttons rather
+than two that do nothing.
+
+**Album art**, **Progress** and **Skip tracks** can each be turned off in the
+editor. Nothing here leaves your machine.
 
 ### Two shapes, not one stretched
 
@@ -350,6 +357,11 @@ and this follows the same rules so the bar and the card agree.
 A card is drawn as soon as there is a title **or** an artist, rather than
 waiting for both, for the same reason: some players publish one slightly
 before the other.
+
+If you always have two players running and the card keeps choosing the wrong
+one, the **Player** setting names the one to follow — `spotify`, `firefox`,
+`mpv`. It is matched against the player's own name and its bus name, and a
+blank value goes back to following whatever is playing.
 
 ## Config file
 

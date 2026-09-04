@@ -197,7 +197,7 @@ function catalog() {
     {
       type: "music",
       name: "Music",
-      description: "What is playing, how far in, and a button to stop it.",
+      description: "What is playing, how far in, and the transport for it.",
       source: "widgets/Music.qml",
       sizes: [[2, 1], [1, 1]],
       // The one widget in the set that takes a click. Everything else is
@@ -217,6 +217,22 @@ function catalog() {
           type: "boolean",
           label: "Progress",
           defaultValue: true
+        },
+        {
+          key: "showSkip",
+          type: "boolean",
+          label: "Skip tracks",
+          defaultValue: true
+        },
+        {
+          // Empty follows whatever is playing, which is what most desktops
+          // want. Naming one is for the desktop that always has two: a
+          // browser tab open beside the player it actually means.
+          key: "player",
+          type: "text",
+          label: "Player",
+          help: "Spotify, Firefox, mpv - blank follows whatever is playing",
+          defaultValue: ""
         }
       ]
     }
@@ -1121,6 +1137,19 @@ function hasPlayable(player) {
   return !!(player && (player.trackTitle || player.trackArtist))
 }
 
+// Which transport controls a player will actually answer. MPRIS publishes a
+// flag per control and they are not decoration: a browser tab has somewhere
+// to pause and nowhere to skip to, and a button that does nothing when it is
+// pressed is worse than no button. Only an explicit true counts — these
+// arrive over a bus, so an absent flag is not a no by accident.
+function playerTransport(player) {
+  return {
+    toggle: !!player && player.canTogglePlaying === true,
+    previous: !!player && player.canGoPrevious === true,
+    next: !!player && player.canGoNext === true
+  }
+}
+
 // -------------------------------------------------------- contributions
 //
 // GitHub does not publish the contribution calendar through its REST API,
@@ -1515,6 +1544,7 @@ if (typeof module !== "undefined" && module.exports) {
     playerScore: playerScore,
     pickPlayerIndex: pickPlayerIndex,
     hasPlayable: hasPlayable,
+    playerTransport: playerTransport,
     isSafeLogin: isSafeLogin,
     loginsInUse: loginsInUse,
     MAX_CONTRIBUTION_BYTES: MAX_CONTRIBUTION_BYTES,

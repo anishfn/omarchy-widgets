@@ -1,0 +1,174 @@
+# Design guide
+
+These widgets sit on a wallpaper, under the windows someone is actually
+working in. They are read at a glance, from across a desk, and they are never
+the thing being used. Everything below follows from that.
+
+The goal is that a hundred widgets from a hundred people still look like one
+set.
+
+- [The one rule](#the-one-rule)
+- [Color](#color)
+- [The card](#the-card)
+- [Type](#type)
+- [Layout inside a widget](#layout-inside-a-widget)
+- [Sizes](#sizes)
+- [Decoration](#decoration)
+- [Motion](#motion)
+- [What a widget is not](#what-a-widget-is-not)
+
+## The one rule
+
+**Every colour and every dimension comes from the theme.** Omarchy users
+switch themes constantly, and a widget with one hardcoded value is the one
+that looks broken on every theme but the author's.
+
+```qml
+// yes
+color: Color.foreground
+font.pixelSize: Math.round(root.unit * 0.21)
+
+// no
+color: "#d3c6aa"
+font.pixelSize: 42
+```
+
+If you cannot express something in terms of `Color`, `Style`, or the widget's
+own `width`/`height`, that is usually a sign the design wants simplifying
+rather than that the system needs an exception.
+
+## Color
+
+Four roles, from `qs.Commons.Color`. That is the whole palette.
+
+| | | |
+|---|---|---|
+| `Color.foreground` | The reading colour | The number, the value, the thing you came for |
+| `Color.accent` | One thing per card | The single detail that earns attention |
+| `Color.urgent` | Something is wrong | Errors and alerts only. Not "important" |
+| `Color.background` | The card, already drawn for you | You will rarely name it |
+
+Everything else is `foreground` at reduced alpha:
+
+```qml
+readonly property color dim: Util.alpha(Color.foreground, 0.55)   // labels
+readonly property color faint: Util.alpha(Color.foreground, 0.3)  // decoration
+```
+
+**Use the accent exactly once.** On the clock it is the line saying how far
+that zone is from yours — the only thing on the card you could not get from
+the bar. Two accents on one card and neither is a highlight; the eye gets no
+instruction about where to land.
+
+Do not tint by meaning — no green for good, no red for hot. A theme's palette
+is not a semantic scale, and a widget that invents one fights every theme it
+did not anticipate. `urgent` is the single exception, for actual failure.
+
+## The card
+
+`WidgetCard` draws a translucent background, a hairline border, and the corner
+radius. **Your widget draws none of that.** You are handed the inside of a
+card; fill it.
+
+The border is `foreground` at 0.14 alpha, not the accent, deliberately: the
+card should read as a pane resting on the wallpaper. An accent outline turns
+every widget into a notification.
+
+The background is translucent — the wallpaper is meant to come through. Do not
+add an opaque fill behind your content to make it easier to read. If your
+content is not legible at the default opacity, it is too dense or too small.
+
+## Type
+
+One family: `Style.font.family`, the theme's font. Do not ship a font.
+
+Size is a **fraction of the widget**, never a fixed number of pixels, so the
+same widget is the same drawing whether its cell is 160px or 260px:
+
+```qml
+readonly property real unit: Math.min(width, height)
+
+// the value you came for
+font.pixelSize: Math.max(12, Math.round(root.unit * 0.21))
+// the label above it
+font.pixelSize: Math.max(8, Math.round(root.unit * 0.075))
+// the detail below it
+font.pixelSize: Math.max(8, Math.round(root.unit * 0.065))
+```
+
+Three sizes on a card is plenty. Two is usually better. A card with four type
+sizes is a card that has not decided what it is for.
+
+Weight: `Font.Light` for a large value reads calmer at size and is what makes
+these look like faces rather than readouts. Leave everything else at normal —
+never bold a whole card.
+
+Set `renderType: Text.NativeRendering` and `textFormat: Text.PlainText`.
+Plain text is not a style preference: anything you interpolate could come from
+a config file or a network response, and rich text would render it.
+
+## Layout inside a widget
+
+The shape almost every widget wants:
+
+```
+┌──────────────────┐
+│      LABEL       │   what this is        dim, small, letter-spaced
+│                  │
+│      13:15       │   the value           foreground, large
+│                  │
+│      +9:30       │   one detail          accent, small
+└──────────────────┘
+```
+
+Centred, three lines, generous space. Space is the main tool: these are read
+from far away, and crowding is what makes a card unreadable long before small
+type does.
+
+Derive gaps from `unit` too (`Math.round(unit * 0.02)`), so the whole
+composition scales together.
+
+## Sizes
+
+Offer a size only when the widget is genuinely a **different composition** at
+that size, not the same one stretched.
+
+- `[1, 1]` — one value and its label. The default shape.
+- `[2, 1]` — room for a second value beside the first, a sparkline, a range.
+
+If your `[2, 1]` is your `[1, 1]` with more whitespace, do not offer it. The
+size button should feel like a choice, not a stretch.
+
+## Decoration
+
+The clock's ring of tick marks is decoration, and it is the most decorated
+thing here. Take that as the ceiling.
+
+Decoration must be `foreground` at low alpha (~0.3), must carry no
+information, and must be switchable off by a setting. It is texture, not
+content — a widget whose ticks you had to read would be a broken widget.
+
+No drop shadows, no gradients, no glows. The card is flat on the wallpaper.
+
+## Motion
+
+Almost none. A desktop widget that animates in the corner of your eye while
+you are working is a distraction you cannot turn off without deleting it.
+
+- Values change by simply becoming the new value.
+- No transitions on appearance — a widget switched on is just there.
+- The only motion worth having is in the editor, where you are looking at it
+  on purpose.
+
+## What a widget is not
+
+- **Not interactive.** The desktop surface has an empty input region by
+  design, so clicks reach the desktop underneath. A `MouseArea` in your widget
+  is dead code. Anything the user has to operate belongs in a bar widget or a
+  panel, not here.
+- **Not a notification.** No demands for attention, no urgent colour for
+  things that are merely notable.
+- **Not a dashboard.** One idea per card. If it needs a legend, it is the
+  wrong shape for a wallpaper.
+- **Not a window.** No title bars, no close buttons, no chrome. The card is
+  all the frame there is.

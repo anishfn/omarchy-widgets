@@ -1,0 +1,87 @@
+#!/bin/bash
+
+# Render the desktop widgets on their own, outside omarchy-shell.
+#
+# Iterating on a widget inside the real shell is slow and blunt: the plugin
+# registry re-reads a changed file, but it does not re-instantiate a panel
+# that is already mounted with `keepLoaded`, so a code change needs a full
+# `omarchy-restart-shell` before you can see it. This runs a second Quickshell
+# with nothing in it but this plugin's service and desktop surface, so the
+# widget you are working on appears in seconds and Ctrl-C takes it away again.
+#
+# It reads the same ~/.config/omarchy/widgets.json as the real thing, so
+# whatever you have configured is what you see.
+#
+# Usage: dev/preview           (Ctrl-C to stop)
+#        dev/preview --edit    start with the layout editor open
+
+set -uo pipefail
+
+EDIT=false
+case ${1:-} in
+  --edit) EDIT=true ;;
+  "") ;;
+  *) echo "usage: $0 [--edit]" >&2; exit 2 ;;
+esac
+
+PLUGIN_DIR=$(cd -- "$(dirname -- "$0")/.." && pwd)
+SHELL_DIR=/usr/share/omarchy/shell
+ROOT=${XDG_RUNTIME_DIR:-/tmp}/omarchy-widgets-preview
+
+command -v qs >/dev/null 2>&1 || { echo "quickshell (qs) not found" >&2; exit 1; }
+[ -d "$SHELL_DIR/Commons" ] || { echo "Omarchy shell not found at $SHELL_DIR" >&2; exit 1; }
+
+# The harness needs its own Quickshell config root so `qs.Commons` and `qs.Ui`
+# resolve the way they do inside omarchy-shell. The plugin itself is loaded by
+# absolute URL from where it actually lives, not copied in here: a plugin
+# placed inside a Quickshell config root loses the implicit same-directory
+# type resolution its own components rely on, and would fail here in a way it
+# never would in the real shell.
+rm -rf "$ROOT"
+mkdir -p "$ROOT"
+ln -s "$SHELL_DIR/Commons" "$ROOT/Commons"
+ln -s "$SHELL_DIR/Ui" "$ROOT/Ui"
+
+cat > "$ROOT/shell.qml" <<EOF
+import QtQuick
+import Quickshell
+
+ShellRoot {
+  id: harness
+
+  readonly property string pluginDir: "file://$PLUGIN_DIR/"
+
+  property var serviceItem: null
+
+  // Stands in for the shell object the plugin is handed. Surface asks it for
+  // serviceFor(), and for a bar to forward popup summons to — there is no bar
+  // here, so that path stays null and the desktop surface is all you get.
+  property var shellStub: QtObject {
+    function serviceFor(id) { return harness.serviceItem }
+  }
+
+  Loader {
+    source: harness.pluginDir + "Service.qml"
+    onLoaded: harness.serviceItem = item
+    onStatusChanged: if (status === Loader.Error) console.warn("service failed:", errorString())
+  }
+
+  Loader {
+    active: harness.serviceItem !== null
+    source: harness.pluginDir + "Surface.qml"
+    onLoaded: {
+      item.shell = harness.shellStub
+      item.service = harness.serviceItem
+      // The editor is normally reached from the bar, and there is no bar
+      // here, so --edit opens it directly.
+      if ($EDIT) harness.serviceItem.editing = true
+      console.warn("widgets preview: surface up")
+    }
+    onStatusChanged: if (status === Loader.Error) console.warn("surface failed:", errorString())
+  }
+}
+EOF
+
+trap 'rm -rf "$ROOT"' EXIT
+echo "Previewing $PLUGIN_DIR — Ctrl-C to stop."
+exec qs -p "$ROOT/shell.qml"

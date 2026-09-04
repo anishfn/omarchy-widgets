@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="Widgets" width="140">
+</p>
+
 <h1 align="center">Widgets</h1>
 
 <p align="center"><strong>Desktop widgets for Omarchy, in your theme's colors.</strong></p>

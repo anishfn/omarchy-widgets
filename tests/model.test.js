@@ -807,6 +807,207 @@ test("used rows counts what is on the grid, not what is configured", () => {
   assert.equal(Model.usedRows(config), 3)
 })
 
+// ----------------------------------------------------- github contributions
+
+// The page GitHub serves at /users/<login>/contributions, built to the same
+// shape a live response has. Two details are load-bearing and both are here
+// on purpose:
+//
+//   - the calendar is emitted a ROW at a time, so consecutive cells are a
+//     week apart and the markup is not in date order
+//   - the legend carries five squares with a data-level and no data-date,
+//     which a pattern keying off the level alone happily counts as days
+//
+// Verified against a real 234 KB response while writing the parser; kept
+// synthetic here so the suite does not carry a quarter megabyte of somebody's
+// profile around.
+function contributionsPage(options) {
+  const opts = options || {}
+  const weeks = opts.weeks === undefined ? 4 : opts.weeks
+  const total = opts.total === undefined ? "1,763" : opts.total
+  // 2026-01-04 is a Sunday, so the calendar starts on a week boundary the way
+  // GitHub's does.
+  const start = Date.UTC(2026, 0, 4)
+  const level = (row, col) => (row + col) % 5
+
+  let cells = ""
+  for (let row = 0; row < 7; row++) {
+    for (let col = 0; col < weeks; col++) {
+      const d = new Date(start + (col * 7 + row) * 86400000)
+      const date = d.toISOString().slice(0, 10)
+      cells += `<td data-ix="${col}" style="width: 10px" data-date="${date}"`
+        + ` id="contribution-day-component-${row}-${col}" data-level="${level(row, col)}"`
+        + ` role="gridcell" class="ContributionCalendar-day"></td>\n`
+    }
+  }
+
+  let legend = ""
+  for (let i = 0; i < 5; i++) {
+    legend += `<td style="width: 10px; height: 10px"`
+      + ` id="contribution-graph-legend-level-${i}" data-level="${i}"`
+      + ` class="ContributionCalendar-day rounded-1"></td>\n`
+  }
+
+  return `<div class="js-yearly-contributions">
+    <h2 class="f4 text-normal mb-2">
+      ${total}
+      contributions
+        in the last year
+    </h2>
+    <table class="ContributionCalendar-grid">${cells}</table>
+    <div class="legend">Less ${legend} More</div>
+  </div>`
+}
+
+test("the contribution calendar is read out of the page", () => {
+  const c = Model.parseContributions(contributionsPage({ weeks: 4 }))
+  assert.equal(c.total, "1,763")
+  assert.equal(c.days.length, 28, "four weeks of seven days")
+  assert.ok(c.at > 0)
+})
+
+test("the legend's five squares are not counted as days", () => {
+  // They carry a data-level and no data-date. A pattern keyed off the level
+  // reads 33 days here instead of 28, and every graph is then five days long.
+  const page = contributionsPage({ weeks: 4 })
+  assert.equal((page.match(/data-level=/g) || []).length, 33, "28 days plus 5 legend squares")
+  assert.equal(Model.parseContributions(page).days.length, 28)
+})
+
+test("days come back in date order, whatever order the page emits them", () => {
+  const c = Model.parseContributions(contributionsPage({ weeks: 4 }))
+  const dates = c.days.map((d) => d.date)
+  assert.deepEqual(dates, [...dates].sort(), "the page emits a row at a time, not a day at a time")
+  assert.equal(dates[0], "2026-01-04")
+  assert.equal(dates[dates.length - 1], "2026-01-31")
+})
+
+test("a page that is not a contribution calendar is refused", () => {
+  for (const junk of ["", null, undefined, "<html>nope</html>", "<h2>1,763 contributions in the last year</h2>"]) {
+    assert.equal(Model.parseContributions(junk), null, `${junk} should be refused`)
+  }
+})
+
+test("a calendar with no total still gives its days", () => {
+  const page = contributionsPage({ weeks: 2 }).replace(/<h2[\s\S]*?<\/h2>/, "")
+  const c = Model.parseContributions(page)
+  assert.equal(c.days.length, 14)
+  assert.equal(c.total, "", "no headline is not a reason to lose the graph")
+})
+
+test("a response past the ceiling is refused rather than parsed", () => {
+  const huge = "x".repeat(Model.MAX_CONTRIBUTION_BYTES + 1)
+  assert.equal(Model.parseContributions(huge), null)
+})
+
+test("the grid puts every day in the right row and column", () => {
+  const c = Model.parseContributions(contributionsPage({ weeks: 4 }))
+  const g = Model.contributionGrid(c, 4)
+  assert.equal(g.columns, 4)
+  assert.equal(g.shown, 28)
+  assert.equal(g.from, "2026-01-04")
+  assert.equal(g.to, "2026-01-31")
+
+  // Sunday the 4th is row 0 of column 0; Saturday the 10th is row 6.
+  const at = (date) => g.cells.find((cell) => cell.date === date)
+  assert.deepEqual([at("2026-01-04").col, at("2026-01-04").row], [0, 0])
+  assert.deepEqual([at("2026-01-10").col, at("2026-01-10").row], [0, 6])
+  assert.deepEqual([at("2026-01-11").col, at("2026-01-11").row], [1, 0], "next Sunday is the next column")
+  assert.deepEqual([at("2026-01-31").col, at("2026-01-31").row], [3, 6])
+
+  // Every cell lands inside the grid it reports.
+  for (const cell of g.cells) {
+    assert.ok(cell.col >= 0 && cell.col < g.columns, `col ${cell.col} outside ${g.columns}`)
+    assert.ok(cell.row >= 0 && cell.row < 7, `row ${cell.row} outside a week`)
+  }
+})
+
+test("asking for fewer weeks keeps the most recent ones", () => {
+  const c = Model.parseContributions(contributionsPage({ weeks: 8 }))
+  const g = Model.contributionGrid(c, 3)
+  assert.equal(g.columns, 3)
+  assert.equal(g.to, "2026-02-28", "the last day stays the last day")
+  assert.equal(g.from, "2026-02-08", "and the window starts three weeks before it")
+  // Columns are renumbered from zero so the drawing does not have to know
+  // which slice of the year it was handed.
+  assert.equal(Math.min(...g.cells.map((cell) => cell.col)), 0)
+  assert.equal(Math.max(...g.cells.map((cell) => cell.col)), 2)
+})
+
+test("asking for more weeks than exist gives what there is", () => {
+  const c = Model.parseContributions(contributionsPage({ weeks: 2 }))
+  const g = Model.contributionGrid(c, 53)
+  assert.equal(g.columns, 2)
+  assert.equal(g.shown, 14)
+})
+
+test("a grid of nothing is empty rather than broken", () => {
+  for (const junk of [null, undefined, {}, { days: [] }, { days: [{ date: "nonsense", level: 1 }] }]) {
+    const g = Model.contributionGrid(junk, 10)
+    assert.equal(g.columns, 0)
+    assert.deepEqual(g.cells, [])
+  }
+})
+
+test("a calendar starting mid-week still lands in the right rows", () => {
+  // 2026-01-07 is a Wednesday, day three of GitHub's Sunday-first week.
+  const c = { days: [
+    { date: "2026-01-07", level: 1 },
+    { date: "2026-01-08", level: 2 },
+    { date: "2026-01-11", level: 3 }
+  ] }
+  const g = Model.contributionGrid(c, 4)
+  const at = (date) => g.cells.find((cell) => cell.date === date)
+  assert.equal(at("2026-01-07").row, 3, "Wednesday")
+  assert.equal(at("2026-01-08").row, 4, "Thursday")
+  assert.deepEqual([at("2026-01-11").col, at("2026-01-11").row], [1, 0], "the following Sunday")
+})
+
+test("how many weeks fit is a whole number, and never zero", () => {
+  // A 13px cell with a 3px gap: the last column needs no trailing gap.
+  assert.equal(Model.weeksThatFit(376, 13, 3), 23)
+  assert.equal(Model.weeksThatFit(13, 13, 3), 1, "exactly one cell")
+  assert.equal(Model.weeksThatFit(0, 13, 3), 1, "never zero columns")
+  assert.equal(Model.weeksThatFit(376, 0, 0), 1, "never divides by nothing")
+})
+
+test("the week count reads as a sentence", () => {
+  assert.equal(Model.weeksLabel(23), "23 weeks")
+  assert.equal(Model.weeksLabel(1), "1 week")
+  assert.equal(Model.weeksLabel(0), "0 weeks")
+})
+
+test("a username that could become something else in a URL is refused", () => {
+  for (const good of ["anishfn", "a", "a-b", "torvalds", "x".repeat(39), "user-name-1"]) {
+    assert.equal(Model.isSafeLogin(good), true, `${good} should be allowed`)
+  }
+  for (const bad of ["", "-lead", "trail-", "two--hyphens", "has space", "has/slash",
+                     "../../etc", "a".repeat(40), "semi;colon", "$(id)", null, undefined, 7]) {
+    assert.equal(Model.isSafeLogin(bad), false, `${bad} should be refused`)
+  }
+})
+
+test("logins in use are unique, safe, and include the ones switched off", () => {
+  const config = Model.normalizeConfig({
+    widgets: [
+      { id: "a", type: "github", enabled: true, col: 0, row: 0, settings: { login: "anishfn" } },
+      { id: "b", type: "github", enabled: false, col: 0, row: 1, settings: { login: "anishfn" } },
+      { id: "c", type: "github", enabled: false, col: 0, row: 2, settings: { login: "torvalds" } },
+      { id: "d", type: "github", enabled: true, col: 0, row: 3, settings: { login: "../../etc" } },
+      { id: "e", type: "github", enabled: true, col: 0, row: 4, settings: { login: "" } },
+      { id: "f", type: "clock", enabled: true, col: 1, row: 0 }
+    ]
+  })
+  assert.deepEqual(Model.loginsInUse(config), ["anishfn", "torvalds"])
+})
+
+test("the github widget declares where it goes, and is wide by default", () => {
+  const gh = Model.catalogEntry("github")
+  assert.equal(gh.network, "github.com")
+  assert.deepEqual(Model.defaultSize("github"), [2, 1],
+    "seven rows of squares want length; a square card is the fallback, not the default")
+})
+
 // ----------------------------------------------------------------- weather
 
 // The shape wttr.in's j1 endpoint actually returns, trimmed to the fields

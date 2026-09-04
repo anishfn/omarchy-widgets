@@ -21,13 +21,18 @@ button in the bar.
    └───────────────────┘
 ```
 
-No account, no telemetry. Two widgets ship — a **clock** and the
-**weather** — and the catalogue is built to grow.
+No account, no telemetry. Three widgets ship — a **clock**, the **weather**,
+and a **GitHub contribution graph** — and the catalogue is built to grow.
 
-The clock touches nothing outside your machine. The weather is the one thing
-here that makes a network request: it reads **wttr.in**, which is where the
-rest of Omarchy already gets its weather, and only while a weather widget is
-switched on. Nothing else here talks to anything.
+The clock touches nothing outside your machine. Two widgets do make requests,
+each only while it is switched on, each to one host and no third party:
+
+| Widget | Talks to | |
+|---|---|---|
+| Weather | `wttr.in` | where the rest of Omarchy already gets its weather |
+| GitHub | `github.com` | the contribution page, directly; no proxy in between |
+
+Nothing else here talks to anything.
 
 ---
 
@@ -41,6 +46,7 @@ switched on. Nothing else here talks to anything.
   - [Dragging](#dragging)
 - [The clock](#the-clock)
 - [The weather](#the-weather)
+- [The contribution graph](#the-contribution-graph)
 - [Config file](#config-file)
   - [The layout block](#the-layout-block)
   - [Each widget](#each-widget)
@@ -64,7 +70,7 @@ Draws widget cards on the desktop:
 | **Input** | None. The surface has an empty input region, so clicks pass through |
 | **Space** | Reserves none, and stays inside the area the bar has already claimed |
 | **Screens** | Every output by default, or one you name |
-| **Network** | None, except the weather widget — see [The weather](#the-weather) |
+| **Network** | Only the weather and GitHub widgets, only while they are on |
 
 Nothing here is a window. You cannot focus a widget or click it — it is
 something you see when you clear the screen. Arranging them happens in an
@@ -214,6 +220,36 @@ place being reported, so a rainy midnight does not get a sun.
 If a request fails, the card keeps showing the last reading rather than going
 blank — ten-minute-old weather beats no weather.
 
+## The contribution graph
+
+Your GitHub year: seven rows of squares, one column a week, as many weeks
+back as the card can hold.
+
+Click it in the editor and set a **Username**. That is the only required
+setting; **Legend** turns the scale and week count along the bottom on and
+off.
+
+Cell size comes from the height, because seven rows have to fit exactly, and
+the number of weeks then follows from the width. So a wide card shows most of
+a year and a square one shows a couple of months — the same widget at a
+different length, rather than a squashed version of itself. The most recent
+week is at the right edge, where you look for it.
+
+The heatmap is the one place in this set where the accent is the data rather
+than a detail, so the squares get the whole accent budget and every letter on
+the card stays neutral.
+
+### Where it gets the graph
+
+GitHub does not publish the contribution calendar through its REST API, but
+the page that draws it is served on its own at `/users/<login>/contributions`
+and needs no token. That is the whole source: **github.com directly**, with no
+third-party proxy standing between your desktop and it, and no credentials to
+set up.
+
+It shows **public contributions**, which is what that page shows. One request
+per username, refreshed every half hour, and only while a GitHub widget is on.
+
 ## Config file
 
 `~/.config/omarchy/widgets.json`, created with sensible defaults the first
@@ -330,6 +366,8 @@ omarchy-shell widgets side left     # left | right
 omarchy-shell widgets columns 4     # 1-6, whatever fits the screen
 omarchy-shell widgets edit          # open the layout editor
 omarchy-shell widgets done          # close it
+omarchy-shell widgets weather       # the current reading
+omarchy-shell widgets github        # the fetched graphs
 omarchy-shell widgets reload        # re-read the file now
 
 omarchy-shell shell toggle io.github.anishfn.widgets   # open the bar popup

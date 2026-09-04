@@ -21,8 +21,13 @@ button in the bar.
    └───────────────────┘
 ```
 
-Local-first. No account, no cloud, no telemetry, no network access of any
-kind. One widget ships today — a clock — and the catalogue is built to grow.
+No account, no telemetry. Two widgets ship — a **clock** and the
+**weather** — and the catalogue is built to grow.
+
+The clock touches nothing outside your machine. The weather is the one thing
+here that makes a network request: it reads **wttr.in**, which is where the
+rest of Omarchy already gets its weather, and only while a weather widget is
+switched on. Nothing else here talks to anything.
 
 ---
 
@@ -35,6 +40,7 @@ kind. One widget ships today — a clock — and the catalogue is built to grow.
   - [The grid](#the-grid)
   - [Dragging](#dragging)
 - [The clock](#the-clock)
+- [The weather](#the-weather)
 - [Config file](#config-file)
   - [The layout block](#the-layout-block)
   - [Each widget](#each-widget)
@@ -58,6 +64,7 @@ Draws widget cards on the desktop:
 | **Input** | None. The surface has an empty input region, so clicks pass through |
 | **Space** | Reserves none, and stays inside the area the bar has already claimed |
 | **Screens** | Every output by default, or one you name |
+| **Network** | None, except the weather widget — see [The weather](#the-weather) |
 
 Nothing here is a window. You cannot focus a widget or click it — it is
 something you see when you clear the screen. Arranging them happens in an
@@ -173,6 +180,39 @@ and it wakes once a minute.
 
 The ring of small marks around the edge is decoration. Turn it off with
 `"ticks": false`.
+
+## The weather
+
+Where you are, what it is doing, and today's range.
+
+Click it in the editor for **Units** (°C or °F), a **Label** to override the
+place name, and whether to show the **high and low**.
+
+### Where it gets the weather
+
+From [wttr.in](https://wttr.in), the same source the rest of Omarchy uses,
+and only while a weather widget is on. One request serves every weather
+widget on every screen, refreshed every fifteen minutes.
+
+**Location** comes from the file Omarchy already keeps it in, so there is one
+place to set it and this plugin never learns your address separately:
+
+```bash
+omarchy-weather-location                       # what it is now
+omarchy-weather-location --set "Bengaluru"     # set it
+omarchy-weather-location --clear               # back to IP auto-detect
+```
+
+With nothing set, wttr.in detects the location from your IP address — that is
+Omarchy's documented default, not a choice this plugin makes. If you would
+rather it not, set a location explicitly.
+
+The condition icon uses the same glyphs `omarchy-weather-icon` picks, and
+switches between its day and night forms using the sunrise and sunset at the
+place being reported, so a rainy midnight does not get a sun.
+
+If a request fails, the card keeps showing the last reading rather than going
+blank — ten-minute-old weather beats no weather.
 
 ## Config file
 

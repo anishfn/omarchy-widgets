@@ -263,6 +263,98 @@ Item {
     onTriggered: service.refreshZones()
   }
 
+  // --------------------------------------------------------------- weather
+  //
+  // One fetch serves every weather widget on every screen. It lives here for
+  // the same reason the timezone lookup does: this is the object that talks
+  // to the outside world on behalf of widgets, and a card that ran its own
+  // request would run one per instance, per monitor.
+  //
+  // The response is kept in Celsius and converted for display, so two widgets
+  // in different units still cost one request.
+  //
+  // Location comes from the file `omarchy-weather-location` writes, which is
+  // the same one the built-in weather bar widget reads. Nothing stored there
+  // means wttr.in detects it from the IP address, which is Omarchy's
+  // documented default rather than a decision taken here.
+
+  readonly property string weatherLocationPath:
+    home + "/.local/state/omarchy/settings/weather.json"
+
+  property var weather: null
+  property string weatherError: ""
+  property string weatherLocation: ""
+
+  readonly property bool weatherWanted: {
+    for (var i = 0; i < widgets.length; i++)
+      if (widgets[i].enabled && widgets[i].type === "weather") return true
+    return false
+  }
+
+  onWeatherWantedChanged: if (weatherWanted) refreshWeather()
+
+  FileView {
+    path: service.weatherLocationPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: service.applyWeatherLocation(text())
+    onLoadFailed: service.applyWeatherLocation("")
+  }
+
+  function applyWeatherLocation(raw) {
+    var next = ""
+    try {
+      var parsed = JSON.parse(String(raw || ""))
+      if (parsed && typeof parsed === "object" && typeof parsed.name === "string")
+        next = parsed.name.replace(/^\s+|\s+$/g, "")
+    } catch (e) {
+      // A half-written file is not a reason to forget where we are.
+      return
+    }
+    if (next === service.weatherLocation) return
+    service.weatherLocation = next
+    if (service.weatherWanted) refreshWeather()
+  }
+
+  function refreshWeather() {
+    if (!service.weatherWanted || weatherProc.running) return
+    // The location is a path segment, so it is encoded rather than trusted,
+    // and the whole thing is passed as one argv entry to curl.
+    var query = service.weatherLocation ? encodeURIComponent(service.weatherLocation) : ""
+    weatherProc.command = ["/usr/bin/timeout", "-k", "2", "20",
+      "/usr/bin/curl", "-fsS", "--max-time", "15",
+      "https://wttr.in/" + query + "?format=j1"]
+    weatherProc.running = true
+  }
+
+  Process {
+    id: weatherProc
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var parsed = Model.parseWeather(text)
+        if (parsed) {
+          service.weather = parsed
+          service.weatherError = ""
+        } else {
+          // Keep whatever is on screen. A card showing ten-minute-old weather
+          // is better than one that has gone blank because a request failed.
+          service.weatherError = service.weather ? "stale" : "unavailable"
+        }
+      }
+    }
+  }
+
+  Timer {
+    interval: 900000
+    repeat: true
+    running: service.weatherWanted
+    triggeredOnStart: true
+    onTriggered: service.refreshWeather()
+  }
+
   // ----------------------------------------------------------------- IPC
 
   IpcHandler {
@@ -363,6 +455,20 @@ Item {
 
     function done(): string {
       service.closeEditor()
+      return "ok"
+    }
+
+    function weather(): string {
+      if (!service.weatherWanted) return "no weather widget is on"
+      if (!service.weather) return service.weatherError || "not fetched yet"
+      var w = service.weather
+      return w.place + "  " + w.tempC + "C / " + w.tempF + "F  " + w.condition
+        + "  (H:" + w.highC + " L:" + w.lowC + ")"
+        + (service.weatherError ? "  [" + service.weatherError + "]" : "")
+    }
+
+    function refreshWeather(): string {
+      service.refreshWeather()
       return "ok"
     }
 

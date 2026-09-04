@@ -205,6 +205,7 @@ this shape; read it alongside.
 | `source` | Path to your QML, relative to the plugin root. Must stay inside it |
 | `sizes` | Footprints you allow, `[cols, rows]` in cells. First is the default |
 | `settings` | Your whole tunable surface, as a schema. See [Settings](#settings) |
+| `network` | The host you talk to, if you talk to one. Omit it if you do not |
 
 ## What your widget is handed
 
@@ -302,10 +303,16 @@ Most interesting widgets want something the shell does not already have.
 - **Anything from outside is untrusted.** Validate it before it reaches a
   command line or a `Text`. `isSafeZone()` is the pattern: a strict allowlist
   pattern, not an attempt to escape what arrived.
-- **Network access must be obvious.** This plugin makes none today. If your
-  widget needs it, say so in the PR, in the README, and in the widget's own
-  description — an unexpected outbound request from a wallpaper decoration is
-  not something anyone should have to discover.
+- **Network access must be declared.** Put the host in your catalogue entry's
+  `network` field, and say so in the PR and the README. An unexpected outbound
+  request from a wallpaper decoration is not something anyone should have to
+  discover. `weather` is the worked example: it declares `wttr.in`, fetches
+  only while a weather widget is switched on, and takes its location from the
+  file Omarchy already keeps rather than asking again.
+- **Prefer a source the desktop already uses.** Weather goes to wttr.in
+  because that is where the rest of Omarchy gets it; a second provider would
+  mean a second place to configure and a second party learning where the user
+  lives.
 - **Poll slowly.** A clock that shows minutes wakes once a minute, not sixty
   times. Match the timer to what is actually on screen.
 
@@ -321,8 +328,15 @@ draws the whole shell. Budget accordingly.
   the widget's own lifetime — a widget in the tray is destroyed, so keep
   state in the widget, not in the service.
 - **A subprocess is expensive.** Poll in minutes, not seconds, and share one
-  call across every instance rather than one per widget — the timezone
-  lookup resolves every zone in the config in a single `date` invocation.
+  call across every instance rather than one per widget — the timezone lookup
+  resolves every zone in the config in a single `date` invocation.
+- **Shared, outside-world data belongs in `Service.qml`,** not in the widget.
+  That is where the timezone table and the weather report live: a card that
+  ran its own request would run one per instance, per monitor. The widget
+  reads what the service resolved and draws it.
+- **Fetch only while something needs it.** The weather request is bound to
+  whether a weather widget is actually switched on, so a plugin nobody has
+  turned it on in makes no requests at all.
 - **`Canvas` repaints on every property change.** Give it explicit
   `requestPaint()` triggers, as `widgets/TickRing.qml` does, rather than
   letting it redraw on animation frames.

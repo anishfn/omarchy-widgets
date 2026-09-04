@@ -807,6 +807,155 @@ test("used rows counts what is on the grid, not what is configured", () => {
   assert.equal(Model.usedRows(config), 3)
 })
 
+// ----------------------------------------------------------------- weather
+
+// The shape wttr.in's j1 endpoint actually returns, trimmed to the fields
+// the card reads. Captured from a live response rather than imagined.
+const wttrSample = {
+  current_condition: [{
+    temp_C: "20", temp_F: "68", weatherCode: "122",
+    weatherDesc: [{ value: "Overcast " }]
+  }],
+  nearest_area: [{
+    areaName: [{ value: "London" }],
+    region: [{ value: "City of London Greater London" }],
+    country: [{ value: "United Kingdom" }]
+  }],
+  weather: [{
+    maxtempC: "22", mintempC: "16", maxtempF: "72", mintempF: "61",
+    astronomy: [{ sunrise: "06:18 AM", sunset: "07:41 PM" }]
+  }]
+}
+
+test("a weather report becomes the handful of values a card draws", () => {
+  const w = Model.parseWeather(wttrSample)
+  assert.equal(w.place, "London")
+  assert.equal(w.tempC, "20")
+  assert.equal(w.tempF, "68")
+  assert.equal(w.code, 122)
+  assert.equal(w.condition, "Overcast", "wttr pads some descriptions; the padding goes")
+  assert.equal(w.highC, "22")
+  assert.equal(w.lowC, "16")
+  assert.equal(w.sunrise, "06:18 AM")
+  assert.ok(w.at > 0)
+})
+
+test("a report also parses from the raw string curl hands back", () => {
+  const w = Model.parseWeather(JSON.stringify(wttrSample))
+  assert.equal(w.place, "London")
+  assert.equal(w.tempC, "20")
+})
+
+test("temperatures are rounded, not passed through", () => {
+  const w = Model.parseWeather({
+    current_condition: [{ temp_C: "20.6", temp_F: "69.1", weatherCode: "113", weatherDesc: [] }],
+    weather: [{ maxtempC: "22.4", mintempC: "15.5" }]
+  })
+  assert.equal(w.tempC, "21")
+  assert.equal(w.tempF, "69")
+  assert.equal(w.highC, "22")
+  assert.equal(w.lowC, "16")
+})
+
+test("a response that is not a weather report is refused, not half-drawn", () => {
+  for (const junk of [null, undefined, "", "not json", "[]", 7, {}, { current_condition: [] },
+                      { current_condition: [{}] },
+                      { current_condition: [{ temp_C: "nonsense" }] }]) {
+    assert.equal(Model.parseWeather(junk), null, `${JSON.stringify(junk)} should be refused`)
+  }
+})
+
+test("a report missing its forecast still gives a temperature", () => {
+  // The card can lose the range without losing the number it exists for.
+  const w = Model.parseWeather({
+    current_condition: [{ temp_C: "20", temp_F: "68", weatherCode: "113", weatherDesc: [] }]
+  })
+  assert.equal(w.tempC, "20")
+  assert.equal(w.highC, "")
+  assert.equal(Model.rangeLabel(w, "celsius"), "", "no range means no range line, not a broken one")
+})
+
+test("temperatures are written the way a weather card writes them", () => {
+  const w = Model.parseWeather(wttrSample)
+  assert.equal(Model.tempLabel(w, "celsius", "temp"), "20°")
+  assert.equal(Model.tempLabel(w, "fahrenheit", "temp"), "68°")
+  assert.equal(Model.rangeLabel(w, "celsius"), "H:22°  L:16°")
+  assert.equal(Model.rangeLabel(w, "fahrenheit"), "H:72°  L:61°")
+  assert.equal(Model.tempLabel(null, "celsius", "temp"), "")
+})
+
+test("units are the setting's value, and anything else means celsius", () => {
+  assert.equal(Model.isFahrenheit("fahrenheit"), true)
+  assert.equal(Model.isFahrenheit("celsius"), false)
+  assert.equal(Model.isFahrenheit(""), false)
+  assert.equal(Model.isFahrenheit(undefined), false)
+})
+
+test("condition icons match the ones Omarchy's own weather picks", () => {
+  // Pinned to the exact codepoints, not merely asserted to differ. The
+  // mapping is transcribed from `omarchy-weather-icon`, whose lines read
+  // `[[ $night == true ]] && icon=<A> || icon=<B>` -- so the *first* glyph is
+  // the night one. Reading that pair the other way round is exactly the
+  // mistake that shipped a sun on a rainy midnight, and "they differ" is a
+  // test that passes just as happily when they are swapped.
+  assert.equal(Model.weatherIcon(113, false), "\ue30d", "clear by day is the sun")
+  assert.equal(Model.weatherIcon(113, true), "\ue32b", "clear by night is the moon")
+  assert.equal(Model.weatherIcon(353, false), "\ue308", "rain showers by day carry a sun")
+  assert.equal(Model.weatherIcon(353, true), "\ue333", "rain showers by night do not")
+  // Overcast has no night variant; the same glyph either way.
+  assert.equal(Model.weatherIcon(122, false), Model.weatherIcon(122, true))
+  // A code nobody has heard of still draws something.
+  assert.equal(Model.weatherIcon(9999, false), Model.weatherIcon(119, false))
+  assert.equal(Model.weatherIcon("not a code", false), Model.weatherIcon(119, false))
+  // Every glyph in the table is a single character, or the bar would jump.
+  for (const row of Model.WEATHER_ICONS) {
+    assert.equal(Array.from(row.day).length, 1, `day glyph for ${row.codes[0]}`)
+    assert.equal(Array.from(row.night).length, 1, `night glyph for ${row.codes[0]}`)
+  }
+})
+
+test("every weather code appears in exactly one icon row", () => {
+  const seen = new Set()
+  for (const row of Model.WEATHER_ICONS) {
+    for (const code of row.codes) {
+      assert.equal(seen.has(code), false, `code ${code} is in two rows`)
+      seen.add(code)
+    }
+  }
+})
+
+test("wall-clock times parse, and anything else does not", () => {
+  assert.equal(Model.parseClockTime("06:18 AM"), 378)
+  assert.equal(Model.parseClockTime("07:41 PM"), 1181)
+  assert.equal(Model.parseClockTime("12:00 AM"), 0, "midnight is hour zero, not twelve")
+  assert.equal(Model.parseClockTime("12:30 PM"), 750, "noon is hour twelve, not twenty-four")
+  for (const bad of ["", "6:18", "25:00 AM", "06:70 AM", "sunrise", null, undefined]) {
+    assert.equal(Model.parseClockTime(bad), null, `${bad} should not parse`)
+  }
+})
+
+test("night is before sunrise and after sunset", () => {
+  const rise = "06:18 AM", set = "07:41 PM"
+  assert.equal(Model.isNight(0, rise, set), true, "midnight")
+  assert.equal(Model.isNight(377, rise, set), true, "a minute before sunrise")
+  assert.equal(Model.isNight(378, rise, set), false, "sunrise itself is day")
+  assert.equal(Model.isNight(12 * 60, rise, set), false, "noon")
+  assert.equal(Model.isNight(1180, rise, set), false, "a minute before sunset")
+  assert.equal(Model.isNight(1181, rise, set), true, "sunset itself is night")
+  // Somewhere the sun does not set, the times invert; day is the safe answer.
+  assert.equal(Model.isNight(12 * 60, "07:41 PM", "06:18 AM"), false)
+  // No astronomy at all is not a reason to claim it is dark.
+  assert.equal(Model.isNight(12 * 60, "", ""), false)
+})
+
+test("a widget that reaches the network says so in the catalogue", () => {
+  const weather = Model.catalogEntry("weather")
+  assert.equal(weather.network, "wttr.in",
+    "a widget making requests must declare where they go")
+  // And one that does not must not claim to.
+  assert.equal(Model.catalogEntry("clock").network, undefined)
+})
+
 // ------------------------------------------------------------- clock math
 
 test("zone names that could reach a shell or escape zoneinfo are refused", () => {

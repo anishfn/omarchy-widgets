@@ -162,10 +162,23 @@ you are working is a distraction you cannot turn off without deleting it.
 
 ## What a widget is not
 
-- **Not interactive.** The desktop surface has an empty input region by
-  design, so clicks reach the desktop underneath. A `MouseArea` in your widget
-  is dead code. Anything the user has to operate belongs in a bar widget or a
-  panel, not here.
+- **Not interactive, unless it has to be.** The desktop surface has an empty
+  input region by default, so clicks reach the desktop underneath and a
+  `MouseArea` in your widget is dead code. A type can opt its own rectangle
+  back in with `interactive: true` in the catalogue — and only its own; every
+  other widget stays click-through.
+
+  That is an exception, not a door left open. Ask whether the control has to
+  be *here*: a transport button on a now-playing card earns it, because a
+  play/pause you have to go somewhere else to reach is not a play/pause.
+  Almost nothing else does. If your widget wants a click to open something,
+  configure something, or drill into a detail, it wants to be a bar widget or
+  a panel instead.
+
+  Two things follow from being on the Bottom layer, and both are on you:
+  clicks only reach the widget where no window is covering it, and the target
+  has to be big enough to hit without aiming — this is a wallpaper, not a
+  toolbar.
 - **Not a notification.** No demands for attention, no urgent colour for
   things that are merely notable.
 - **Not a dashboard.** One idea per card. If it needs a legend, it is the

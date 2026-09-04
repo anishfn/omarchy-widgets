@@ -166,6 +166,55 @@ function catalog() {
           defaultValue: true
         }
       ]
+    },
+    {
+      type: "repo-pulse",
+      name: "Repo pulse",
+      description: "Stars, forks, issues and open pull requests for a repository.",
+      source: "widgets/RepoPulse.qml",
+      sizes: [[1, 1], [2, 1]],
+      network: "api.github.com",
+      settings: [
+        {
+          key: "repo",
+          type: "text",
+          label: "Repository",
+          help: "owner/name",
+          defaultValue: ""
+        },
+        {
+          key: "showStats",
+          type: "boolean",
+          label: "Stars and issues",
+          defaultValue: true
+        }
+      ]
+    },
+    {
+      type: "music",
+      name: "Music",
+      description: "What is playing, how far in, and a button to stop it.",
+      source: "widgets/Music.qml",
+      sizes: [[2, 1], [1, 1]],
+      // The one widget in the set that takes a click. Everything else is
+      // read, and the desktop surface has no input region at all; this opts
+      // its own rectangle back in so play/pause can be pressed. See
+      // DESIGN.md -- it is an exception with a reason, not the new default.
+      interactive: true,
+      settings: [
+        {
+          key: "showArt",
+          type: "boolean",
+          label: "Album art",
+          defaultValue: true
+        },
+        {
+          key: "showProgress",
+          type: "boolean",
+          label: "Progress",
+          defaultValue: true
+        }
+      ]
     }
   ]
 }
@@ -808,12 +857,196 @@ function widgetsForScreen(config, screenName) {
   return out
 }
 
+// Does this type ask to be clickable? Only a type that says so, and only
+// over its own rectangle -- everything else stays click-through.
+function isInteractiveType(type) {
+  var entry = catalogEntry(type)
+  return !!(entry && entry.interactive === true)
+}
+
+// The widgets on a screen that want input. The desktop surface turns exactly
+// these rectangles back into an input region and leaves the rest alone.
+function interactiveWidgetsForScreen(config, screenName) {
+  var list = widgetsForScreen(config, screenName)
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (isInteractiveType(list[i].type)) out.push(list[i])
+  }
+  return out
+}
+
 // Everything switched off, in catalogue order. This is the editor's tray.
 function offWidgets(config) {
   var list = config && Array.isArray(config.widgets) ? config.widgets : []
   var out = []
   for (var i = 0; i < list.length; i++) if (!list[i].enabled) out.push(list[i])
   return out
+}
+
+// ------------------------------------------------------------ repo pulse
+//
+// The public REST API, unauthenticated: sixty requests an hour per address,
+// which two repositories refreshed every half hour is comfortably inside.
+
+// "owner/name", to GitHub's own rules for both halves. This becomes two path
+// segments, so it is checked rather than trusted.
+function isSafeRepo(value) {
+  if (typeof value !== "string") return false
+  var parts = value.split("/")
+  if (parts.length !== 2) return false
+  if (!isSafeLogin(parts[0])) return false
+  var name = parts[1]
+  if (name.length === 0 || name.length > 100) return false
+  return /^[A-Za-z0-9._-]+$/.test(name) && name !== "." && name !== ".."
+}
+
+function reposInUse(config) {
+  var list = config && Array.isArray(config.widgets) ? config.widgets : []
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].type !== "repo-pulse") continue
+    var repo = list[i].settings ? clampString(list[i].settings.repo) : ""
+    if (!repo || seen[repo] || !isSafeRepo(repo)) continue
+    seen[repo] = true
+    out.push(repo)
+  }
+  return out
+}
+
+function parseRepo(raw) {
+  var data = raw
+  if (typeof raw === "string") {
+    try { data = JSON.parse(raw) } catch (e) { return null }
+  }
+  if (!isPlainObject(data)) return null
+  if (typeof data.full_name !== "string" || data.full_name === "") return null
+  return {
+    fullName: clampString(data.full_name),
+    description: clampString(typeof data.description === "string" ? data.description : ""),
+    stars: Math.max(0, Math.round(clampNumber(data.stargazers_count, 0, 1e9, 0))),
+    forks: Math.max(0, Math.round(clampNumber(data.forks_count, 0, 1e9, 0))),
+    issues: Math.max(0, Math.round(clampNumber(data.open_issues_count, 0, 1e9, 0))),
+    pushedAt: clampString(typeof data.pushed_at === "string" ? data.pushed_at : "")
+  }
+}
+
+// GitHub's `open_issues_count` counts pull requests as issues, which is a
+// long-standing quirk of the API and not what anybody means by "issues". The
+// search endpoint gives the pull request count on its own, so the two can be
+// told apart and shown as the two different things they are.
+function parsePullCount(raw) {
+  var data = raw
+  if (typeof raw === "string") {
+    try { data = JSON.parse(raw) } catch (e) { return null }
+  }
+  if (!isPlainObject(data)) return null
+  var n = Number(data.total_count)
+  if (!isFinite(n) || n < 0) return null
+  return Math.round(n)
+}
+
+// The four numbers the card shows. `issues` is what is left once the pull
+// requests are taken back out of GitHub's combined count; until that count
+// has arrived the combined figure is shown rather than a wrong smaller one.
+function repoStats(info, pulls) {
+  if (!isPlainObject(info)) return null
+  // Checked for absence before coercion: Number(null) is 0, which is a
+  // perfectly finite number and would report "no open pull requests" for a
+  // repository whose count has simply not arrived yet.
+  var known = pulls !== null && pulls !== undefined && isFinite(Number(pulls)) && Number(pulls) >= 0
+  var prs = known ? Number(pulls) : 0
+  return {
+    stars: info.stars,
+    forks: info.forks,
+    issues: known ? Math.max(0, info.issues - Math.round(prs)) : info.issues,
+    pulls: known ? Math.round(prs) : null
+  }
+}
+
+// 46148 -> "46.1k". Counts on this card are for scale, not for arithmetic.
+function compactCount(value) {
+  var n = Number(value)
+  if (!isFinite(n) || n < 0) return "0"
+  if (n < 1000) return String(Math.round(n))
+  if (n < 1000000) {
+    var k = n / 1000
+    return (k < 10 ? k.toFixed(1).replace(/\.0$/, "") : String(Math.round(k))) + "k"
+  }
+  var m = n / 1000000
+  return (m < 10 ? m.toFixed(1).replace(/\.0$/, "") : String(Math.round(m))) + "M"
+}
+
+// "2026-09-04T16:07:18Z" against now, as the coarsest true thing: "3h",
+// "2d", "5w". A repository's last push does not want a clock.
+function sinceLabel(iso, nowMs) {
+  var then = Date.parse(String(iso || ""))
+  if (!isFinite(then)) return ""
+  var now = Number(nowMs)
+  if (!isFinite(now)) return ""
+  var seconds = Math.floor((now - then) / 1000)
+  if (seconds < 0) return "now"
+  if (seconds < 3600) return Math.max(1, Math.floor(seconds / 60)) + "m"
+  if (seconds < 86400) return Math.floor(seconds / 3600) + "h"
+  if (seconds < 604800) return Math.floor(seconds / 86400) + "d"
+  if (seconds < 2592000) return Math.floor(seconds / 604800) + "w"
+  if (seconds < 31536000) return Math.floor(seconds / 2592000) + "mo"
+  return Math.floor(seconds / 31536000) + "y"
+}
+
+// ----------------------------------------------------------------- music
+
+// Seconds to "3:45", and past an hour to "1:03:45".
+function trackTime(seconds) {
+  var n = Number(seconds)
+  if (!isFinite(n) || n < 0) return "0:00"
+  var total = Math.floor(n)
+  var s = total % 60
+  var m = Math.floor(total / 60) % 60
+  var h = Math.floor(total / 3600)
+  var mm = h > 0 && m < 10 ? "0" + m : String(m)
+  var ss = s < 10 ? "0" + s : String(s)
+  return h > 0 ? h + ":" + mm + ":" + ss : mm + ":" + ss
+}
+
+// How far through, clamped, and zero rather than NaN when the player has not
+// said how long the track is.
+function trackFraction(position, length) {
+  var pos = Number(position)
+  var len = Number(length)
+  if (!isFinite(pos) || !isFinite(len) || len <= 0) return 0
+  return Math.min(1, Math.max(0, pos / len))
+}
+
+// Which player the widget should follow, given what is registered. Something
+// actually playing wins; otherwise the first that can be controlled; failing
+// that, the first there is. Takes plain objects so it can be tested without
+// a session bus.
+function pickPlayerIndex(players, preferred) {
+  // Length-and-index rather than Array.isArray: what arrives at runtime is
+  // Mpris.players.values, a QML list that indexes and measures like an array
+  // but is not one, so Array.isArray says false and every player vanishes.
+  // Tests hand it a real array and would never have caught that.
+  if (!players) return -1
+  var count = Number(players.length)
+  if (!isFinite(count) || count <= 0) return -1
+
+  var wanted = clampString(preferred).toLowerCase()
+  if (wanted !== "") {
+    for (var p = 0; p < count; p++) {
+      var identity = String((players[p] && players[p].identity) || "").toLowerCase()
+      var bus = String((players[p] && players[p].dbusName) || "").toLowerCase()
+      if (identity.indexOf(wanted) !== -1 || bus.indexOf(wanted) !== -1) return p
+    }
+  }
+
+  for (var i = 0; i < count; i++) {
+    if (players[i] && players[i].isPlaying === true) return i
+  }
+  for (var j = 0; j < count; j++) {
+    if (players[j] && players[j].canControl === true) return j
+  }
+  return 0
 }
 
 // -------------------------------------------------------- contributions
@@ -1193,6 +1426,16 @@ if (typeof module !== "undefined" && module.exports) {
     coerceSetting: coerceSetting,
     zoneLabel: zoneLabel,
     WEATHER_ICONS: WEATHER_ICONS,
+    isSafeRepo: isSafeRepo,
+    reposInUse: reposInUse,
+    parseRepo: parseRepo,
+    parsePullCount: parsePullCount,
+    repoStats: repoStats,
+    compactCount: compactCount,
+    sinceLabel: sinceLabel,
+    trackTime: trackTime,
+    trackFraction: trackFraction,
+    pickPlayerIndex: pickPlayerIndex,
     isSafeLogin: isSafeLogin,
     loginsInUse: loginsInUse,
     MAX_CONTRIBUTION_BYTES: MAX_CONTRIBUTION_BYTES,
@@ -1255,6 +1498,8 @@ if (typeof module !== "undefined" && module.exports) {
     setColumns: setColumns,
     widgetsForScreen: widgetsForScreen,
     offWidgets: offWidgets,
+    isInteractiveType: isInteractiveType,
+    interactiveWidgetsForScreen: interactiveWidgetsForScreen,
     isSafeZone: isSafeZone,
     zonesInUse: zonesInUse,
     parseOffsetToken: parseOffsetToken,

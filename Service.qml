@@ -71,8 +71,21 @@ Item {
     if (service.selectedId && !Model.findInstance(next, service.selectedId)) service.selectedId = ""
     saveTimer.restart()
     refreshZones()
-    // A username is typed into the config, so this is where one arrives.
-    refreshContributions(false)
+    // Usernames and repository names are *typed* into the config, and the
+    // editor commits on every keystroke so an edit cannot be lost by closing
+    // the panel. Fetching straight from here would therefore send one request
+    // per character — "cli/cli" is seven, and GitHub allows sixty an hour to
+    // an unauthenticated address. Wait for the typing to stop.
+    remoteDebounce.restart()
+  }
+
+  Timer {
+    id: remoteDebounce
+    interval: 1200
+    onTriggered: {
+      service.refreshContributions(false)
+      service.refreshRepos(false)
+    }
   }
 
   function setEnabled(id, enabled) { apply(Model.setEnabled(config, id, enabled)) }
@@ -449,6 +462,133 @@ Item {
     onTriggered: service.refreshContributions(true)
   }
 
+  // ------------------------------------------------------------ repo pulse
+  //
+  // The public REST API, unauthenticated: sixty requests an hour per address.
+  // Two calls per repository, every half hour, so a handful of repositories
+  // sits comfortably inside that.
+  //
+  // Two calls because GitHub's open_issues_count counts pull requests as
+  // issues: the search endpoint gives the pull request count on its own, so
+  // the two can be shown as the two different things they are.
+
+  // "owner/name" -> { info, pulls }
+  property var repos: ({})
+  property string reposError: ""
+  property var repoQueue: []
+
+  readonly property bool reposWanted: {
+    for (var i = 0; i < widgets.length; i++)
+      if (widgets[i].enabled && widgets[i].type === "repo-pulse") return true
+    return false
+  }
+
+  onReposWantedChanged: if (reposWanted) refreshRepos(false)
+
+  function refreshRepos(force) {
+    if (!service.reposWanted) return
+    var names = Model.reposInUse(config)
+    var queue = []
+    for (var i = 0; i < names.length; i++) {
+      var have = service.repos[names[i]]
+      // Re-queued when forced, when nothing is known, and when the repository
+      // arrived but its pull request count did not.
+      if (force === true || !have || have.pulls === null || have.pulls === undefined)
+        queue.push(names[i])
+    }
+    if (queue.length === 0) return
+    service.repoQueue = queue
+    startNextRepo()
+  }
+
+  function startNextRepo() {
+    if (repoInfoProc.running || repoStatsProc.running) return
+    var queue = service.repoQueue
+    if (!queue || queue.length === 0) return
+    var name = String(queue[0])
+    service.repoQueue = queue.slice(1)
+    // Checked again here rather than trusted from the queue: this becomes
+    // two path segments.
+    if (!Model.isSafeRepo(name)) { startNextRepo(); return }
+    repoInfoProc.repo = name
+    repoInfoProc.command = ["/usr/bin/timeout", "-k", "2", "20",
+      "/usr/bin/curl", "-fsSL", "--max-time", "15",
+      "-H", "Accept: application/vnd.github+json",
+      "https://api.github.com/repos/" + name]
+    repoInfoProc.running = true
+  }
+
+  function storeRepo(name, info, pulls) {
+    var next = ({})
+    for (var key in service.repos) next[key] = service.repos[key]
+    var existing = next[name] || ({})
+    next[name] = {
+      info: info !== null ? info : (existing.info || null),
+      pulls: pulls !== null ? pulls : (existing.pulls === undefined ? null : existing.pulls)
+    }
+    service.repos = next
+  }
+
+  Process {
+    id: repoInfoProc
+    running: false
+    property string repo: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var info = Model.parseRepo(text)
+        if (info) {
+          service.storeRepo(repoInfoProc.repo, info, null)
+          service.reposError = ""
+        } else {
+          service.reposError = service.repos[repoInfoProc.repo] ? "stale" : "unavailable"
+        }
+      }
+    }
+    onRunningChanged: {
+      if (running) return
+      // Only count pull requests for a repository that exists.
+      if (service.repos[repoInfoProc.repo]) {
+        repoStatsProc.repo = repoInfoProc.repo
+        // The query is built from a name already matched against GitHub's own
+        // rules, so it carries nothing that needs escaping beyond the colon
+        // and plus signs the search syntax itself uses.
+        repoStatsProc.command = ["/usr/bin/timeout", "-k", "2", "25",
+          "/usr/bin/curl", "-fsSL", "--max-time", "20",
+          "-H", "Accept: application/vnd.github+json",
+          "https://api.github.com/search/issues?per_page=1&q=repo:"
+            + repoInfoProc.repo + "+type:pr+state:open"]
+        repoStatsProc.running = true
+      } else {
+        Qt.callLater(service.startNextRepo)
+      }
+    }
+  }
+
+  Process {
+    id: repoStatsProc
+    running: false
+    property string repo: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        // The repository keeps the numbers it already has if this fails; the
+        // card then shows GitHub's combined count until a later pass.
+        var pulls = Model.parsePullCount(text)
+        if (pulls !== null) service.storeRepo(repoStatsProc.repo, null, pulls)
+      }
+    }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextRepo)
+  }
+
+  Timer {
+    interval: 1800000
+    repeat: true
+    running: service.reposWanted
+    triggeredOnStart: true
+    onTriggered: service.refreshRepos(true)
+  }
+
   // ----------------------------------------------------------------- IPC
 
   IpcHandler {
@@ -572,6 +712,25 @@ Item {
           : (service.contributionsError || "not fetched yet")))
       }
       return out.join("\n")
+    }
+
+    function repos(): string {
+      var names = Model.reposInUse(service.config)
+      if (names.length === 0) return "no repo-pulse widget has a repository set"
+      var out = []
+      for (var i = 0; i < names.length; i++) {
+        var data = service.repos[names[i]]
+        if (!data || !data.info) { out.push(names[i] + ": " + (service.reposError || "not fetched yet")); continue }
+        var st = Model.repoStats(data.info, data.pulls)
+        out.push(names[i] + ": " + st.stars + " stars, " + st.forks + " forks, "
+          + st.issues + " issues, " + (st.pulls === null ? "PRs unknown" : st.pulls + " PRs"))
+      }
+      return out.join("\n")
+    }
+
+    function refreshRepos(): string {
+      service.refreshRepos(true)
+      return "ok"
     }
 
     function refreshGithub(): string {

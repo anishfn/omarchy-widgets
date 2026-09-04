@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.anishfn.widgets",
+  "name": "Widgets",
+  "version": "0.1.0",
+  "author": "anishfn",
+  "license": "MIT",
+  "description": "Desktop widgets that sit on your wallpaper and take their colors from your Omarchy theme. Choose which ones are on screen from the bar.",
+  "repository": "https://github.com/anishfn/omarchy-widgets",
+  "keywords": [
+    "widgets",
+    "desktop",
+    "clock",
+    "wallpaper",
+    "quickshell"
+  ],
+  "kinds": [
+    "panel",
+    "bar-widget",
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Surface.qml",
+    "barWidget": "BarWidget.qml",
+    "service": "Service.qml"
+  },
+  "barWidget": {
+    "displayName": "Widgets",
+    "description": "Choose which desktop widgets are on screen.",
+    "category": "Desktop",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "showCount": false
+    },
+    "schema": [
+      {
+        "key": "showCount",
+        "type": "boolean",
+        "label": "Show how many widgets are on",
+        "defaultValue": false
+      }
+    ]
+  }
+}

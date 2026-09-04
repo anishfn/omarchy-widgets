@@ -527,26 +527,32 @@ Item {
                     font.pixelSize: Style.font.bodySmall
                   }
 
-                  // Enough zones that scanning is friction, so this one is
-                  // the searchable variant.
-                  SearchableDropdown {
+                  // Enough zones that scanning is friction, so this one
+                  // carries a filter.
+                  PickerField {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: setting.modelData.type === "timezone"
                     width: visible ? Style.space(210) : 0
+                    height: Style.spacing.controlHeight
+                    windowHeight: win.height
+                    searchable: true
+                    searchPlaceholder: "Search cities…"
+                    emptyText: "No city by that name"
+                    emptyLabel: "Your own clock"
                     options: root.timezoneOptions
                     value: String(setting.value || "")
-                    triggerLabel: setting.value ? Model.zoneLabel(setting.value) : "Your own clock"
-                    placeholderText: "Search cities…"
                     foreground: root.foreground
                     accent: root.accent
                     fontFamily: root.fontFamily
                     onChanged: function(v) { setting.commit(v) }
                   }
 
-                  Dropdown {
+                  PickerField {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: setting.modelData.type === "choice"
                     width: visible ? Style.space(120) : 0
+                    height: Style.spacing.controlHeight
+                    windowHeight: win.height
                     options: setting.modelData.options || []
                     value: String(setting.value || "")
                     foreground: root.foreground

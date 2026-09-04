@@ -29,10 +29,6 @@ BarWidget {
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
-  // nf-fa-th_large. One glyph in both states rather than a filled/outlined
-  // pair: the button already dims when nothing is on screen, and an icon
-  // that changes shape reads as a different button, not a different state.
-  readonly property string glyph: ""
   readonly property string labelText: showCount ? String(enabledCount) : ""
 
   // ------------------------------------------------- shell summon interface
@@ -123,14 +119,13 @@ BarWidget {
       anchors.centerIn: parent
       spacing: Style.space(6)
 
-      Text {
+      // The plugin's own mark rather than a font glyph: the grid with a
+      // spanning card is what this button is for, and no glyph in the set
+      // says that.
+      WidgetsMark {
         anchors.verticalCenter: parent.verticalCenter
-        textFormat: Text.PlainText
-        text: root.glyph
+        iconSize: Style.bar.iconCanvas
         color: button.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.icon
-        renderType: Text.NativeRendering
       }
 
       Text {

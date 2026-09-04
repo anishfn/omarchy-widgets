@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Widgets">
+  <title>Widgets</title>
+
+  <!-- The grid the plugin lays out, at logo size: two cards side by side and
+       one spanning both underneath. Nine units square on a sixteen unit
+       canvas, the same geometry the bar mark is drawn from. -->
+
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#243040"/>
+      <stop offset="1" stop-color="#161d27"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="114" fill="url(#plate)"/>
+  <rect x="1.5" y="1.5" width="509" height="509" rx="112.5"
+        fill="none" stroke="#ffffff" stroke-opacity="0.10" stroke-width="3"/>
+
+  <!-- Top left: the clock, the widget that ships. Its ring of ticks is the
+       one piece of decoration in the whole set, so it is what the mark
+       carries. -->
+  <g>
+    <rect x="96" y="96" width="144" height="144" rx="30" fill="#dfd8c8" fill-opacity="0.93"/>
+    <rect x="112" y="112" width="112" height="112" rx="18"
+          fill="none" stroke="#161d27" stroke-opacity="0.5" stroke-width="4"
+          stroke-dasharray="2 10" stroke-linecap="round"/>
+  </g>
+
+  <!-- Top right: one accent per card is the rule, so the mark keeps one
+       accent too. -->
+  <rect x="272" y="96" width="144" height="144" rx="30" fill="#e8845f"/>
+
+  <!-- The spanning card. This is the part that makes the mark this plugin
+       and not a dashboard icon. -->
+  <rect x="96" y="272" width="320" height="144" rx="30" fill="#dfd8c8" fill-opacity="0.62"/>
+</svg>

@@ -104,25 +104,36 @@ Item {
 
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
+      // Same fit-to-card guard as the time: a label is user-written and can
+      // be any length.
+      width: Math.round(root.width * 0.86)
       visible: root.label.length > 0
       text: root.label
       textFormat: Text.PlainText
       color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Math.max(8, Math.round(root.unit * 0.075))
+      minimumPixelSize: Math.max(7, Math.round(root.unit * 0.05))
+      fontSizeMode: Text.HorizontalFit
       font.letterSpacing: Math.round(root.unit * 0.075) * 0.12
       renderType: Text.NativeRendering
     }
 
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
+      // Stay inside the tick ring: a fraction of the card, not all of it.
+      width: Math.round(root.width * 0.86)
       text: root.timeText
       textFormat: Text.PlainText
       color: root.foreground
       font.family: root.fontFamily
       // The weather card's headline size, so the two cards agree about what
-      // a headline is.
+      // a headline is. The 12-hour format's " PM" tail can make the line
+      // wider than the card it is centred on, so it shrinks to fit rather
+      // than spill past the ring; formats that already fit are untouched.
       font.pixelSize: Math.max(14, Math.round(root.unit * 0.24))
+      minimumPixelSize: Math.max(10, Math.round(root.unit * 0.1))
+      fontSizeMode: Text.HorizontalFit
       font.weight: Font.Light
       renderType: Text.NativeRendering
     }

@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 import "Model.js" as Model
 
 // Single source of truth for the Widgets plugin: which widgets exist, which
@@ -832,11 +833,15 @@ Item {
       for (var i = 0; i < service.widgets.length; i++) {
         var w = service.widgets[i]
         out.push((w.enabled ? "on   " : "off  ") + w.id
-          + "  (" + w.type + ", col " + w.col + " row " + w.row
+          + "  (" + w.type + ", " + Model.sideOf(w, service.layout)
+          + " col " + w.col + " row " + w.row
           + ", " + w.cols + "x" + w.rows + ")")
       }
-      var head = "grid: " + service.layout.columns + " columns, "
-        + service.layout.side + " side"
+      var used = Model.sidesInUse(service.config)
+      var where = used.left && used.right ? "both sides"
+        : (used.left || used.right ? service.layout.side + " side" : "nothing placed")
+      var head = "grid: " + service.layout.columns + " columns, " + where
+        + " (new widgets go " + service.layout.side + ")"
       return head + (out.length ? "\n" + out.join("\n") : "\nno widgets configured")
     }
 
@@ -936,11 +941,14 @@ Item {
       return now.cols + "x" + now.rows
     }
 
-    function side(value: string): string {
+    // With no id, everything moves; with one, just that widget.
+    function side(value: string, id: string): string {
       if (Model.SIDES.indexOf(String(value)) === -1)
         return "side must be one of: " + Model.SIDES.join(", ")
-      service.setSide(value)
-      return "ok"
+      if (!String(id)) { service.setSide(value); return "ok" }
+      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
+      service.setWidgetSide(id, value)
+      return Model.sideOf(Model.findInstance(service.config, id), service.layout)
     }
 
     function columns(value: string): string {

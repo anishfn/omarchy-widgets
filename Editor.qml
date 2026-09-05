@@ -200,7 +200,8 @@ Item {
           if (win.overTray) {
             if (root.service) root.service.setEnabled(id, false)
           } else if (win.hoverCell && win.dropValid && root.service) {
-            root.service.placeWidget(id, win.hoverCell.col, win.hoverCell.row)
+            root.service.placeWidget(id, win.hoverCell.col, win.hoverCell.row,
+              win.hoverCell.side)
           }
           win.dragCancel()
         }
@@ -256,14 +257,33 @@ Item {
         readonly property int gridRows: Math.min(Model.MAX_ROWS,
           (root.config ? Model.usedRows(root.config) : 0) + 1)
 
+        // Both grids, always. The other side is drawn even when nothing is on
+        // it, because that is the only way anyone finds out it is there --
+        // an empty half of the screen tells you nothing, and a second grid of
+        // cells is an invitation you can drag something into.
+        //
+        // The unused one is drawn fainter, so at a glance the desktop still
+        // reads as "my widgets are on the right" rather than as two equal
+        // columns you have to choose between.
+        readonly property var sideUse: root.config
+          ? Model.sidesInUse(root.config) : ({ left: true, right: true })
+
         Repeater {
-          model: win.gridRows * root.layout.columns
+          model: win.gridRows * root.layout.columns * Model.SIDES.length
 
           delegate: Rectangle {
             required property int index
-            readonly property int col: index % root.layout.columns
-            readonly property int row: Math.floor(index / root.layout.columns)
-            readonly property var rect: Model.cellRect(root.layout, win.width, col, row, 1, 1)
+            readonly property int perSide: win.gridRows * root.layout.columns
+            readonly property string side: Model.SIDES[Math.floor(index / perSide)]
+            readonly property int cell: index % perSide
+            readonly property int col: cell % root.layout.columns
+            readonly property int row: Math.floor(cell / root.layout.columns)
+            readonly property var rect: Model.cellRect(root.layout, win.width,
+              col, row, 1, 1, side)
+            // Lit while a card is being carried over this grid, so the side
+            // you are heading for answers before you let go.
+            readonly property bool live: win.dragging
+              && win.hoverCell !== null && win.hoverCell.side === side
 
             x: rect.x
             y: rect.y
@@ -272,7 +292,8 @@ Item {
             radius: Style.cornerRadius > 0 ? Style.cornerRadius : 0
             color: "transparent"
             border.width: 1
-            border.color: Util.alpha(root.foreground, 0.18)
+            border.color: Util.alpha(root.foreground,
+              win.sideUse[side] || live ? 0.18 : 0.07)
           }
         }
 
@@ -283,7 +304,7 @@ Item {
           visible: win.dragging && win.hoverCell !== null
           readonly property var rect: win.hoverCell
             ? Model.cellRect(root.layout, win.width, win.hoverCell.col, win.hoverCell.row,
-                win.dragCols, win.dragRows)
+                win.dragCols, win.dragRows, win.hoverCell.side)
             : ({ x: 0, y: 0, width: 0, height: 0 })
           x: rect.x
           y: rect.y
@@ -733,8 +754,8 @@ Item {
               wrapMode: Text.Wrap
               textFormat: Text.PlainText
               text: root.selected !== null
-                ? "Drag it to move it, or into the bar below to take it off the desktop."
-                : "Drag a widget to move it. Click one to change its settings."
+                ? "Drag it anywhere — either side of the screen, or onto another widget to swap. Into the bar below takes it off."
+                : "Drag a widget to either side of the screen. Click one to change its settings, or to duplicate it."
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption

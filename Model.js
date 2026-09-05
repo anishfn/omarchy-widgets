@@ -473,8 +473,12 @@ function gridWidth(layout) {
 }
 
 // Left edge of the grid inside a `screenWidth`-wide usable area.
-function gridOriginX(layout, screenWidth) {
-  if (layout.side === "left") return layout.marginX
+// Left edge of a grid inside a `screenWidth`-wide usable area. `side` names
+// which of the two; omitting it asks for the layout's own, which is what every
+// caller that predates two grids wants.
+function gridOriginX(layout, screenWidth, side) {
+  var where = SIDES.indexOf(String(side)) === -1 ? layout.side : String(side)
+  if (where === "left") return layout.marginX
   return Math.round(screenWidth - layout.marginX - gridWidth(layout))
 }
 
@@ -482,11 +486,19 @@ function gridOriginX(layout, screenWidth) {
 // size and the margin it is held off its edge by. Offering a column count
 // that runs off the screen would be offering a widget you cannot see, so the
 // editor asks this before it offers anything.
+// The widest grid that still fits, given the cell size and the margin it is
+// held off the edge by.
+//
+// Both grids have to fit, not just one, and that is deliberate even for a
+// desktop using a single side: the other side is always one drag away, and a
+// column count that only works while you have not used it yet is a trap rather
+// than a setting. `columnOptions` still offers whatever a config already holds,
+// so nobody's grid narrows underneath them.
 function maxColumnsFor(layout, screenWidth) {
   var w = Number(screenWidth)
   if (!isFinite(w) || w <= 0) return MAX_COLUMNS
   for (var n = MAX_COLUMNS; n > 1; n--) {
-    if (layout.marginX + blockWidth(layout, n) <= w) return n
+    if (2 * (layout.marginX + blockWidth(layout, n)) <= w) return n
   }
   return 1
 }
@@ -503,10 +515,10 @@ function columnOptions(layout, screenWidth) {
 
 // Screen rectangle of a cell block. The grid's own origin is folded in, so
 // this is what both the drawing and the hit testing use — they cannot drift.
-function cellRect(layout, screenWidth, col, row, cols, rows) {
+function cellRect(layout, screenWidth, col, row, cols, rows, side) {
   var step = layout.cellSize + layout.gap
   return {
-    x: Math.round(gridOriginX(layout, screenWidth) + col * step),
+    x: Math.round(gridOriginX(layout, screenWidth, side) + col * step),
     y: Math.round(layout.marginY + row * step),
     width: blockWidth(layout, cols),
     height: blockHeight(layout, rows)
@@ -514,23 +526,35 @@ function cellRect(layout, screenWidth, col, row, cols, rows) {
 }
 
 function widgetRect(layout, instance, screenWidth) {
-  return cellRect(layout, screenWidth, instance.col, instance.row, instance.cols, instance.rows)
+  return cellRect(layout, screenWidth, instance.col, instance.row,
+    instance.cols, instance.rows, sideOf(instance, layout))
 }
 
 // Which cell a screen point falls in. Returns null outside the grid's columns
 // or above its top, so a drag that wanders off does not silently snap back to
 // column zero.
+// Which cell of which grid a screen point falls in. Both are tried, and the
+// answer carries the side it came from, so a drag across the screen changes
+// which grid a widget belongs to without the caller having to ask.
+//
+// Returns null outside either grid's columns or above its top, so a drag that
+// wanders into the gap between them does not silently snap to one.
 function cellFromPoint(layout, screenWidth, x, y) {
   var step = layout.cellSize + layout.gap
   if (step <= 0) return null
-  var localX = x - gridOriginX(layout, screenWidth)
   var localY = y - layout.marginY
-  if (localX < 0 || localY < 0) return null
-  var col = Math.floor(localX / step)
+  if (localY < 0) return null
   var row = Math.floor(localY / step)
-  if (col < 0 || col >= layout.columns) return null
   if (row < 0 || row >= MAX_ROWS) return null
-  return { col: col, row: row }
+
+  for (var i = 0; i < SIDES.length; i++) {
+    var localX = x - gridOriginX(layout, screenWidth, SIDES[i])
+    if (localX < 0) continue
+    var col = Math.floor(localX / step)
+    if (col < 0 || col >= layout.columns) continue
+    return { col: col, row: row, side: SIDES[i] }
+  }
+  return null
 }
 
 // Where a card held with its top-left corner at (cardX, cardY) would land,
@@ -727,6 +751,9 @@ function defaultInstance(type, id) {
     type: entry.type,
     enabled: true,
     monitor: "",
+    // Overwritten with a real side the moment this goes through
+    // `normalizeInstance`, which everything reaching the config does.
+    side: "",
     col: 0,
     row: 0,
     cols: size[0],
@@ -743,11 +770,10 @@ function defaultInstance(type, id) {
 
 // The first config anyone gets: one clock, on, top of the right-hand grid.
 function defaultConfig() {
-  return {
-    version: SCHEMA_VERSION,
-    layout: normalizeLayout(DEFAULT_LAYOUT),
-    widgets: [defaultInstance("clock", "clock")]
-  }
+  var layout = normalizeLayout(DEFAULT_LAYOUT)
+  var clock = defaultInstance("clock", "clock")
+  clock.side = layout.side
+  return { version: SCHEMA_VERSION, layout: layout, widgets: [clock] }
 }
 
 function normalizeSettings(entry, raw) {
@@ -801,6 +827,20 @@ function normalizeInstance(raw, index, layout) {
 
   if (typeof raw.enabled === "boolean") out.enabled = raw.enabled
   out.monitor = clampString(raw.monitor)
+  // Resolved to one of the two sides here, once, rather than left as "follow
+  // the layout" for everything downstream to work out.
+  //
+  // That matters more than it looks: `rectsOverlap` is handed bare blocks with
+  // no layout in reach, so an unresolved side there has to guess -- and a
+  // guess means two widgets on what it thinks are different grids, quietly
+  // drawn on top of each other. Making it explicit at the door means nothing
+  // below this line can get it wrong.
+  //
+  // A file that says nothing, or says something that is not a side, still
+  // means "wherever the rest of them are", which is what every config written
+  // before widgets had sides means.
+  var side = clampString(raw.side)
+  out.side = SIDES.indexOf(side) === -1 ? sideOf(null, layout) : side
 
   // A footprint the type does not offer is not a footprint. Falling back to
   // the default keeps a hand-edited file from producing a widget that the
@@ -859,9 +899,30 @@ function normalizeConfig(raw) {
 
 // ----------------------------------------------------------------- packing
 
+// Do two blocks collide? Sides first: the left grid and the right grid are two
+// separate boards, and a cell on one has nothing to do with the same cell on
+// the other.
+//
+// Folding the side in here rather than filtering by it at each call site is
+// what lets the whole placement system -- fitting, packing, displacing,
+// resolving -- stay exactly as it was. Nothing above this line had to learn
+// that there are two grids.
 function rectsOverlap(a, b) {
+  if (sideOf(a) !== sideOf(b)) return false
   return a.col < b.col + b.cols && b.col < a.col + a.cols
     && a.row < b.row + b.rows && b.row < a.row + a.rows
+}
+
+// The side a widget or a block belongs to. Absent means the layout's own side,
+// which is what every config written before widgets had sides means -- and why
+// one of those still draws exactly where it always did.
+function sideOf(block, layout) {
+  var value = block ? clampString(block.side) : ""
+  // Called with a null block to mean "whatever the layout calls home", which
+  // is what an unset side resolves to.
+  if (SIDES.indexOf(value) !== -1) return value
+  return layout && SIDES.indexOf(clampString(layout.side)) !== -1
+    ? clampString(layout.side) : DEFAULT_LAYOUT.side
 }
 
 // Only enabled widgets take up room. One that is switched off keeps its cell
@@ -895,11 +956,12 @@ function fitsAmong(layout, block, others) {
 // First cell a block fits in, scanning left to right then down — the reading
 // order, so a widget dropped into a full grid lands where the eye expects the
 // next one to go.
-function firstFreeCellAmong(layout, cols, rows, others) {
+function firstFreeCellAmong(layout, cols, rows, others, side) {
+  var where = SIDES.indexOf(String(side)) === -1 ? layout.side : String(side)
   for (var row = 0; row < MAX_ROWS; row++) {
     for (var col = 0; col + cols <= layout.columns; col++) {
-      if (fitsAmong(layout, { col: col, row: row, cols: cols, rows: rows }, others))
-        return { col: col, row: row }
+      var block = { col: col, row: row, cols: cols, rows: rows, side: where }
+      if (fitsAmong(layout, block, others)) return { col: col, row: row, side: where }
     }
   }
   return null
@@ -907,20 +969,45 @@ function firstFreeCellAmong(layout, cols, rows, others) {
 
 // Can a `cols` x `rows` block sit at (col, row) without leaving the grid or
 // landing on any other live widget?
-function canPlace(config, id, col, row, cols, rows) {
-  return fitsAmong(config.layout, { col: col, row: row, cols: cols, rows: rows },
+function canPlace(config, id, col, row, cols, rows, side) {
+  var target = findInstance(config, id)
+  var where = SIDES.indexOf(String(side)) === -1
+    ? sideOf(target, config.layout) : String(side)
+  return fitsAmong(config.layout,
+    { col: col, row: row, cols: cols, rows: rows, side: where },
     occupants(config, id))
 }
 
-function firstFreeCell(config, id, cols, rows) {
-  return firstFreeCellAmong(config.layout, cols, rows, occupants(config, id))
+// The first free cell at or below `startRow`, then wrapping to the top. Where
+// something pushed out of the way should land: a widget displaced by a drop
+// belongs under the thing that displaced it, not back at the top of the grid
+// in a cell that happened to be empty.
+function firstFreeCellFrom(layout, cols, rows, others, startRow, side) {
+  var where = SIDES.indexOf(String(side)) === -1 ? layout.side : String(side)
+  var begin = Math.max(0, Math.round(Number(startRow) || 0))
+  var offset, row, col
+  for (offset = 0; offset < MAX_ROWS; offset++) {
+    // Below first, then round the top for the rows already passed.
+    row = begin + offset
+    if (row >= MAX_ROWS) row = row - MAX_ROWS
+    for (col = 0; col + cols <= layout.columns; col++) {
+      var block = { col: col, row: row, cols: cols, rows: rows, side: where }
+      if (fitsAmong(layout, block, others)) return { col: col, row: row, side: where }
+    }
+  }
+  return null
+}
+
+function firstFreeCell(config, id, cols, rows, side) {
+  return firstFreeCellAmong(config.layout, cols, rows, occupants(config, id), side)
 }
 
 // Put a widget somewhere legal, wherever that turns out to be.
 function relocate(config, id) {
   var target = findInstance(config, id)
   if (!target) return false
-  var cell = firstFreeCell(config, id, target.cols, target.rows)
+  var cell = firstFreeCell(config, id, target.cols, target.rows,
+    sideOf(target, config.layout))
   if (!cell) return false
   target.col = cell.col
   target.row = cell.row
@@ -940,7 +1027,8 @@ function resolveOverlaps(config) {
     var w = list[i]
     if (!w.enabled) continue
     if (!fitsAmong(config.layout, w, settled)) {
-      var cell = firstFreeCellAmong(config.layout, w.cols, w.rows, settled)
+      var cell = firstFreeCellAmong(config.layout, w.cols, w.rows, settled,
+        sideOf(w, config.layout))
       if (cell) { w.col = cell.col; w.row = cell.row }
     }
     settled.push(w)
@@ -950,6 +1038,9 @@ function resolveOverlaps(config) {
 
 // How many rows the grid actually uses, for drawing an editor that is as tall
 // as the content plus one empty row to drop into.
+// The lowest row anything reaches, on either side. The editor draws one row
+// past this so there is always somewhere new to drop, and both grids are drawn
+// to the same depth so they read as one surface rather than two lists.
 function usedRows(config) {
   var list = occupants(config)
   var max = 0
@@ -1161,12 +1252,51 @@ function cycleSize(config, id) {
   return resizeWidget(config, id, size[0], size[1])
 }
 
+// Put everything on one side.
+//
+// `layout.side` is where a widget goes when it has not said otherwise -- which
+// is every widget in every config written before sides existed. Setting it also
+// moves what is already placed, because that is what the button saying "Left"
+// looks like it does, and because for a desktop using one side it is exactly
+// what this always did.
 function setSide(config, side) {
   var next = normalizeConfig(config)
   var value = clampString(side)
   if (SIDES.indexOf(value) === -1) return next
   next.layout.side = value
+  for (var i = 0; i < next.widgets.length; i++) next.widgets[i].side = value
+  return resolveOverlaps(next)
+}
+
+// Move one widget to a side, keeping its cell if that cell is free over there.
+function setWidgetSide(config, id, side) {
+  var next = normalizeConfig(config)
+  var target = findInstance(next, id)
+  var value = clampString(side)
+  if (!target || SIDES.indexOf(value) === -1) return next
+  if (sideOf(target, next.layout) === value) return next
+  var was = target.side
+  target.side = value
+  if (fitsAmong(next.layout, target, occupants(next, id))) return next
+  // Taken over there. Fall back to the first free cell on that side rather
+  // than refusing: the side is what was asked for, the cell was incidental.
+  var cell = landingCell(next, target.cols, target.rows, value)
+  if (!cell) { target.side = was; return next }
+  target.col = cell.col
+  target.row = cell.row
   return next
+}
+
+// Which sides actually have something on them. The editor draws both grids
+// regardless -- that is how you discover you can use the other one -- but the
+// empty one is drawn as an invitation rather than as a peer.
+function sidesInUse(config) {
+  var list = occupants(config)
+  var layout = config && config.layout ? config.layout : normalizeLayout(null)
+  var out = {}
+  for (var i = 0; i < SIDES.length; i++) out[SIDES[i]] = false
+  for (var w = 0; w < list.length; w++) out[sideOf(list[w], layout)] = true
+  return out
 }
 
 function setColumns(config, columns) {
@@ -2911,9 +3041,14 @@ if (typeof module !== "undefined" && module.exports) {
     isLegacyInstance: isLegacyInstance,
     normalizeConfig: normalizeConfig,
     rectsOverlap: rectsOverlap,
+    sideOf: sideOf,
+    setWidgetSide: setWidgetSide,
+    sidesInUse: sidesInUse,
     occupants: occupants,
     fitsAmong: fitsAmong,
     firstFreeCellAmong: firstFreeCellAmong,
+    firstFreeCellFrom: firstFreeCellFrom,
+    placeDisplacing: placeDisplacing,
     canPlace: canPlace,
     firstFreeCell: firstFreeCell,
     relocate: relocate,

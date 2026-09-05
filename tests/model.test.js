@@ -415,23 +415,34 @@ test("a cell rect is the block it draws, gaps included", () => {
   assert.deepEqual(Model.cellRect(layout, 2560, 0, 0, 2, 1), { x: 2104, y: 40, width: 416, height: 200 })
 })
 
-test("hit testing is the inverse of drawing", () => {
+test("hit testing is the inverse of drawing, on both grids", () => {
   const layout = Model.normalizeLayout(Model.DEFAULT_LAYOUT)
   for (const side of Model.SIDES) {
-    const l = { ...layout, side }
-    for (let col = 0; col < l.columns; col++) {
+    for (let col = 0; col < layout.columns; col++) {
       for (let row = 0; row < 4; row++) {
-        const r = Model.cellRect(l, 2560, col, row, 1, 1)
-        // Anywhere inside the drawn cell must read back as that cell.
+        const r = Model.cellRect(layout, 2560, col, row, 1, 1, side)
+        // Anywhere inside the drawn cell must read back as that cell -- and as
+        // the grid it was drawn on, which is what makes a drag across the
+        // screen change a widget's side.
         for (const [dx, dy] of [[1, 1], [r.width / 2, r.height / 2], [r.width - 1, r.height - 1]]) {
-          assert.deepEqual(Model.cellFromPoint(l, 2560, r.x + dx, r.y + dy), { col, row },
-            `${side} (${col},${row}) at +${dx},+${dy}`)
+          assert.deepEqual(Model.cellFromPoint(layout, 2560, r.x + dx, r.y + dy),
+            { col, row, side }, `${side} (${col},${row}) at +${dx},+${dy}`)
         }
       }
     }
   }
 })
 
+test("the gap between the two grids belongs to neither", () => {
+  const layout = Model.normalizeLayout(Model.DEFAULT_LAYOUT)
+  const W = 2560
+  const leftEnd = Model.gridOriginX(layout, W, "left") + Model.gridWidth(layout)
+  const rightStart = Model.gridOriginX(layout, W, "right")
+  assert.ok(rightStart > leftEnd, "the default grid leaves a gap on a wide screen")
+  const middle = Math.round((leftEnd + rightStart) / 2)
+  assert.equal(Model.cellFromPoint(layout, W, middle, layout.marginY + 10), null,
+    "a drag that wanders into the middle does not snap to either side")
+})
 test("a point outside the grid is not a cell", () => {
   const layout = Model.normalizeLayout(Model.DEFAULT_LAYOUT)
   assert.equal(Model.cellFromPoint(layout, 2560, 0, 100), null, "left of a right-hand grid")
@@ -460,18 +471,38 @@ test("a widget that is off takes up no room", () => {
   assert.equal(Model.canPlace(config, "b", 0, 0, 1, 1), true)
 })
 
-test("free cells are found in reading order", () => {
+test("free cells are found in reading order, per side", () => {
   const config = Model.normalizeConfig({
-    layout: { columns: 2 },
+    layout: { side: "right", columns: 2 },
     widgets: [
       { id: "a", type: "clock", enabled: true, col: 0, row: 0 },
       { id: "b", type: "clock", enabled: true, col: 1, row: 0 }
     ]
   })
-  assert.deepEqual(Model.firstFreeCell(config, "c", 1, 1), { col: 0, row: 1 })
-  assert.deepEqual(Model.firstFreeCell(config, "c", 2, 1), { col: 0, row: 1 })
+  assert.deepEqual(Model.firstFreeCell(config, "c", 1, 1), { col: 0, row: 1, side: "right" })
+  assert.deepEqual(Model.firstFreeCell(config, "c", 2, 1), { col: 0, row: 1, side: "right" })
+  // The other grid is empty, so its very first cell is free -- the two are
+  // separate boards, not one board with a wider row.
+  assert.deepEqual(Model.firstFreeCell(config, "c", 1, 1, "left"),
+    { col: 0, row: 0, side: "left" })
 })
 
+test("a cell on one side does not collide with the same cell on the other", () => {
+  const config = Model.normalizeConfig({
+    layout: { side: "right", columns: 2 },
+    widgets: [
+      { id: "r", type: "clock", enabled: true, col: 0, row: 0, side: "right" },
+      { id: "l", type: "weather", enabled: true, col: 0, row: 0, side: "left" }
+    ]
+  })
+  // Same col, same row, different grid. Both keep the cell they asked for.
+  assert.deepEqual([Model.findInstance(config, "r").col, Model.findInstance(config, "r").row], [0, 0])
+  assert.deepEqual([Model.findInstance(config, "l").col, Model.findInstance(config, "l").row], [0, 0])
+  assert.equal(overlapCount(config), 0)
+  assert.equal(Model.rectsOverlap(
+    { col: 0, row: 0, cols: 1, rows: 1, side: "left" },
+    { col: 0, row: 0, cols: 1, rows: 1, side: "right" }), false)
+})
 test("two widgets given the same cell by hand are separated", () => {
   const out = Model.normalizeConfig({
     layout: { columns: 2 },
@@ -572,30 +603,101 @@ test("a two-column card cannot be dropped half off the grid", () => {
     widgets: [{ id: "wide", type: "clock", enabled: true, col: 0, row: 0, cols: 2, rows: 1 }]
   })
   const W = 2560
-  const secondCol = Model.cellRect(config.layout, W, 1, 1, 1, 1)
+  const secondCol = Model.cellRect(config.layout, W, 1, 1, 1, 1, "right")
   const t = Model.dropTarget(config, "wide", secondCol.x, secondCol.y, W)
-  assert.deepEqual(t.cell, { col: 1, row: 1 })
+  assert.deepEqual(t.cell, { col: 1, row: 1, side: "right" })
   assert.equal(t.valid, false, "starting in the last column it would overhang")
 })
-
 test("a card dragged off the grid has no target at all", () => {
   const config = Model.defaultConfig()
   const W = 2560
-  // Far to the left of a right-hand grid.
-  assert.equal(Model.dropTarget(config, "clock", 100, 100, W).cell, null)
-  // Above the top margin.
+  // Above the top margin, over either grid.
   assert.equal(Model.dropTarget(config, "clock", 2104, -300, W).cell, null)
+  // Off the right-hand end of the screen entirely.
+  assert.equal(Model.dropTarget(config, "clock", W + 500, 100, W).cell, null)
 })
-
 test("dropping works the same on the left as on the right", () => {
   let config = Model.setSide(Model.defaultConfig(), "left")
   const W = 2560
-  const r = Model.cellRect(config.layout, W, 1, 2, 1, 1)
+  const r = Model.cellRect(config.layout, W, 1, 2, 1, 1, "left")
   const t = Model.dropTarget(config, "clock", r.x, r.y, W)
-  assert.deepEqual(t.cell, { col: 1, row: 2 })
+  assert.deepEqual(t.cell, { col: 1, row: 2, side: "left" })
   assert.equal(t.valid, true)
 })
 
+test("dragging a widget across the screen moves it to the other grid", () => {
+  const config = Model.normalizeConfig({
+    layout: { side: "right", columns: 2 },
+    widgets: [{ id: "a", type: "clock", enabled: true, col: 0, row: 0 }]
+  })
+  const W = 2560
+  const overThere = Model.cellRect(config.layout, W, 0, 0, 1, 1, "left")
+  const t = Model.dropTarget(config, "a", overThere.x, overThere.y, W)
+  assert.equal(t.cell.side, "left")
+  assert.equal(t.valid, true, "the other grid is empty, so it fits")
+
+  const after = Model.placeWidget(config, "a", 0, 0, "left")
+  const moved = Model.findInstance(after, "a")
+  assert.equal(moved.side, "left")
+  assert.deepEqual([moved.col, moved.row], [0, 0])
+  // ...and the drop matches the preview it was shown as.
+  assert.deepEqual(after.widgets, t.preview.widgets)
+})
+
+test("a widget dropped on one across the screen trades places with it", () => {
+  const config = Model.normalizeConfig({
+    layout: { side: "right", columns: 2 },
+    widgets: [
+      { id: "a", type: "clock", enabled: true, col: 0, row: 0, side: "right" },
+      { id: "b", type: "weather", enabled: true, col: 1, row: 3, side: "left" }
+    ]
+  })
+  const after = Model.moveWidget(config, "a", 1, 3, "left")
+  const a = Model.findInstance(after, "a")
+  const b = Model.findInstance(after, "b")
+  assert.deepEqual([a.side, a.col, a.row], ["left", 1, 3])
+  assert.deepEqual([b.side, b.col, b.row], ["right", 0, 0],
+    "the one it landed on took the cell, and the side, that a left")
+  assert.equal(overlapCount(after), 0)
+})
+
+test("a widget can be sent to a side without naming a cell", () => {
+  let config = Model.normalizeConfig({
+    layout: { side: "right", columns: 2 },
+    widgets: [
+      { id: "a", type: "clock", enabled: true, col: 1, row: 2 },
+      { id: "b", type: "weather", enabled: true, col: 1, row: 2, side: "left" }
+    ]
+  })
+  // Its own cell is taken over there, so it takes the first free one instead:
+  // the side is what was asked for, the cell was incidental.
+  config = Model.setWidgetSide(config, "a", "left")
+  const a = Model.findInstance(config, "a")
+  assert.equal(a.side, "left")
+  assert.notDeepEqual([a.col, a.row], [1, 2])
+  assert.equal(overlapCount(config), 0)
+
+  // A side that is not a side, and a widget that is not a widget, change nothing.
+  const before = JSON.stringify(config)
+  assert.equal(JSON.stringify(Model.setWidgetSide(config, "a", "up")), before)
+  assert.equal(JSON.stringify(Model.setWidgetSide(config, "ghost", "left")), before)
+})
+
+test("which sides are in use is what the editor draws grids for", () => {
+  const oneSide = Model.normalizeConfig({
+    layout: { side: "right", columns: 2 },
+    widgets: [{ id: "a", type: "clock", enabled: true, col: 0, row: 0 }]
+  })
+  assert.deepEqual(Model.sidesInUse(oneSide), { left: false, right: true })
+
+  const both = Model.setWidgetSide(
+    Model.addWidget(oneSide, "weather"), "weather", "left")
+  assert.deepEqual(Model.sidesInUse(both), { left: true, right: true })
+
+  // Something switched off is not on a side; the tray is not a grid.
+  const off = Model.setEnabled(oneSide, "a", false)
+  assert.deepEqual(Model.sidesInUse(off), { left: false, right: false })
+})
 test("what dropTarget calls legal is what placeWidget accepts", () => {
   const config = Model.normalizeConfig({
     layout: { side: "right", columns: 2 },
@@ -822,19 +924,20 @@ test("widening the grid grows it from the side it is anchored to", () => {
     Model.gridOriginX({ ...five, side: "left" }, 2560))
 })
 
-test("only column counts that fit the screen are offered", () => {
+test("only column counts that fit both grids are offered", () => {
   const layout = Model.normalizeLayout(Model.DEFAULT_LAYOUT)  // 200px cells, 16 gap, 40 margin
-  // Six columns need 40 + 6*200 + 5*16 = 1320.
-  assert.equal(Model.maxColumnsFor(layout, 1320), 6)
-  assert.equal(Model.maxColumnsFor(layout, 1319), 5)
-  // Three need 40 + 600 + 32 = 672.
-  assert.equal(Model.maxColumnsFor(layout, 672), 3)
-  assert.equal(Model.maxColumnsFor(layout, 671), 2)
+  // One grid of six columns needs 40 + 6*200 + 5*16 = 1320, and there are two
+  // of them: the other side is always one drag away, so a count that only
+  // works until you use it is a trap rather than a setting.
+  assert.equal(Model.maxColumnsFor(layout, 2640), 6)
+  assert.equal(Model.maxColumnsFor(layout, 2639), 5)
+  // Three a side need 2 * (40 + 600 + 32) = 1344.
+  assert.equal(Model.maxColumnsFor(layout, 1344), 3)
+  assert.equal(Model.maxColumnsFor(layout, 1343), 2)
   // Never zero, however cramped: one column is always offered.
   assert.equal(Model.maxColumnsFor(layout, 10), 1)
-  assert.deepEqual(Model.columnOptions(layout, 672), [1, 2, 3])
+  assert.deepEqual(Model.columnOptions(layout, 1344), [1, 2, 3])
 })
-
 test("a grid already wider than the screen can still be narrowed", () => {
   // Configured by hand at 5 columns on a display only wide enough for 2: the
   // current count has to stay on offer or there is no way back from it.
@@ -861,19 +964,72 @@ test("narrowing the grid shrinks and repacks what no longer fits", () => {
   assert.equal(overlapCount(config), 0)
 })
 
-test("switching sides moves the grid and nothing else", () => {
+test("switching sides puts everything on that side", () => {
   const before = Model.normalizeConfig({
     layout: { side: "right", columns: 2 },
-    widgets: [{ id: "a", type: "clock", enabled: true, col: 1, row: 2 }]
+    widgets: [
+      { id: "a", type: "clock", enabled: true, col: 1, row: 2 },
+      { id: "b", type: "weather", enabled: true, col: 0, row: 0, side: "left" }
+    ]
   })
   const after = Model.setSide(before, "left")
   assert.equal(after.layout.side, "left")
-  assert.deepEqual(after.widgets, before.widgets, "cells are untouched")
-  assert.notEqual(Model.gridOriginX(after.layout, 2560), Model.gridOriginX(before.layout, 2560))
+  for (const w of after.widgets) assert.equal(w.side, "left")
+  // Cells are kept where they can be. `a` asked for (1,2) and nothing on the
+  // left wanted it, so it keeps it.
+  const a = Model.findInstance(after, "a")
+  assert.deepEqual([a.col, a.row], [1, 2])
+  assert.equal(overlapCount(after), 0)
+
   // A side that is not a side is ignored rather than accepted.
   assert.equal(Model.setSide(before, "up").layout.side, "right")
 })
 
+test("a config written before sides existed draws exactly where it always did", () => {
+  // No widget names a side, so every one of them belongs to the layout's.
+  const old = Model.normalizeConfig({
+    layout: { side: "right", columns: 2 },
+    widgets: [{ id: "a", type: "clock", enabled: true, col: 1, row: 2 }]
+  })
+  const a = Model.findInstance(old, "a")
+  // Resolved once, at the door, rather than left for everything downstream to
+  // work out -- `rectsOverlap` gets bare blocks with no layout in reach, and a
+  // guess there is two widgets drawn on top of each other.
+  assert.equal(a.side, "right", "no opinion resolves to the layout's own side")
+  assert.equal(Model.sideOf(a, old.layout), "right")
+  assert.deepEqual(Model.widgetRect(old.layout, a, 2560),
+    Model.cellRect(old.layout, 2560, 1, 2, 1, 1, "right"))
+
+  // A side that is not one of the two is a typo, and reads as no opinion --
+  // which puts the widget with the others rather than off the screen.
+  const typo = Model.normalizeConfig({
+    layout: { side: "right", columns: 2 },
+    widgets: [{ id: "a", type: "clock", enabled: true, col: 0, row: 0, side: "middle" }]
+  })
+  assert.equal(Model.findInstance(typo, "a").side, "right")
+})
+
+test("a widget added beside another cannot land on top of it", () => {
+  // The bug this is here for: an unset side read as one grid while a freshly
+  // placed block read as the other, so "is that cell free?" answered yes for a
+  // cell that was plainly occupied.
+  let config = Model.normalizeConfig({
+    layout: { side: "left", columns: 2 },
+    widgets: [
+      { id: "a", type: "clock", enabled: true, col: 0, row: 0 },
+      { id: "b", type: "weather", enabled: true, col: 1, row: 0 }
+    ]
+  })
+  for (const type of ["repo-pulse", "github", "todos", "calendar"]) {
+    config = Model.addWidget(config, type)
+    assert.equal(overlapCount(config), 0, `adding ${type} overlapped something`)
+  }
+  config = Model.duplicateWidget(config, "repo-pulse")
+  assert.equal(overlapCount(config), 0, "a duplicate overlapped something")
+  for (const w of config.widgets) {
+    assert.ok(Model.SIDES.indexOf(w.side) !== -1, `${w.id} has no resolved side`)
+  }
+})
 test("a widget switched back on finds a cell when its old one was taken", () => {
   let config = Model.normalizeConfig({
     layout: { columns: 2 },

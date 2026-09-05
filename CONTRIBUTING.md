@@ -223,6 +223,7 @@ this shape; read it alongside.
 | `settings` | Your whole tunable surface, as a schema. See [Settings](#settings) |
 | `network` | The host you talk to, if you talk to one. Omit it if you do not |
 | `interactive` | `true` if the widget needs clicks. Omit it unless it does |
+| `multiple` | `true` if a second one of your widget could say something different. Omit it if it reads a single source |
 
 ## What your widget is handed
 
@@ -231,7 +232,7 @@ Three properties are injected. Declare them; leave them `null`-safe.
 | Property | |
 |---|---|
 | `service` | The plugin service. `service.zoneOffsets` is the resolved timezone table; treat the rest as read-only |
-| `instance` | Your configured instance: `id`, `cols`, `rows`, `opacity`, `radius`, and `settings` |
+| `instance` | Your configured instance: `id`, `side`, `cols`, `rows`, `opacity`, `radius`, and `settings` |
 | `card` | The `WidgetCard` you are drawn on. Read `card.radius` if you need to follow its corners |
 
 Your widget is inside the card, filling it. **Do not draw your own background

@@ -152,11 +152,55 @@ A widget you switch off is off, not gone: its settings stay in the config
 file, and switching it back on brings them back — in its old cell if it is
 still free, and in the next free one if it is not.
 
+### More than one of the same widget
+
+Three timezones, two repositories, a work list and a personal one. Open the
+layout editor, click a widget, and press **Duplicate** — you get a copy with
+the same settings and the same shape, already selected so you can change the
+one field that differs. **Remove** deletes a spare and its settings.
+
+The button only appears for types where a second one can say something
+different. The weather reads one location and the music card follows one
+player, so duplicating either would be the same card twice; those two show no
+Duplicate button, and there is nothing to configure to change that.
+
+**The last of a type cannot be deleted, only switched off.** Every type in the
+catalogue has a row in the bar popup, and that row *is* an instance — deleting
+the last one would only mean the next config read put a fresh one back,
+switched off, which looks exactly like the delete failing.
+
+Copies are named `clock-2`, `clock-3`, and so on, and the editor tells them
+apart by the **Label** (or **Title**) you give them, falling back to the id.
+The id is yours: rename it in the config file and it changes everywhere,
+including on the command line.
+
 ## Arranging them
 
 **Arrange…** in the same popup opens the layout editor: the desktop dims, the
 grid appears under your widgets, and you can drag them around. Escape or
 **Done** closes it.
+
+### Two sides
+
+Widgets can sit on the **left edge, the right edge, or both at once**. The
+editor draws both grids whether or not you are using them — the unused one
+fainter, as an invitation — and dragging a card from one to the other is all
+it takes to move it across. Nothing to switch on first.
+
+Each widget remembers its own side, so the two grids are two independent
+boards: the same cell on the left and on the right are different places, and a
+widget on one can never collide with a widget on the other.
+
+The **Side** buttons in the toolbar put *everything* on one side, which is what
+they have always done and what they look like they do. `layout.side` is also
+where a new widget goes when it has no opinion of its own.
+
+> [!NOTE]
+> Both grids have to fit the screen, so the **Columns** ceiling is now what
+> fits *twice*, not once — five columns a side on a 2560px display rather than
+> six. The other side is always one drag away, and a column count that only
+> works until you use it is a trap rather than a setting. A config that already
+> holds a wider grid keeps it and can still be narrowed.
 
 ### The grid
 
@@ -192,9 +236,14 @@ is repacked in reading order.
 
 ### Dragging
 
-- **Move one** — drag it to another cell. The cell you are over lights up in
-  the accent color when the drop is legal and in the urgent color when it is
-  not, so a refused drop is refused before it happens.
+- **Move one** — drag it to another cell, on either side of the screen. The
+  cell you are over lights up in the accent color when the drop is legal and
+  in the urgent color when it is not, so a refused drop is refused before it
+  happens.
+- **Send one across** — drag it to the other side's grid. The grid you are
+  over brightens as you cross, so you can see which board you are aiming at.
+- **Drop it on another widget** — the other one moves out of the way. See
+  below.
 - **Take one off** — drag it down into the tray at the bottom.
 - **Put one back** — drag it out of the tray onto a cell.
 - **Resize one** — click it, then the size button (`1×1`) in the toolbar. It
@@ -606,7 +655,7 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 
 | Key | Meaning |
 |---|---|
-| `side` | `left` or `right`: which edge the grid hugs |
+| `side` | `left` or `right`: the side a widget goes to when it has not named one of its own |
 | `columns` | How many cells wide the grid is, 1–6 |
 | `cellSize` | The side of one cell in px |
 | `gap` | Space between cells |

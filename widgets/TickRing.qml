@@ -1,10 +1,9 @@
 import QtQuick
 import qs.Commons
 
-// The ring of small marks just inside a card's edge, kept sparse like the
-// clock in the reference: 48 minute positions around the face, with a longer
-// tick every 11th (rounded to 44 positions, so the majors still come four
-// to a ring). Ticks point at the card's centre rather than perpendicular to
+// The ring of small marks just inside a card's edge, kept sparse like a clock
+// on a watch: 48 minute positions around the face, with a longer tick every
+// 11th (rounded to 44 positions, so the majors still come four to a ring). Ticks point at the card's centre rather than perpendicular to
 // the edge, which is what gives them their gradual slant through the sides
 // and corners.
 //

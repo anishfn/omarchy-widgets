@@ -362,23 +362,19 @@ function scaledGap(layout) {
   return layout.gap * layout.scale
 }
 
-// Pixel size of an `n`-block run at a given scale, gaps included. Everything
-// else measures the global grid at `layout.scale`:
-function blockRunAt(layout, n, scale) {
-  return n * layout.cellSize * scale + (n - 1) * layout.gap * scale
+// Pixel size of an `n`-block run at the layout's own scale, gaps included.
+// Widths and heights both read this, so a scale change takes effect
+// everywhere at once.
+function blockRunAt(layout, n) {
+  return n * layout.cellSize * layout.scale + (n - 1) * layout.gap * layout.scale
 }
 
-// Pixel size of a `cols` x `rows` block, gaps included.
 function blockWidth(layout, cols) {
-  var n = Math.max(1, Math.round(cols))
-  return blockRunAt(layout, n, layout.scale)
+  return blockRunAt(layout, Math.max(1, Math.round(cols)))
 }
 
-// Pixel size of a `rows`-row block, gaps included, at the layout's scale. The
-// editor's per-cell outline and the grid's height both read this.
 function blockHeight(layout, rows) {
-  var n = Math.max(1, Math.round(rows))
-  return blockRunAt(layout, n, layout.scale)
+  return blockRunAt(layout, Math.max(1, Math.round(rows)))
 }
 
 function gridWidth(layout) {
@@ -414,9 +410,8 @@ function columnOptions(layout, screenWidth) {
   return out
 }
 
-// Screen rectangle of a cell block at the grid's own scale. The editor's cell
-// outline, the drop probe and the grid's overall height all draw the *grid*,
-// so they use the layout scale on every cell and never see an override.
+// Screen rectangle of a cell block at the layout's scale. The editor's cell
+// outline, the drop probe and the grid's overall height all draw the *grid*.
 function cellRect(layout, screenWidth, col, row, cols, rows) {
   var step = scaledCell(layout) + scaledGap(layout)
   return {
@@ -906,14 +901,14 @@ function setLayoutOpacity(config, opacity) {
   if (!isFinite(n)) return normalizeConfig(config)
   var next = normalizeConfig(config)
   next.layout.opacity = Math.round(clampNumber(n, 0, 1, DEFAULT_LAYOUT.opacity) * 100) / 100
-  dropPerWidget(next, "opacity")
+  dropOpacityOverrides(next)
   return next
 }
 
-// With the global changed, a card that had its own value keeps it no longer:
+// With the global opacity changed, a card that had its own keeps it no longer:
 // the point of touching the global is the whole grid moving together.
-function dropPerWidget(config, key) {
-  for (var i = 0; i < config.widgets.length; i++) config.widgets[i][key] = null
+function dropOpacityOverrides(config) {
+  for (var i = 0; i < config.widgets.length; i++) config.widgets[i].opacity = null
 }
 
 // Back to what the plugin ships with: the grid's default scale and opacity,
@@ -923,7 +918,7 @@ function resetAppearance(config) {
   var next = normalizeConfig(config)
   next.layout.scale = DEFAULT_LAYOUT.scale
   next.layout.opacity = DEFAULT_LAYOUT.opacity
-  dropPerWidget(next, "opacity")
+  dropOpacityOverrides(next)
   return next
 }
 
@@ -1650,7 +1645,6 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeLayout: normalizeLayout,
     scaledCell: scaledCell,
     scaledGap: scaledGap,
-    blockRunAt: blockRunAt,
     blockWidth: blockWidth,
     blockHeight: blockHeight,
     gridWidth: gridWidth,

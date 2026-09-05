@@ -586,9 +586,9 @@ Item {
             // What the selected widget can be told. Every control here is
             // built from the type's own settings schema, so a widget added
             // later gets this panel by describing itself — nothing in the
-            // editor knows what a clock is. Opacity and scale are ahead of all
-            // of them because they are true of every card, not just the ones
-            // with settings.
+            // editor knows what a clock is. Opacity is ahead of all of them
+            // because it is true of every card, not just the ones with
+            // settings.
             Row {
               anchors.horizontalCenter: parent.horizontalCenter
               spacing: Style.space(12)

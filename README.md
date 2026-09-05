@@ -154,9 +154,17 @@ set of places it can land.
 | **Side** | `left` or `right`. The buttons in the editor, or `side` in the config |
 | **Columns** | How many cells wide the grid is, 1–6. Two by default. The buttons in the editor, or `columns` in the config |
 | **Scale** | Grows or shrinks every card at once, 0–200% in the editor's field, or `scale` in the config. Global only: every card is exactly as big as its cell |
-| **Opacity** | How solid every card is over the wallpaper, 0–100% in the editor's field, or `opacity` in the config. Same rules as **Scale**: the global re-applies to all cards, a single card can drift afterwards |
+| **Opacity** | How solid every card is over the wallpaper, 0–100% in the editor's field, or `opacity` in the config. The global re-applies to every card; any card can break away with its own (see below) |
 | **Cell** | 200px square by default. Widening the grid adds room, it does not shrink what is in it |
 | **Spans** | A widget takes one or more columns. The clock is square or double-width |
+
+Individual cards can drift from the grid's opacity. Select a widget and its
+own **Opacity** field appears — the value it shows is the card's own when one
+is set, the grid's otherwise — and **↺** sends the card back to following the
+grid. In the config the same is a per-widget `opacity` (see [Each
+widget](#each-widget)): a value is that card's own, omitting it means "follow
+the layout's". Nothing can do this to **Scale**, which is grid-wide and stays
+that way.
 
 The grid starts below the bar, not behind it: the surface asks the compositor
 for the area the bar has already claimed, so the top row lines up under it on
@@ -430,7 +438,7 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 | `row` | Which row it starts in, counting from the top |
 | `cols` | How many columns it spans. Must be a size the type offers |
 | `rows` | How many rows it spans. Must be a size the type offers |
-| `opacity` | This card's own solidency, `0`–`1`. Omit it (or the **Opacity ↺** button) to follow the layout's `opacity`; the next grid-wide change re-applies over it |
+| `opacity` | This card's own solidity, `0`–`1`. Omit it (or the **Opacity ↺** button) to follow the layout's `opacity`; the next grid-wide change re-applies over it |
 | `radius` | Corner rounding in px, or `-1` to follow Hyprland's `decoration:rounding` |
 
 `radius` defaults to `20` rather than to the theme, because a desktop card is

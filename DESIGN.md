@@ -180,6 +180,12 @@ you are working is a distraction you cannot turn off without deleting it.
 - The only motion worth having is in the editor, where you are looking at it
   on purpose.
 
+The editor is where that last line is spent. Dropping a widget onto an
+occupied cell moves the occupant, and the occupant *slides* — 130ms, and only
+while the editor is open. A card that teleported out from under the one you
+were holding would read as a glitch; the same card sliding down reads as the
+grid making room, which is the one thing the gesture has to communicate.
+
 ## What a widget is not
 
 - **Not interactive, unless it has to be.** The desktop surface has an empty

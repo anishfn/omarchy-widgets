@@ -868,44 +868,120 @@ function toggleEnabled(config, id) {
 // Move a widget to a cell. A drop that does not fit is refused rather than
 // nudged: the editor shows whether the cell under the pointer is legal, so a
 // refusal is something the user already saw coming.
-function moveWidget(config, id, col, row) {
+// Drop a widget on a cell, moving whatever was there out of the way.
+//
+// This is the whole of what a drop means, and it is here rather than in the
+// editor because the editor needs to answer it twice: once every time the
+// pointer moves, to show what *would* happen, and once on release to make it
+// happen. Two implementations of that would be two chances to disagree, and
+// the disagreement would be a card landing somewhere the preview did not say.
+//
+// Occupied is not the same as illegal. A cell with something in it is the
+// most natural place to aim for -- it is where you can see a widget already
+// fits -- so the thing already there moves rather than the drop being
+// refused. Two rules, in this order:
+//
+//   - **Swap**, when exactly one widget is in the way and it has the same
+//     footprint. It takes the cell the dragged one just left, which is the
+//     shortest distance anything has to travel and the only outcome that
+//     leaves the grid as full as it found it.
+//   - **Push down**, otherwise. Everything in the way is relocated to the
+//     first free cell at or below the drop, in reading order, so the widgets
+//     you displaced end up under the one you moved rather than scattered
+//     into whatever gaps existed above it.
+//
+// Returns null when the drop cannot happen at all: off the grid, wider than
+// the grid, or a grid so full there is nowhere for a displaced widget to go.
+// Null means "the highlight should say no"; anything else is the new config.
+function placeDisplacing(config, id, col, row, side) {
   var next = normalizeConfig(config)
   var target = findInstance(next, id)
-  if (!target) return next
+  if (!target) return null
+
   var c = Math.round(Number(col))
   var r = Math.round(Number(row))
-  if (!isFinite(c) || !isFinite(r)) return next
-  if (!canPlace(next, id, c, r, target.cols, target.rows)) return next
+  if (!isFinite(c) || !isFinite(r)) return null
+  if (c < 0 || r < 0) return null
+  if (c + target.cols > next.layout.columns) return null
+  if (r + target.rows > MAX_ROWS) return null
+
+  // Which grid it is being dropped on. Omitted means "the one it is already
+  // on", so every caller that predates two grids still means what it said.
+  var toSide = SIDES.indexOf(String(side)) === -1
+    ? sideOf(target, next.layout) : String(side)
+
+  // Where it came from, before anything moves. A widget coming in from the
+  // tray has no cell to give back, which is what rules the swap out for it.
+  var wasEnabled = target.enabled === true
+  var fromCol = target.col
+  var fromRow = target.row
+  var fromSide = sideOf(target, next.layout)
+
+  target.enabled = true
   target.col = c
   target.row = r
+  target.side = toSide
+
+  var block = { col: c, row: r, cols: target.cols, rows: target.rows, side: toSide }
+  var others = occupants(next, id)
+  var displaced = []
+  var settled = [target]
+  var i
+  for (i = 0; i < others.length; i++) {
+    if (rectsOverlap(block, others[i])) displaced.push(others[i])
+    else settled.push(others[i])
+  }
+
+  if (displaced.length === 0) return next
+
+  // The swap. Only for a widget that had a cell to swap into, and only when
+  // the footprints match -- a 2x1 cannot take a 1x1's cell, and pretending
+  // otherwise would be an overlap dressed up as a swap.
+  if (displaced.length === 1 && wasEnabled
+    && displaced[0].cols === target.cols && displaced[0].rows === target.rows) {
+    displaced[0].col = fromCol
+    displaced[0].row = fromRow
+    // Across the screen as well as across the grid: dropping a left-hand card
+    // onto a right-hand one trades their places, which is what "swap" means
+    // when the two are not on the same board.
+    displaced[0].side = fromSide
+    return next
+  }
+
+  // The push. Nearest first, so the widget closest to the top of the drop is
+  // the one that gets the cell closest under it.
+  displaced.sort(function (a, b) { return a.row - b.row || a.col - b.col })
+  for (i = 0; i < displaced.length; i++) {
+    var cell = firstFreeCellFrom(next.layout,
+      displaced[i].cols, displaced[i].rows, settled, r, toSide)
+    // Nowhere at all to put it. Refuse the whole drop rather than leave a
+    // widget stacked on another one: a half-applied move is worse than none.
+    if (!cell) return null
+    displaced[i].col = cell.col
+    displaced[i].row = cell.row
+    settled.push(displaced[i])
+  }
   return next
+}
+
+// Move a widget already on the grid. A cell with something in it is not a
+// refusal any more -- the occupant moves. See placeDisplacing.
+function moveWidget(config, id, col, row, side) {
+  var target = findInstance(config, id)
+  // Still a no-op for something in the tray: "move" is about rearranging what
+  // is on the desktop, and `place` is the one that puts a widget there.
+  if (!target || !target.enabled) return normalizeConfig(config)
+  var next = placeDisplacing(config, id, col, row, side)
+  return next === null ? normalizeConfig(config) : next
 }
 
 // Drop a widget onto a cell, switching it on if it was in the tray. Enabling
 // and moving are one step on purpose: a widget that arrived on the grid but
 // landed nowhere legal, or moved but stayed off, are both states the editor
 // would then have to explain.
-function placeWidget(config, id, col, row) {
-  var next = normalizeConfig(config)
-  var target = findInstance(next, id)
-  if (!target) return next
-  var c = Math.round(Number(col))
-  var r = Math.round(Number(row))
-  if (!isFinite(c) || !isFinite(r)) return next
-
-  // Checked as though it were already on, because that is what is being
-  // asked for; a widget in the tray takes up no room and would otherwise
-  // never collide with anything.
-  var wasEnabled = target.enabled
-  target.enabled = true
-  var block = { col: c, row: r, cols: target.cols, rows: target.rows }
-  if (!fitsAmong(next.layout, block, occupants(next, id))) {
-    target.enabled = wasEnabled
-    return next
-  }
-  target.col = c
-  target.row = r
-  return next
+function placeWidget(config, id, col, row, side) {
+  var next = placeDisplacing(config, id, col, row, side)
+  return next === null ? normalizeConfig(config) : next
 }
 
 // Change one setting on one widget. The value goes through exactly the same

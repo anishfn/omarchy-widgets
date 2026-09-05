@@ -131,6 +131,23 @@ Item {
         property bool dropValid: false
         property bool overTray: false
 
+        // The grid as it *would* be if the pointer let go now, worked out by
+        // the same function that will perform the drop. Everything the drag
+        // shows is read off this, so the preview and the result cannot come
+        // apart -- there is only one answer, asked once per pointer move.
+        property var dropPreview: null
+
+        // Where a widget sits while a drag is in progress. The one in hand
+        // keeps its old cell and fades, so the grid still shows where it came
+        // from; everything else slides to wherever the drop would put it.
+        function previewInstance(instance) {
+          if (!instance) return instance
+          if (!win.dragging || !win.dropPreview) return instance
+          if (instance.id === win.dragId) return instance
+          var moved = Model.findInstance(win.dropPreview, instance.id)
+          return moved ? moved : instance
+        }
+
         function startDrag(instance, localGrabX, localGrabY, px, py) {
           if (!instance) return
           win.dragId = String(instance.id)
@@ -155,6 +172,7 @@ Item {
           if (win.overTray) {
             win.hoverCell = null
             win.dropValid = false
+            win.dropPreview = null
             return
           }
 
@@ -163,9 +181,10 @@ Item {
           // disagree — they are one answer, asked once.
           var target = root.config
             ? Model.dropTarget(root.config, win.dragId, win.ghostX, win.ghostY, win.width)
-            : { cell: null, valid: false }
+            : { cell: null, valid: false, preview: null }
           win.hoverCell = target.cell
           win.dropValid = target.valid
+          win.dropPreview = target.valid ? target.preview : null
         }
 
         function dragMove(px, py) {
@@ -191,6 +210,7 @@ Item {
           win.dragId = ""
           win.hoverCell = null
           win.dropValid = false
+          win.dropPreview = null
           win.overTray = false
         }
 
@@ -284,7 +304,13 @@ Item {
             id: slot
             required property var modelData
 
-            readonly property var rect: Model.widgetRect(root.layout, modelData, win.width)
+            // Where the drop would put it, which is its own cell whenever
+            // nothing is being dragged. The Repeater's model stays the real
+            // config throughout, so only x and y re-evaluate as the pointer
+            // moves -- rebuilding the delegates would tear every card down
+            // and build it again on every mouse move.
+            readonly property var rect: Model.widgetRect(root.layout,
+              win.previewInstance(modelData), win.width)
             readonly property bool isDragged: win.dragging && win.dragId === modelData.id
             readonly property bool isSelected: root.selectedId === modelData.id
 
@@ -295,6 +321,14 @@ Item {
             // Left in place but faded while it is in hand, so the grid keeps
             // showing where it came from.
             opacity: isDragged ? 0.25 : 1
+
+            // The one place motion earns its keep. DESIGN.md rules animation
+            // out on the desktop and allows it here, and this is why: a card
+            // that teleports out from under the one you are holding reads as
+            // a glitch, and the same card sliding down reads as the grid
+            // making room. Short enough to be over before you have let go.
+            Behavior on x { enabled: !slot.isDragged; NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+            Behavior on y { enabled: !slot.isDragged; NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
 
             WidgetInstance {
               anchors.fill: parent

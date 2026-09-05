@@ -207,6 +207,31 @@ What decides a drop is the corner of the card you are holding, not the point
 of the pointer — the same rule the highlight draws, so the two can never
 disagree.
 
+#### Dropping onto an occupied cell
+
+An occupied cell is the most natural place to aim for — it is where you can
+*see* a widget already fits — so the thing already there moves rather than the
+drop being refused. Two rules, in this order:
+
+- **Same footprint: they swap.** Drop the clock on the weather and the weather
+  takes the clock's cell. Shortest distance anything has to travel, and the
+  grid stays as full as it was.
+- **Anything else: it goes below.** Drop a two-column calendar onto a row
+  holding music and a repo card, and both of them move to the first free row
+  at or below the drop. Not up into whatever gap happened to exist above it —
+  below is the direction the gesture means.
+
+The grid rearranges **while you are still holding the card**, so you see what
+the drop will do before you commit to it, and the displaced widgets slide
+rather than teleport. What you are shown is not an approximation of the drop:
+it *is* the drop, worked out early by the same code that will apply it on
+release. Escape still cancels the whole thing.
+
+A drop is only ever refused for running off the grid — or, in the one corner
+case, when a widget coming in from the tray lands on a grid so full that the
+occupant has nowhere to go. Then nothing moves at all, because half a
+rearrangement is worse than none.
+
 ## The clock
 
 The time, large, with two smaller lines:

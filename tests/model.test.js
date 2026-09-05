@@ -499,30 +499,32 @@ test("a card dropped over a cell lands in that cell", () => {
   })
   const W = 2560
   // Held exactly over each cell in turn, the card reads back as that cell.
-  for (let col = 0; col < 2; col++) {
-    for (let row = 0; row < 3; row++) {
-      const r = Model.cellRect(config.layout, W, col, row, 1, 1)
-      const t = Model.dropTarget(config, "a", r.x, r.y, W)
-      assert.deepEqual(t.cell, { col, row }, `held on (${col},${row})`)
+  for (const side of Model.SIDES) {
+    for (let col = 0; col < 2; col++) {
+      for (let row = 0; row < 3; row++) {
+        const r = Model.cellRect(config.layout, W, col, row, 1, 1, side)
+        const t = Model.dropTarget(config, "a", r.x, r.y, W)
+        assert.deepEqual(t.cell, { col, row, side }, `held on ${side} (${col},${row})`)
+      }
     }
   }
 })
-
 test("a card is judged by its own corner, not by how far it has drifted", () => {
   const config = Model.normalizeConfig({
     layout: { side: "right", columns: 2 },
     widgets: [{ id: "a", type: "clock", enabled: true, col: 0, row: 0 }]
   })
   const W = 2560
-  const r = Model.cellRect(config.layout, W, 1, 1, 1, 1)
-  // Just short of the next cell in both directions: still this one.
+  const r = Model.cellRect(config.layout, W, 1, 1, 1, 1, "right")
   const step = config.layout.cellSize + config.layout.gap
-  assert.deepEqual(Model.dropTarget(config, "a", r.x + step / 2 - 1, r.y, W).cell, { col: 1, row: 1 })
+  // Just short of the next cell in both directions: still this one.
+  assert.deepEqual(Model.dropTarget(config, "a", r.x + step / 2 - 1, r.y, W).cell,
+    { col: 1, row: 1, side: "right" })
   // Half a step further and it has moved on.
-  assert.deepEqual(Model.dropTarget(config, "a", r.x, r.y + step, W).cell, { col: 1, row: 2 })
+  assert.deepEqual(Model.dropTarget(config, "a", r.x, r.y + step, W).cell,
+    { col: 1, row: 2, side: "right" })
 })
-
-test("a drop onto an occupied cell is offered and refused, not silently moved", () => {
+test("a drop onto an occupied cell is offered, and carries what it would do", () => {
   const config = Model.normalizeConfig({
     layout: { side: "right", columns: 2 },
     widgets: [
@@ -533,8 +535,35 @@ test("a drop onto an occupied cell is offered and refused, not silently moved", 
   const W = 2560
   const onB = Model.cellRect(config.layout, W, 1, 0, 1, 1)
   const t = Model.dropTarget(config, "a", onB.x, onB.y, W)
-  assert.deepEqual(t.cell, { col: 1, row: 0 }, "the cell under the card is still reported")
-  assert.equal(t.valid, false, "and it is reported as illegal, so the editor can say so")
+  assert.deepEqual(t.cell, { col: 1, row: 0, side: "right" },
+    "the cell under the card is reported, and which grid it is on")
+  assert.equal(t.valid, true, "occupied is not illegal: the occupant moves")
+
+  // The preview the editor draws is the drop itself, worked out early. If
+  // these two could differ, a card would land somewhere the highlight did
+  // not say it would.
+  assert.deepEqual(
+    [Model.findInstance(t.preview, "a").col, Model.findInstance(t.preview, "b").col],
+    [1, 0], "a takes b's cell and b takes a's")
+
+  const committed = Model.placeWidget(config, "a", 1, 0)
+  assert.deepEqual(committed.widgets, t.preview.widgets,
+    "and committing the drop produces exactly the previewed config")
+})
+
+test("a drop off the grid is still refused, and says so", () => {
+  const config = Model.normalizeConfig({
+    layout: { columns: 2 },
+    widgets: [{ id: "wide", type: "github", enabled: true, col: 0, row: 0, cols: 2, rows: 1 }]
+  })
+  // A two-column widget cannot start in the last column of a two-column grid.
+  assert.equal(Model.placeDisplacing(config, "wide", 1, 0), null)
+  assert.equal(Model.placeDisplacing(config, "wide", 0, -1), null)
+  assert.equal(Model.placeDisplacing(config, "wide", 0, Model.MAX_ROWS), null)
+  assert.equal(Model.placeDisplacing(config, "ghost", 0, 0), null)
+  // ...and a refused drop leaves the config exactly as it was.
+  const before = JSON.stringify(config)
+  assert.equal(JSON.stringify(Model.moveWidget(config, "wide", 1, 0)), before)
 })
 
 test("a two-column card cannot be dropped half off the grid", () => {
@@ -611,7 +640,7 @@ test("widgets are named by type until there are two of a type", () => {
   assert.equal(Model.displayName(two, null), "")
 })
 
-test("moving is refused when it does not fit, and applied when it does", () => {
+test("moving onto an occupied cell swaps with it", () => {
   let config = Model.normalizeConfig({
     layout: { columns: 2 },
     widgets: [
@@ -620,16 +649,100 @@ test("moving is refused when it does not fit, and applied when it does", () => {
     ]
   })
   config = Model.moveWidget(config, "a", 1, 0)
-  assert.deepEqual([Model.findInstance(config, "a").col, Model.findInstance(config, "a").row], [0, 0],
-    "onto an occupied cell: refused")
+  const a = Model.findInstance(config, "a")
+  const b = Model.findInstance(config, "b")
+  assert.deepEqual([a.col, a.row], [1, 0], "a went where it was aimed")
+  assert.deepEqual([b.col, b.row], [0, 0], "b took the cell a left")
+  assert.equal(overlapCount(config), 0)
 
   config = Model.moveWidget(config, "a", 0, 3)
   assert.deepEqual([Model.findInstance(config, "a").col, Model.findInstance(config, "a").row], [0, 3],
-    "onto a free cell: applied")
+    "onto a free cell: applied, and nothing else moves")
+  assert.deepEqual([Model.findInstance(config, "b").col, Model.findInstance(config, "b").row], [0, 0])
 
   config = Model.moveWidget(config, "a", 0, "nonsense")
   assert.equal(Model.findInstance(config, "a").row, 3, "junk coordinates change nothing")
   assert.equal(overlapCount(config), 0)
+})
+
+test("a wide widget dropped across two cards pushes both of them below it", () => {
+  // The shape the user actually hits: a 2x1 dropped onto a row holding two
+  // 1x1s. There is no swap to make -- the footprints do not match and there
+  // are two of them -- so both go under the thing that displaced them.
+  let config = Model.normalizeConfig({
+    layout: { columns: 2 },
+    widgets: [
+      { id: "left", type: "clock", enabled: true, col: 0, row: 0 },
+      { id: "right", type: "music", enabled: true, col: 1, row: 0, cols: 1, rows: 1 },
+      { id: "wide", type: "github", enabled: true, col: 0, row: 1, cols: 2, rows: 1 }
+    ]
+  })
+  config = Model.moveWidget(config, "wide", 0, 0)
+
+  const wide = Model.findInstance(config, "wide")
+  assert.deepEqual([wide.col, wide.row], [0, 0], "the dragged one stays where it was put")
+  // Row 1 is the first free row at or below the drop -- the row the wide
+  // widget just vacated.
+  assert.deepEqual(
+    [Model.findInstance(config, "left").row, Model.findInstance(config, "right").row],
+    [1, 1], "both displaced widgets land on the row below")
+  assert.equal(overlapCount(config), 0)
+})
+
+test("what is displaced goes below the drop, not into a gap above it", () => {
+  let config = Model.normalizeConfig({
+    layout: { columns: 1 },
+    widgets: [
+      { id: "a", type: "clock", enabled: true, col: 0, row: 2 },
+      { id: "b", type: "weather", enabled: true, col: 0, row: 5 }
+    ]
+  })
+  // Rows 0, 1, 3 and 4 are all free. Dropping a onto b must not send b up to
+  // row 0 -- "below" is the whole point of the gesture.
+  config = Model.moveWidget(config, "a", 0, 5)
+  assert.equal(Model.findInstance(config, "a").row, 5)
+  assert.equal(Model.findInstance(config, "b").row, 2,
+    "same footprint, so it is a swap and b takes the cell a left")
+
+  // With mismatched footprints there is no swap, and the push goes downward.
+  let wide = Model.normalizeConfig({
+    layout: { columns: 2 },
+    widgets: [
+      { id: "small", type: "clock", enabled: true, col: 0, row: 5 },
+      { id: "big", type: "github", enabled: true, col: 0, row: 8, cols: 2, rows: 1 }
+    ]
+  })
+  wide = Model.moveWidget(wide, "big", 0, 5)
+  assert.equal(Model.findInstance(wide, "big").row, 5)
+  assert.equal(Model.findInstance(wide, "small").row, 6,
+    "pushed to the first free row at or below the drop, not up to row 0")
+})
+
+test("a drop with nowhere to put what it displaces is refused whole", () => {
+  // A grid filled to the last cell, and one widget still in the tray. The
+  // ones already placed can always shuffle -- a widget being moved vacates as
+  // many cells as it needs -- but one arriving from the tray vacates nothing,
+  // so there is genuinely nowhere for the occupant to go.
+  const widgets = []
+  for (let row = 0; row < Model.MAX_ROWS; row++) {
+    widgets.push({ id: "l" + row, type: "clock", enabled: true, col: 0, row: row })
+    widgets.push({ id: "r" + row, type: "clock", enabled: true, col: 1, row: row })
+  }
+  widgets.push({ id: "spare", type: "weather", enabled: false, col: 0, row: 0 })
+  const full = Model.normalizeConfig({ layout: { columns: 2 }, widgets: widgets })
+
+  assert.equal(Model.placeDisplacing(full, "spare", 0, 0), null)
+  const after = Model.placeWidget(full, "spare", 0, 0)
+  assert.equal(Model.findInstance(after, "spare").enabled, false,
+    "a refused drop leaves it in the tray rather than half-placing it")
+  assert.equal(overlapCount(after), 0)
+
+  // A widget already on that same full grid still moves, because the cells it
+  // leaves are exactly the ones the occupant needs.
+  const swapped = Model.moveWidget(full, "l0", 0, 5)
+  assert.equal(Model.findInstance(swapped, "l0").row, 5)
+  assert.equal(Model.findInstance(swapped, "l5").row, 0)
+  assert.equal(overlapCount(swapped), 0)
 })
 
 test("dropping from the tray switches the widget on and places it in one step", () => {
@@ -640,16 +753,20 @@ test("dropping from the tray switches the widget on and places it in one step", 
       { id: "b", type: "clock", enabled: true, col: 0, row: 0 }
     ]
   })
-  // Onto the cell b is standing on: refused, and a stays in the tray rather
-  // than ending up on the grid at the wrong place or on top of b.
+  // Onto the cell b is standing on. A widget arriving from the tray has no
+  // cell to give back, so there is no swap to make and b is pushed below.
   config = Model.placeWidget(config, "a", 0, 0)
-  assert.equal(Model.findInstance(config, "a").enabled, false)
+  let a = Model.findInstance(config, "a")
+  assert.equal(a.enabled, true)
+  assert.deepEqual([a.col, a.row], [0, 0])
+  assert.deepEqual([Model.findInstance(config, "b").col, Model.findInstance(config, "b").row],
+    [1, 0], "b moved rather than a being refused")
   assert.equal(overlapCount(config), 0)
 
-  config = Model.placeWidget(config, "a", 1, 0)
-  const a = Model.findInstance(config, "a")
+  config = Model.placeWidget(config, "a", 1, 1)
+  a = Model.findInstance(config, "a")
   assert.equal(a.enabled, true)
-  assert.deepEqual([a.col, a.row], [1, 0])
+  assert.deepEqual([a.col, a.row], [1, 1])
   assert.equal(overlapCount(config), 0)
 })
 

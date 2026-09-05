@@ -135,9 +135,29 @@ that size, not the same one stretched.
 
 - `[1, 1]` — one value and its label. The default shape.
 - `[2, 1]` — room for a second value beside the first, a sparkline, a range.
+- `[2, 2]` — a list long enough to be worth reading. Rare, and only for a
+  widget that genuinely has more to say than a row can hold.
 
 If your `[2, 1]` is your `[1, 1]` with more whitespace, do not offer it. The
 size button should feel like a choice, not a stretch.
+
+**A size taller than one row sizes its type from a cell, not from the card.**
+`Math.min(width, height)` is the right unit while every size you offer is one
+row tall — it is the cell size, and it is what keeps the drawing identical at
+160px and at 260px. On a `[2, 2]` it is suddenly twice as large, and a widget
+that sized type from it would answer a bigger card with bigger letters. What
+the reader asked a second row for is more content:
+
+```qml
+readonly property int spanCols: instance && instance.cols > 0 ? instance.cols : 1
+readonly property int spanRows: instance && instance.rows > 0 ? instance.rows : 1
+readonly property real unit: Math.min(width / spanCols, height / spanRows)
+```
+
+That is still one number, still derived from the rectangle, and identical to
+`Math.min(width, height)` at every single-row size. `widgets/Calendar.qml` and
+`widgets/Todos.qml` are the worked examples: both work out how many rows fit
+and draw that many, rather than fixing a count that suits one cell size.
 
 ## Decoration
 
@@ -186,6 +206,11 @@ you are working is a distraction you cannot turn off without deleting it.
     your windows; that is the point of them.
   - **Targets have to be hittable without aiming.** This is a wallpaper, not a
     toolbar.
+
+  Where a card does take a click, **the hover state is the whole of the
+  affordance**: it is the only thing telling the user which part of a
+  click-through desktop is live. A link underlines and takes the accent; a
+  checkbox fills faintly. Nothing is drawn to explain it in words.
 
 - **Not a notification.** No demands for attention, no urgent colour for
   things that are merely notable.

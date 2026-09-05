@@ -50,12 +50,15 @@ to reach is not a play/pause. `repo-pulse` passes it — the name opens the
 repository it is describing. A settings button, a menu, or anything that
 opens more interface does not; that is a bar widget or a panel.
 
+`todos` takes more than one action, and [DESIGN.md](DESIGN.md) records why
+that is an exception rather than a precedent. Read it before you reach for the
+same latitude.
+
 Note that the *whole card* becomes an input region, not just your control, so
 whatever is live has to look live. See [DESIGN.md](DESIGN.md).
 
 Good candidates: a clock in another timezone, the weather, disk or battery
-headroom, next calendar event, now playing, a countdown, moon phase, a
-sparkline of something slow.
+headroom, now playing, a countdown, moon phase, a sparkline of something slow.
 
 Poor candidates: anything with a scrollbar, anything needing a legend,
 anything that is only interesting for two seconds a day.

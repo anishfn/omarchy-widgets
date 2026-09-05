@@ -1545,3 +1545,866 @@ test("the offset label is written the way a timezone difference is written", () 
   assert.equal(Model.offsetLabel(825), "+13:45")
   assert.equal(Model.offsetLabel("nonsense"), "")
 })
+
+// --------------------------------------------------------------- calendar
+//
+// The fixture is shaped like what Google actually serves: CRLF line endings,
+// a folded SUMMARY, VTIMEZONE blocks carrying the daylight-saving rules, a
+// weekly series with an EXDATE and a moved instance, and an all-day event
+// written as a DATE rather than a DATE-TIME.
+
+const ICS = [
+  "BEGIN:VCALENDAR",
+  "PRODID:-//Google Inc//Google Calendar 70.9054//EN",
+  "VERSION:2.0",
+  "BEGIN:VTIMEZONE",
+  "TZID:Europe/London",
+  "BEGIN:DAYLIGHT",
+  "TZOFFSETFROM:+0000",
+  "TZOFFSETTO:+0100",
+  "TZNAME:BST",
+  "DTSTART:19700329T010000",
+  "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU",
+  "END:DAYLIGHT",
+  "BEGIN:STANDARD",
+  "TZOFFSETFROM:+0100",
+  "TZOFFSETTO:+0000",
+  "TZNAME:GMT",
+  "DTSTART:19701025T020000",
+  "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU",
+  "END:STANDARD",
+  "END:VTIMEZONE",
+  "BEGIN:VEVENT",
+  "DTSTART;TZID=Europe/London:20260907T090000",
+  "DTEND;TZID=Europe/London:20260907T091500",
+  "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+  "EXDATE;TZID=Europe/London:20260909T090000",
+  "UID:standup@example.com",
+  "SUMMARY:Daily standup",
+  "LOCATION:A meeting link",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "DTSTART;VALUE=DATE:20260906",
+  "DTEND;VALUE=DATE:20260907",
+  "UID:holiday@example.com",
+  "SUMMARY:Public holiday",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "DTSTART:20260908T140000Z",
+  "DTEND:20260908T150000Z",
+  "UID:review@example.com",
+  "SUMMARY:Design review with a title long enough that Google folds i",
+  " t across two lines",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "DTSTART;TZID=Europe/London:20260910T110000",
+  "DTEND;TZID=Europe/London:20260910T113000",
+  "UID:standup@example.com",
+  "RECURRENCE-ID;TZID=Europe/London:20260910T090000",
+  "SUMMARY:Daily standup (moved)",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "DTSTART;TZID=Europe/London:20261101T093000",
+  "DTEND;TZID=Europe/London:20261101T100000",
+  "UID:winter@example.com",
+  "SUMMARY:After the clocks change",
+  "END:VEVENT",
+  "BEGIN:VEVENT",
+  "DTSTART;TZID=Europe/London:20260908T160000",
+  "DTEND;TZID=Europe/London:20260908T170000",
+  "UID:cancelled@example.com",
+  "STATUS:CANCELLED",
+  "SUMMARY:Something called off",
+  "END:VEVENT"
+].join("\r\n") + "\r\nEND:VCALENDAR\r\n"
+
+// Saturday 5 September 2026, noon, wherever the test happens to be running.
+const NOW = new Date(2026, 8, 5, 12, 0, 0).getTime()
+
+function parsedCalendar() {
+  return Model.parseCalendar(ICS, NOW - Model.DAY_MS, NOW + 70 * Model.DAY_MS, 300)
+}
+
+function summaries(events) {
+  return events.map((e) => e.summary)
+}
+
+test("only Google's own iCal addresses are accepted", () => {
+  const good = "https://calendar.google.com/calendar/ical/me%40gmail.com/private-0123abc/basic.ics"
+  assert.equal(Model.isSafeIcsUrl(good), true)
+  assert.equal(Model.isSafeIcsUrl(good.replace("private-0123abc", "public")), true)
+  // A holiday calendar's id carries an encoded "#", which is why "%" is in
+  // the allowed set at all.
+  assert.equal(Model.isSafeIcsUrl(
+    "https://calendar.google.com/calendar/ical/en.indian%23holiday%40group.v.calendar.google.com/public/basic.ics"), true)
+
+  for (const bad of [
+    "",
+    "http://calendar.google.com/calendar/ical/x/private-y/basic.ics",  // not TLS
+    "https://calendar.google.com.evil.test/calendar/ical/x/public/basic.ics",
+    "https://evil.test/calendar/ical/x/public/basic.ics",
+    "https://calendar.google.com/calendar/ical/../../etc/passwd/public/basic.ics",
+    "https://calendar.google.com/calendar/ical/x/public/basic.ics?a=b",
+    "https://calendar.google.com/calendar/ical/x/public/basic.ics ; id",
+    "file:///etc/passwd",
+    null, undefined, 7
+  ]) {
+    assert.equal(Model.isSafeIcsUrl(bad), false, `${bad} should be refused`)
+  }
+})
+
+test("an address the pattern refuses is not stored as a setting either", () => {
+  const spec = Model.settingSpec("calendar", "icsUrl")
+  // The URL is a plain text setting, so the gate that matters is the one the
+  // service applies before it builds a command line; the setting itself keeps
+  // whatever was typed so the editor can show you your own typo.
+  assert.equal(spec.type, "text")
+  let config = Model.normalizeConfig({
+    widgets: [{ id: "c", type: "calendar", col: 0, row: 0, settings: { icsUrl: "https://evil.test/x" } }]
+  })
+  assert.deepEqual(Model.calendarsInUse(config), [],
+    "an address that is not Google's is never fetched")
+})
+
+test("calendars in use are unique, safe, and include the ones switched off", () => {
+  const url = "https://calendar.google.com/calendar/ical/a/private-b/basic.ics"
+  const other = "https://calendar.google.com/calendar/ical/c/public/basic.ics"
+  const config = Model.normalizeConfig({
+    widgets: [
+      { id: "a", type: "calendar", col: 0, row: 0, settings: { icsUrl: url } },
+      { id: "b", type: "calendar", col: 1, row: 0, settings: { icsUrl: url } },
+      { id: "c", type: "calendar", col: 0, row: 1, enabled: false, settings: { icsUrl: other } },
+      { id: "d", type: "calendar", col: 1, row: 1, settings: { icsUrl: "nonsense" } }
+    ]
+  })
+  assert.deepEqual(Model.calendarsInUse(config), [url, other])
+})
+
+test("folded lines are put back together before anything reads them", () => {
+  const lines = Model.unfoldIcs("SUMMARY:one\r\n two\r\nDTSTART:20260101\r\n")
+  assert.deepEqual(lines.slice(0, 2), ["SUMMARY:onetwo", "DTSTART:20260101"])
+  // A tab continues a line too, and a fold with nothing before it is not a
+  // fold -- it would have nothing to join to.
+  assert.deepEqual(Model.unfoldIcs("A:1\r\n\tx"), ["A:1x"])
+  assert.deepEqual(Model.unfoldIcs(" orphan"), [" orphan"])
+})
+
+test("a property line splits on the colon that is not inside quotes", () => {
+  const p = Model.parseIcsLine('DTSTART;TZID="Europe/London":20260907T090000')
+  assert.equal(p.name, "DTSTART")
+  assert.equal(p.params.TZID, "Europe/London")
+  assert.equal(p.value, "20260907T090000")
+  // A value may contain colons of its own.
+  assert.equal(Model.parseIcsLine("URL:https://example.test/x").value, "https://example.test/x")
+  assert.equal(Model.parseIcsLine("no colon here"), null)
+})
+
+test("escaped text is unescaped, and folded whitespace collapsed", () => {
+  assert.equal(Model.unescapeIcsText("Lunch\\, then a walk"), "Lunch, then a walk")
+  assert.equal(Model.unescapeIcsText("one\\ntwo"), "one two")
+  assert.equal(Model.unescapeIcsText("a\\\\b"), "a\\b", "an escaped backslash is a backslash")
+  assert.equal(Model.unescapeIcsText("  spaced   out  "), "spaced out")
+})
+
+test("a UTC offset parses into minutes east", () => {
+  assert.equal(Model.parseUtcOffset("+0530"), 330)
+  assert.equal(Model.parseUtcOffset("-0800"), -480)
+  assert.equal(Model.parseUtcOffset("+0000"), 0)
+  assert.equal(Model.parseUtcOffset("+053000"), 330, "seconds are allowed and ignored")
+  for (const bad of ["0530", "+53", "", "east", null]) {
+    assert.equal(Model.parseUtcOffset(bad), null, `${bad} should not parse`)
+  }
+})
+
+test("a duration parses into milliseconds", () => {
+  assert.equal(Model.parseIcsDuration("PT1H"), 3600000)
+  assert.equal(Model.parseIcsDuration("PT1H30M"), 5400000)
+  assert.equal(Model.parseIcsDuration("P1D"), Model.DAY_MS)
+  assert.equal(Model.parseIcsDuration("P2W"), 14 * Model.DAY_MS)
+  assert.equal(Model.parseIcsDuration("PT45S"), 45000)
+  assert.equal(Model.parseIcsDuration("nonsense"), 0)
+})
+
+test("the nth weekday of a month, counting from either end", () => {
+  // The daylight-saving rules every VTIMEZONE is written with.
+  assert.equal(Model.nthWeekdayOfMonth(2026, 3, 0, -1), 29, "last Sunday in March 2026")
+  assert.equal(Model.nthWeekdayOfMonth(2026, 10, 0, -1), 25, "last Sunday in October 2026")
+  assert.equal(Model.nthWeekdayOfMonth(2026, 9, 5, 2), 11, "second Friday in September 2026")
+  assert.equal(Model.nthWeekdayOfMonth(2026, 9, 1, 1), 7, "first Monday in September 2026")
+  // September 2026 has four Mondays, so there is no fifth one. A month that
+  // does not contain the day asked for gives nothing rather than the nearest
+  // thing, which would silently move a meeting.
+  assert.equal(Model.nthWeekdayOfMonth(2026, 9, 1, 5), 0)
+  assert.equal(Model.nthWeekdayOfMonth(2026, 13, 1, 1), 0, "there is no thirteenth month")
+})
+
+test("a recurrence rule parses into the parts the expansion uses", () => {
+  const r = Model.parseRrule("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,-1FR;UNTIL=20261231T000000Z;WKST=SU")
+  assert.equal(r.freq, "WEEKLY")
+  assert.equal(r.interval, 2)
+  assert.equal(r.wkst, 0)
+  assert.deepEqual(r.byday, [{ nth: 0, weekday: 1 }, { nth: -1, weekday: 5 }])
+  assert.ok(r.untilWall !== null)
+  // Defaults, so the expansion never has to check for absence.
+  const bare = Model.parseRrule("FREQ=DAILY")
+  assert.equal(bare.interval, 1)
+  assert.equal(bare.count, 0)
+  assert.equal(bare.wkst, 1, "the spec's default week start is Monday")
+  assert.deepEqual(bare.byday, [])
+})
+
+test("a weekly series keeps its wall-clock time across a daylight change", () => {
+  const starts = new Set(parsedCalendar().events
+    .filter((e) => e.summary === "Daily standup").map((e) => e.start))
+
+  // Asserted as instants, not as this machine's clock, so the test says the
+  // same thing wherever it runs. The series is 09:00 in London; London is on
+  // BST until the last Sunday in October and on GMT after it, so the same
+  // 09:00 is an hour earlier in UTC before the change than after.
+  assert.ok(starts.has(Date.UTC(2026, 9, 19, 8, 0, 0)), "Mon 19 Oct, 09:00 BST")
+  assert.ok(starts.has(Date.UTC(2026, 9, 23, 8, 0, 0)), "Fri 23 Oct, 09:00 BST")
+  assert.ok(starts.has(Date.UTC(2026, 9, 26, 9, 0, 0)), "Mon 26 Oct, 09:00 GMT")
+  assert.ok(starts.has(Date.UTC(2026, 9, 30, 9, 0, 0)), "Fri 30 Oct, 09:00 GMT")
+
+  // Which is exactly what adding seven times 86400000 to an instant would get
+  // wrong: it would put the Monday after the change at 08:00 London time.
+  assert.equal(starts.has(Date.UTC(2026, 9, 26, 8, 0, 0)), false)
+})
+
+test("a series honours its exceptions, and an edited instance replaces one", () => {
+  const events = parsedCalendar().events
+  const standups = events.filter((e) => String(e.summary).indexOf("Daily standup") === 0)
+  // UTC days, so the grouping does not depend on where the test runs.
+  const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10)
+
+  assert.equal(standups.map((e) => dayOf(e.start)).includes("2026-09-09"), false,
+    "the EXDATE'd Wednesday is gone")
+
+  const moved = events.filter((e) => e.summary === "Daily standup (moved)")
+  assert.equal(moved.length, 1)
+  assert.equal(moved[0].start, Date.UTC(2026, 8, 10, 10, 0, 0),
+    "the instance moved to 11:00 London, which in September is 10:00 UTC")
+  // ...and the occurrence it replaced is not also drawn.
+  assert.deepEqual(standups.filter((e) => dayOf(e.start) === "2026-09-10")
+    .map((e) => e.summary), ["Daily standup (moved)"])
+})
+
+test("an all-day event is a local day, not an instant", () => {
+  const holiday = parsedCalendar().events.find((e) => e.summary === "Public holiday")
+  assert.ok(holiday)
+  assert.equal(holiday.allDay, true)
+  const start = new Date(holiday.start)
+  assert.equal(start.getHours(), 0, "it starts at local midnight")
+  assert.equal(start.getDate(), 6)
+  assert.equal(holiday.end - holiday.start, Model.DAY_MS)
+})
+
+test("a folded summary reads as one sentence, and a cancelled event is dropped", () => {
+  const events = parsedCalendar().events
+  const review = events.find((e) => String(e.summary).indexOf("Design review") === 0)
+  assert.equal(review.summary,
+    "Design review with a title long enough that Google folds it across two lines")
+  assert.equal(events.some((e) => e.summary === "Something called off"), false)
+})
+
+test("anything that is not a calendar is refused rather than half-drawn", () => {
+  for (const junk of ["", "not a calendar", "<html>404</html>", null, undefined]) {
+    assert.equal(Model.parseCalendar(junk, NOW, NOW + Model.DAY_MS, 10), null)
+  }
+  // A window that is not a window is refused too, rather than looping.
+  assert.equal(Model.parseCalendar(ICS, NOW, NOW, 10), null)
+  assert.equal(Model.parseCalendar(ICS, NOW, NaN, 10), null)
+})
+
+test("the events are sorted, all-day first where they share a start", () => {
+  const events = parsedCalendar().events
+  for (let i = 1; i < events.length; i++) {
+    assert.ok(events[i].start >= events[i - 1].start, "earliest first")
+  }
+  const same = [
+    { start: 10, end: 20, allDay: false, summary: "timed" },
+    { start: 10, end: 20, allDay: true, summary: "all day" }
+  ]
+  // "today" comes before "today at nine".
+  assert.equal(Model.parseCalendar(
+    "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", NOW, NOW + 1, 5).events.length, 0)
+  assert.deepEqual(same.slice().sort((a, b) =>
+    a.start - b.start || (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1)).map((e) => e.summary),
+    ["all day", "timed"])
+})
+
+test("an unbounded series is bounded by the window it is asked about", () => {
+  const short = Model.parseCalendar(ICS, NOW, NOW + 3 * Model.DAY_MS, 300)
+  for (const e of short.events) {
+    assert.ok(e.start >= NOW && e.start <= NOW + 3 * Model.DAY_MS,
+      `${new Date(e.start)} is outside the window`)
+  }
+  // ...and by the ceiling on the whole document, whatever the window says.
+  const capped = Model.parseCalendar(ICS, NOW, NOW + 700 * Model.DAY_MS, 5)
+  assert.equal(capped.events.length, 5)
+})
+
+test("a series stops at its COUNT and at its UNTIL", () => {
+  const rule = Model.parseRrule("FREQ=DAILY;COUNT=3")
+  const start = Date.UTC(2026, 0, 1, 9, 0, 0)
+  const walls = Model.expandWalls(start, rule, start, start + 30 * Model.DAY_MS, 100)
+  assert.equal(walls.length, 3)
+
+  const until = Model.parseRrule("FREQ=DAILY;UNTIL=20260105T000000Z")
+  const bounded = Model.expandWalls(start, until, start, start + 30 * Model.DAY_MS, 100)
+  // The loop stops in the wall-clock domain with a day of slack; the caller
+  // trims the tail off precisely once each occurrence has an offset. What
+  // matters here is that it stops at all.
+  assert.ok(bounded.length <= 6 && bounded.length >= 4, `stopped after ${bounded.length}`)
+})
+
+test("monthly and yearly series land on the day the rule names", () => {
+  const start = Date.UTC(2026, 0, 1, 9, 0, 0)
+  const second = Model.expandWalls(start, Model.parseRrule("FREQ=MONTHLY;BYDAY=2TU"),
+    start, Date.UTC(2026, 3, 1), 100)
+  assert.deepEqual(second.map((w) => new Date(w).getUTCDate()), [13, 10, 10],
+    "second Tuesday of January, February and March 2026")
+
+  // The 31st simply does not happen in a 30-day month, which is what the spec
+  // says and what every calendar does.
+  const thirtyFirst = Model.expandWalls(Date.UTC(2026, 0, 31, 9, 0, 0),
+    Model.parseRrule("FREQ=MONTHLY"), Date.UTC(2026, 0, 1), Date.UTC(2026, 5, 1), 100)
+  assert.deepEqual(thirtyFirst.map((w) => new Date(w).getUTCMonth()), [0, 2, 4],
+    "January, March and May -- February and April have no 31st")
+
+  const yearly = Model.expandWalls(start, Model.parseRrule("FREQ=YEARLY"),
+    start, Date.UTC(2029, 0, 1), 100)
+  assert.equal(yearly.length, 3)
+})
+
+test("a rule with no frequency is a single occurrence, not an empty card", () => {
+  const start = Date.UTC(2026, 0, 1, 9, 0, 0)
+  assert.deepEqual(Model.expandWalls(start, null, start - 1, start + 1, 10), [start])
+  assert.deepEqual(Model.expandWalls(start, Model.parseRrule("FREQ=HOURLY"),
+    start - 1, start + 1, 10), [start],
+    "a frequency the expansion does not know still draws the event it has")
+})
+
+test("the file's own timezone table resolves a zone the system was never asked about", () => {
+  const zones = Model.parseIcsTimezones(Model.unfoldIcs(ICS))
+  assert.equal(Model.tzOffsetAt(zones, "Europe/London", 2026, 7, 1, 12, 0), 60, "July is BST")
+  assert.equal(Model.tzOffsetAt(zones, "Europe/London", 2026, 12, 1, 12, 0), 0, "December is GMT")
+  // January is before the year's first transition; the answer comes from the
+  // one that fired the previous autumn.
+  assert.equal(Model.tzOffsetAt(zones, "Europe/London", 2026, 1, 15, 12, 0), 0)
+  assert.equal(Model.tzOffsetAt(zones, "Europe/Berlin", 2026, 7, 1, 12, 0), null,
+    "a zone the file said nothing about is unknown, not zero")
+})
+
+test("a wall clock becomes an instant according to what kind it is", () => {
+  const zones = Model.parseIcsTimezones(Model.unfoldIcs(ICS))
+  const wall = Date.UTC(2026, 6, 1, 9, 0, 0)
+  assert.equal(Model.wallToEpoch(wall, "utc", "", zones), wall)
+  // 09:00 in London in July is 08:00 UTC.
+  assert.equal(Model.wallToEpoch(wall, "tz", "Europe/London", zones), wall - 3600000)
+  // Floating means local time, whatever this machine's local time is.
+  assert.equal(Model.wallToEpoch(wall, "floating", "", zones),
+    new Date(2026, 6, 1, 9, 0, 0).getTime())
+  // A zone the file did not define falls back to local rather than to UTC:
+  // being an hour out is better than being seven.
+  assert.equal(Model.wallToEpoch(wall, "tz", "Mars/Olympus", zones),
+    new Date(2026, 6, 1, 9, 0, 0).getTime())
+})
+
+test("upcoming is what has not ended, not what has not started", () => {
+  const events = [
+    { start: NOW - 3600000, end: NOW - 1800000, allDay: false, summary: "over" },
+    { start: NOW - 600000, end: NOW + 600000, allDay: false, summary: "running" },
+    { start: NOW + 3600000, end: NOW + 5400000, allDay: false, summary: "later" },
+    { start: NOW, end: NOW + Model.DAY_MS, allDay: true, summary: "all day" }
+  ]
+  assert.deepEqual(summaries(Model.upcomingEvents(events, NOW, 8, true)),
+    ["running", "later", "all day"])
+  assert.deepEqual(summaries(Model.upcomingEvents(events, NOW, 1, true)), ["running"])
+  assert.deepEqual(summaries(Model.upcomingEvents(events, NOW, 8, false)),
+    ["running", "later"], "all-day events can be left out")
+  assert.deepEqual(Model.upcomingEvents(null, NOW, 4, true), [])
+  assert.deepEqual(Model.upcomingEvents(events, NaN, 4, true), [])
+})
+
+test("a time is written the way the card's clock setting asks for it", () => {
+  const at = (h, m) => new Date(2026, 8, 5, h, m).getTime()
+  assert.equal(Model.clockLabel(at(14, 30), false), "14:30")
+  assert.equal(Model.clockLabel(at(14, 30), true), "2:30 PM")
+  assert.equal(Model.clockLabel(at(0, 5), false), "00:05")
+  assert.equal(Model.clockLabel(at(0, 5), true), "12:05 AM", "midnight is twelve, not zero")
+  assert.equal(Model.clockLabel(at(12, 0), true), "12:00 PM", "noon is twelve, not zero")
+  assert.equal(Model.clockLabel("not a time", false), "")
+  // An all-day event has no clock to give.
+  assert.equal(Model.eventTimeLabel({ allDay: true, start: at(9, 0) }, false), "all day")
+  assert.equal(Model.eventTimeLabel(null, false), "")
+})
+
+test("how far off an event is, as the coarsest true thing", () => {
+  const at = (mins) => NOW + mins * 60000
+  assert.equal(Model.untilLabel(at(-10), at(20), NOW), "now", "you are in it")
+  assert.equal(Model.untilLabel(at(0.5), at(30), NOW), "now")
+  assert.equal(Model.untilLabel(at(25), at(55), NOW), "in 25m")
+  assert.equal(Model.untilLabel(at(155), at(215), NOW), "in 2h 35m")
+  assert.equal(Model.untilLabel(at(60 * 9), at(60 * 10), NOW), "in 9h",
+    "past a few hours the minutes stop mattering")
+  assert.equal(Model.untilLabel(at(60 * 30), at(60 * 31), NOW), "tomorrow")
+  assert.equal(Model.untilLabel(at(60 * 24 * 4), at(60 * 24 * 4 + 60), NOW), "in 4 days")
+  assert.equal(Model.untilLabel(at(60 * 24 * 20), at(60 * 24 * 20 + 60), NOW), "in 3w")
+  assert.equal(Model.untilLabel("soon", null, NOW), "")
+})
+
+test("an all-day event says which day rather than counting the hours to midnight", () => {
+  const midnight = Model.startOfDay(NOW)
+  const allDay = (dayOffset) => ({
+    start: midnight + dayOffset * Model.DAY_MS,
+    end: midnight + (dayOffset + 1) * Model.DAY_MS,
+    allDay: true
+  })
+  assert.equal(Model.eventUntilLabel(allDay(0), NOW), "Today")
+  assert.equal(Model.eventUntilLabel(allDay(1), NOW), "Tomorrow")
+  assert.equal(Model.eventUntilLabel(allDay(9), NOW), Model.dayHeading(allDay(9).start, NOW))
+  // A timed event still gets a countdown.
+  assert.equal(Model.eventUntilLabel(
+    { start: NOW + 25 * 60000, end: NOW + 55 * 60000, allDay: false }, NOW), "in 25m")
+  assert.equal(Model.eventUntilLabel(null, NOW), "")
+})
+
+test("days are headed by name near, and by date far", () => {
+  const midnight = Model.startOfDay(NOW)
+  assert.equal(Model.dayHeading(midnight, NOW), "Today")
+  assert.equal(Model.dayHeading(midnight + Model.DAY_MS, NOW), "Tomorrow")
+  // Inside the week, the weekday alone; past it, the date, because "in nine
+  // days" tells you less than "Mon 14 Sep".
+  assert.equal(Model.dayHeading(midnight + 3 * Model.DAY_MS, NOW), "Tue")
+  assert.equal(Model.dayHeading(midnight + 9 * Model.DAY_MS, NOW), "Mon 14 Sep")
+  assert.equal(Model.todayHeading(NOW), "Sat 5 Sep")
+  assert.equal(Model.daysApart(midnight + 2 * Model.DAY_MS, NOW), 2)
+})
+
+test("the day boundary is the calendar's, not twenty-four hours from now", () => {
+  const lateNight = new Date(2026, 8, 5, 23, 30).getTime()
+  const earlyNext = new Date(2026, 8, 6, 1, 0).getTime()
+  // Ninety minutes apart, and a different day. Rounding hours would call it
+  // today.
+  assert.equal(Model.dayHeading(earlyNext, lateNight), "Tomorrow")
+  assert.equal(Model.startOfDay(NaN), 0)
+})
+
+test("events group into days in order, keeping the day's own heading", () => {
+  const midnight = Model.startOfDay(NOW)
+  const events = [
+    { start: midnight + 9 * 3600000, end: midnight + 10 * 3600000, allDay: false, summary: "a" },
+    { start: midnight + 14 * 3600000, end: midnight + 15 * 3600000, allDay: false, summary: "b" },
+    { start: midnight + Model.DAY_MS + 3600000, end: midnight + Model.DAY_MS + 2 * 3600000, allDay: false, summary: "c" }
+  ]
+  const groups = Model.groupEventsByDay(events, NOW)
+  assert.equal(groups.length, 2)
+  assert.equal(groups[0].heading, "Today")
+  assert.deepEqual(summaries(groups[0].events), ["a", "b"])
+  assert.equal(groups[1].heading, "Tomorrow")
+  assert.deepEqual(summaries(groups[1].events), ["c"])
+  assert.deepEqual(Model.groupEventsByDay(null, NOW), [])
+})
+
+test("the calendar widget declares where it goes, and is wide by default", () => {
+  const entry = Model.catalogEntry("calendar")
+  assert.equal(entry.network, Model.CALENDAR_HOST)
+  assert.deepEqual(Model.defaultSize("calendar"), [2, 1])
+  assert.equal(Model.isAllowedSize("calendar", 2, 2), true, "it offers a tall size")
+  assert.equal(entry.interactive, undefined, "the calendar is read, not operated")
+})
+
+// ------------------------------------------------------------------- todos
+
+test("a list file resolves against home, and cannot climb out of it", () => {
+  assert.equal(Model.todoPath("", "/home/a"), "/home/a/" + Model.DEFAULT_TODO_FILE)
+  assert.equal(Model.todoPath("~/notes/today.md", "/home/a"), "/home/a/notes/today.md")
+  assert.equal(Model.todoPath("list.txt", "/home/a"), "/home/a/list.txt")
+  assert.equal(Model.todoPath("/srv/shared/list.txt", "/home/a"), "/srv/shared/list.txt")
+  assert.equal(Model.todoPath("  ~/x.txt  ", "/home/a"), "/home/a/x.txt")
+  assert.equal(Model.todoPath("", "/home/a/"), "/home/a/" + Model.DEFAULT_TODO_FILE,
+    "a trailing slash on home does not double up")
+  // A segment that is exactly ".." is refused rather than resolved away.
+  assert.equal(Model.todoPath("../../etc/passwd", "/home/a"), "")
+  assert.equal(Model.todoPath("~/notes/../../../etc/passwd", "/home/a"), "")
+  // ...but a dot in a file name is a file name.
+  assert.equal(Model.todoPath("notes..txt", "/home/a"), "/home/a/notes..txt")
+  assert.equal(Model.todoPath("", ""), "", "no home means no default path")
+})
+
+test("todo files in use are unique and include the ones switched off", () => {
+  const config = Model.normalizeConfig({
+    widgets: [
+      { id: "a", type: "todos", col: 0, row: 0, settings: { file: "" } },
+      { id: "b", type: "todos", col: 1, row: 0, settings: { file: "~/.config/omarchy/todos.txt" } },
+      { id: "c", type: "todos", col: 0, row: 1, enabled: false, settings: { file: "work.md" } },
+      { id: "d", type: "todos", col: 1, row: 1, settings: { file: "../escape.txt" } }
+    ]
+  })
+  assert.deepEqual(Model.todoPathsInUse(config, "/home/a"),
+    ["/home/a/.config/omarchy/todos.txt", "/home/a/work.md"],
+    "the default and the explicit path are the same file, and the escape is dropped")
+})
+
+test("the list grammar takes what people already type", () => {
+  const parsed = Model.parseTodos([
+    "# Friday",
+    "- [ ] Ship the calendar widget",
+    "- [x] Reply to the issue",
+    "* Buy milk",
+    "+ Book the flights",
+    "! Call the bank",
+    "- [ ] ! Renew the passport",
+    "x 2026-09-04 Restart the shell",
+    "x Something else finished",
+    "plain line with no marker",
+    "",
+    "   ",
+    "# a second heading is just a comment"
+  ].join("\n"))
+
+  assert.equal(parsed.title, "Friday", "the first heading names the list")
+  assert.equal(parsed.total, 9)
+  assert.equal(parsed.done, 3)
+  assert.equal(parsed.remaining, 6)
+  assert.deepEqual(parsed.items.map((i) => i.text), [
+    "Ship the calendar widget", "Reply to the issue", "Buy milk", "Book the flights",
+    "Call the bank", "Renew the passport", "Restart the shell",
+    "Something else finished", "plain line with no marker"
+  ])
+  assert.deepEqual(parsed.items.filter((i) => i.done).map((i) => i.text),
+    ["Reply to the issue", "Restart the shell", "Something else finished"])
+  assert.deepEqual(parsed.items.filter((i) => i.important).map((i) => i.text),
+    ["Call the bank", "Renew the passport"])
+})
+
+test("a checkbox is ticked by anything that is not a space", () => {
+  for (const mark of ["x", "X", "-", "~"]) {
+    assert.equal(Model.parseTodoLine(`- [${mark}] done`).done, true, `[${mark}]`)
+  }
+  assert.equal(Model.parseTodoLine("- [ ] not done").done, false)
+  assert.equal(Model.parseTodoLine("- [] not a checkbox").text, "[] not a checkbox")
+  // A line with nothing left after the markers is not an item.
+  assert.equal(Model.parseTodoLine("- [ ]"), null)
+  assert.equal(Model.parseTodoLine("-"), null)
+  assert.equal(Model.parseTodoLine(""), null)
+  // "x" only marks a line done when it stands on its own.
+  assert.equal(Model.parseTodoLine("xylophone practice").done, false)
+})
+
+test("a rule drawn across the file is not something to do", () => {
+  for (const rule of ["---", "***", "===", "___", "-", "~~~~~"]) {
+    assert.equal(Model.parseTodoLine(rule), null, `${rule} is a divider`)
+  }
+  assert.equal(Model.parseTodos("- [ ] a\n---\n- [ ] b").total, 2)
+})
+
+test("a file that is not there is not the same as a file with nothing in it", () => {
+  const missing = Model.parseTodos(null)
+  assert.deepEqual(missing.items, [])
+  assert.equal(missing.total, 0)
+  assert.equal(missing.title, "")
+  // Nothing here throws, whatever arrives.
+  for (const junk of [undefined, 7, "\n\n\n", "#", "####  "]) {
+    assert.equal(Model.parseTodos(junk).total, 0)
+  }
+})
+
+test("a list too long for anyone to read is cut, not drawn", () => {
+  const many = new Array(Model.TODO_MAX_ITEMS + 50).fill("- [ ] thing").join("\n")
+  assert.equal(Model.parseTodos(many).total, Model.TODO_MAX_ITEMS)
+})
+
+test("what is left comes first, marked items ahead of it, done last", () => {
+  const parsed = Model.parseTodos([
+    "- [ ] a", "- [x] b", "! c", "- [ ] d", "- [x] e"
+  ].join("\n"))
+  assert.deepEqual(Model.visibleTodos(parsed, true, 10).map((i) => i.text),
+    ["c", "a", "d", "b", "e"])
+  // Inside each band the file's own order survives.
+  assert.deepEqual(Model.visibleTodos(parsed, false, 10).map((i) => i.text), ["c", "a", "d"])
+  // A card with room for two spends both on what is left.
+  assert.deepEqual(Model.visibleTodos(parsed, true, 2).map((i) => i.text), ["c", "a"])
+  assert.deepEqual(Model.visibleTodos(null, true, 5), [])
+})
+
+test("every item remembers the line it came from", () => {
+  const file = ["# Friday", "", "- [ ] first", "not an item ---", "- [x] second", "", "third"].join("\n")
+  const parsed = Model.parseTodos(file)
+  // Ticking a box on the card has to rewrite the right line of the file, and
+  // the blank lines, the heading and the divider all shift the numbering.
+  assert.deepEqual(parsed.items.map((i) => [i.text, i.line]),
+    [["first", 2], ["not an item ---", 3], ["second", 4], ["third", 6]])
+})
+
+test("ticking a box rewrites one line and leaves the rest of the file alone", () => {
+  const file = ["# Friday", "  - [ ] indented item", "- [x] done one", "third"].join("\n")
+
+  const ticked = Model.setTodoDone(file, 1, true)
+  assert.equal(ticked, ["# Friday", "  - [x] indented item", "- [x] done one", "third"].join("\n"),
+    "the indentation, the bullet and every other line survive untouched")
+
+  const unticked = Model.setTodoDone(file, 2, false)
+  assert.equal(unticked, ["# Friday", "  - [ ] indented item", "- [ ] done one", "third"].join("\n"))
+
+  // Setting a mark to what it already is is not an edit. The caller uses null
+  // to decide whether to write the file at all.
+  assert.equal(Model.setTodoDone(file, 1, false), null)
+  assert.equal(Model.setTodoDone(file, 2, true), null)
+})
+
+test("a line with no checkbox gets one, and keeps its bullet", () => {
+  assert.equal(Model.setTodoDone("buy milk", 0, true), "[x] buy milk")
+  assert.equal(Model.setTodoDone("* buy milk", 0, true), "* [x] buy milk")
+  assert.equal(Model.setTodoDone("  + buy milk", 0, true), "  + [x] buy milk")
+  // Un-ticking it then leaves a checkbox rather than guessing its way back to
+  // a bare line. That round-trips; guessing would not.
+  assert.equal(Model.setTodoDone("[x] buy milk", 0, false), "[ ] buy milk")
+})
+
+test("todo.txt's done marker is undone by removing it, date and all", () => {
+  assert.equal(Model.setTodoDone("x 2026-09-04 restart the shell", 0, false),
+    "restart the shell", "a completion date on something unfinished is not true any more")
+  assert.equal(Model.setTodoDone("x restart the shell", 0, false), "restart the shell")
+  // Already done: nothing to do.
+  assert.equal(Model.setTodoDone("x restart the shell", 0, true), null)
+})
+
+test("nothing but an item can be ticked", () => {
+  const file = ["# Friday", "", "---", "- [ ] real item"].join("\n")
+  for (const [index, what] of [[0, "a heading"], [1, "a blank line"], [2, "a divider"]]) {
+    assert.equal(Model.setTodoDone(file, index, true), null, what + " is not a task")
+  }
+  // Out of range, and junk, change nothing.
+  for (const index of [-1, 4, 99, NaN, "x", null, undefined]) {
+    assert.equal(Model.setTodoDone(file, index, true), null, `index ${index}`)
+  }
+  assert.equal(Model.setTodoDone(null, 0, true), null)
+  assert.equal(Model.setTodoDone(7, 0, true), null)
+})
+
+test("a tick survives a round trip through the parser", () => {
+  // The loop the widget actually runs: parse, tick the item the user clicked,
+  // parse again, and the same item is the one that changed.
+  let file = ["- [ ] alpha", "* beta", "x gamma"].join("\n")
+  let parsed = Model.parseTodos(file)
+  assert.deepEqual(parsed.items.map((i) => i.done), [false, false, true])
+
+  for (const item of parsed.items) {
+    const next = Model.setTodoDone(file, item.line, !item.done)
+    assert.ok(next !== null, `${item.text} should be togglable`)
+    const after = Model.parseTodos(next)
+    assert.equal(after.items.length, parsed.items.length, "no item appears or vanishes")
+    for (const other of after.items) {
+      const was = parsed.items.find((i) => i.line === other.line)
+      assert.equal(other.done, was.line === item.line ? !was.done : was.done,
+        `only ${item.text} changed`)
+    }
+  }
+})
+
+test("progress is how much of the list is done, and an empty list is not zero percent", () => {
+  assert.equal(Model.todoProgress(Model.parseTodos("- [x] a\n- [ ] b")), 0.5)
+  assert.equal(Model.todoProgress(Model.parseTodos("- [x] a\n- [x] b")), 1)
+  assert.equal(Model.todoProgress(Model.parseTodos("")), 0)
+  assert.equal(Model.todoProgress(null), 0)
+})
+
+test("the title is what you set, then what the file says, then the plain word", () => {
+  const withHeading = Model.parseTodos("# Friday\n- [ ] a")
+  const without = Model.parseTodos("- [ ] a")
+  assert.equal(Model.todoTitle("Work", withHeading), "Work")
+  assert.equal(Model.todoTitle("", withHeading), "Friday")
+  assert.equal(Model.todoTitle("   ", withHeading), "Friday")
+  assert.equal(Model.todoTitle("", without), "Todo")
+  assert.equal(Model.todoTitle("", null), "Todo")
+})
+
+test("the todos widget touches nothing outside the machine", () => {
+  const entry = Model.catalogEntry("todos")
+  assert.equal(entry.network, undefined, "the list is a file, not a service")
+  assert.deepEqual(Model.defaultSize("todos"), [2, 1])
+  assert.equal(Model.isAllowedSize("todos", 2, 2), true)
+})
+
+test("the types that take clicks are exactly the ones that say so", () => {
+  // The list is deliberately short and deliberately checked: every type here
+  // turns its own rectangle into an input region on the desktop, so one added
+  // by accident is a card silently swallowing clicks meant for a window.
+  const interactive = Model.catalogTypes().filter((t) => Model.isInteractiveType(t))
+  assert.deepEqual(interactive.sort(), ["music", "repo-pulse", "todos"])
+  for (const quiet of ["clock", "weather", "github", "calendar"]) {
+    assert.equal(Model.isInteractiveType(quiet), false, `${quiet} should stay click-through`)
+  }
+})
+
+test("ticking can be switched off without switching the widget off", () => {
+  const spec = Model.settingSpec("todos", "canTick")
+  assert.equal(spec.type, "boolean")
+  assert.equal(spec.defaultValue, true)
+  assert.equal(Model.defaultsFor("todos").canTick, true)
+})
+
+// ------------------------------------------------- more than one of a type
+
+test("a type says for itself whether a second one makes sense", () => {
+  // Several clocks is the point of a clock widget; several music cards would
+  // be the same player twice, and several weather cards the same location.
+  for (const many of ["clock", "github", "repo-pulse", "calendar", "todos"]) {
+    assert.equal(Model.allowsMultiple(many), true, `${many} should allow several`)
+  }
+  for (const one of ["weather", "music"]) {
+    assert.equal(Model.allowsMultiple(one), false, `${one} reads one source`)
+  }
+  assert.equal(Model.allowsMultiple("nope"), false)
+})
+
+test("ids are numbered, and the first one keeps the bare type name", () => {
+  let config = Model.defaultConfig()
+  // The default config already has a clock called "clock". An update that
+  // renamed it "clock-1" would break every config that mentions it.
+  assert.equal(Model.nextInstanceId(config, "clock"), "clock-2")
+  assert.equal(Model.nextInstanceId(config, "weather"), "weather")
+
+  config = Model.addWidget(config, "clock")
+  assert.equal(Model.nextInstanceId(config, "clock"), "clock-3")
+  // A gap left by a removal is filled rather than skipped past.
+  config = Model.removeWidget(config, "clock-2")
+  assert.equal(Model.nextInstanceId(config, "clock"), "clock-2")
+})
+
+test("adding another of a type puts it on the grid, in a free cell", () => {
+  let config = Model.defaultConfig()
+  config = Model.addWidget(config, "clock")
+  const added = Model.findInstance(config, "clock-2")
+  assert.ok(added)
+  assert.equal(added.enabled, true, "a widget you asked for is one you can see")
+  assert.equal(added.type, "clock")
+  assert.deepEqual(added.settings, Model.defaultsFor("clock"))
+  assert.equal(overlapCount(config), 0)
+  assert.notDeepEqual([added.col, added.row],
+    [Model.findInstance(config, "clock").col, Model.findInstance(config, "clock").row])
+})
+
+test("a second one of a type that reads one source is refused", () => {
+  let config = Model.defaultConfig()
+  config = Model.addWidget(config, "music")
+  assert.equal(Model.countOfType(config, "music"), 1, "the first is what puts it on the list")
+  config = Model.addWidget(config, "music")
+  assert.equal(Model.countOfType(config, "music"), 1, "the second would be the same card twice")
+  // ...and a type nobody has heard of adds nothing at all.
+  const before = JSON.stringify(config)
+  assert.equal(JSON.stringify(Model.addWidget(config, "nonsense")), before)
+})
+
+test("duplicating copies the settings, which is the point of duplicating", () => {
+  let config = Model.defaultConfig()
+  config = Model.setSetting(config, "clock", "timezone", "Asia/Kolkata")
+  config = Model.setSetting(config, "clock", "label", "BLR")
+  config = Model.resizeWidget(config, "clock", 2, 1)
+
+  config = Model.duplicateWidget(config, "clock")
+  const copy = Model.findInstance(config, "clock-2")
+  assert.equal(copy.settings.timezone, "Asia/Kolkata")
+  assert.equal(copy.settings.label, "BLR")
+  assert.deepEqual([copy.cols, copy.rows], [2, 1], "the shape comes with it")
+  assert.equal(copy.enabled, true)
+  assert.equal(overlapCount(config), 0)
+
+  // The copy is its own widget: changing it leaves the original alone.
+  config = Model.setSetting(config, "clock-2", "label", "London")
+  assert.equal(Model.findInstance(config, "clock").settings.label, "BLR")
+})
+
+test("a duplicate lands on the same side as the one it came from", () => {
+  let config = Model.normalizeConfig({
+    layout: { side: "right", columns: 2 },
+    widgets: [{ id: "clock", type: "clock", enabled: true, col: 0, row: 0, side: "left" }]
+  })
+  config = Model.duplicateWidget(config, "clock")
+  assert.equal(Model.findInstance(config, "clock-2").side, "left")
+})
+
+test("duplicating something that cannot be duplicated changes nothing", () => {
+  const config = Model.defaultConfig()
+  const before = JSON.stringify(config)
+  assert.equal(JSON.stringify(Model.duplicateWidget(config, "ghost")), before)
+  const withMusic = Model.addWidget(config, "music")
+  const musicBefore = JSON.stringify(withMusic)
+  assert.equal(JSON.stringify(Model.duplicateWidget(withMusic, "music")), musicBefore)
+})
+
+test("the last of a type is switched off, not deleted", () => {
+  let config = Model.defaultConfig()
+  assert.equal(Model.canRemove(config, "clock"), false,
+    "deleting it would only mean the next config read put a fresh one back")
+  const before = JSON.stringify(config)
+  assert.equal(JSON.stringify(Model.removeWidget(config, "clock")), before)
+
+  config = Model.addWidget(config, "clock")
+  assert.equal(Model.canRemove(config, "clock"), true, "now there are two, either can go")
+  assert.equal(Model.canRemove(config, "clock-2"), true)
+  config = Model.removeWidget(config, "clock-2")
+  assert.equal(Model.findInstance(config, "clock-2"), null)
+  assert.equal(Model.countOfType(config, "clock"), 1)
+  assert.equal(Model.canRemove(config, "ghost"), false)
+})
+
+test("a widget added to a full grid still lands somewhere you can find it", () => {
+  // Every cell of both grids taken, so there is no free cell at all.
+  const widgets = []
+  for (let row = 0; row < Model.MAX_ROWS; row++) {
+    for (const side of Model.SIDES) {
+      for (let col = 0; col < 2; col++) {
+        widgets.push({ id: `w${side}${col}${row}`, type: "clock", enabled: true,
+          col: col, row: row, side: side })
+      }
+    }
+  }
+  const full = Model.normalizeConfig({ layout: { columns: 2 },
+    widgets: widgets.slice(0, Model.MAX_WIDGETS - 1) })
+  const after = Model.addWidget(full, "clock")
+  const added = Model.findInstance(after, Model.nextInstanceId(full, "clock"))
+  assert.ok(added, "a widget you asked for and cannot find is worse than an awkward cell")
+  assert.equal(added.enabled, true)
+})
+
+test("the config will not grow past its ceiling however hard you press add", () => {
+  let config = Model.defaultConfig()
+  for (let i = 0; i < Model.MAX_WIDGETS + 20; i++) config = Model.addWidget(config, "clock")
+  assert.ok(config.widgets.length <= Model.MAX_WIDGETS)
+})
+
+test("several of a type name themselves apart, by label first and id after", () => {
+  let config = Model.defaultConfig()
+  assert.equal(Model.displayName(config, Model.findInstance(config, "clock")), "Clock",
+    "one of a type needs no qualifier")
+
+  config = Model.addWidget(config, "clock")
+  assert.equal(Model.displayName(config, Model.findInstance(config, "clock")), "Clock · clock")
+  assert.equal(Model.displayName(config, Model.findInstance(config, "clock-2")), "Clock · clock-2")
+
+  // A label is your own name for it, so it beats the generated id.
+  config = Model.setSetting(config, "clock-2", "label", "London")
+  assert.equal(Model.displayName(config, Model.findInstance(config, "clock-2")), "Clock · London")
+
+  // `title` counts too, which is what the todo list calls the same idea.
+  let todos = Model.addWidget(Model.addWidget(Model.defaultConfig(), "todos"), "todos")
+  todos = Model.setSetting(todos, "todos-2", "title", "Work")
+  assert.equal(Model.displayName(todos, Model.findInstance(todos, "todos-2")), "Todos · Work")
+})
+
+test("a secret never becomes the name of a widget", () => {
+  // The generalisation "name it after its first text setting" would put a
+  // calendar's private address in the editor's tray. Only `label` and `title`
+  // are read, and a calendar's label is the one the user typed.
+  const url = "https://calendar.google.com/calendar/ical/a/private-secret/basic.ics"
+  let config = Model.addWidget(Model.defaultConfig(), "calendar")
+  config = Model.addWidget(config, "calendar")
+  config = Model.setSetting(config, "calendar", "icsUrl", url)
+  const shown = Model.displayName(config, Model.findInstance(config, "calendar"))
+  assert.equal(shown.indexOf("private-secret"), -1, shown)
+  assert.equal(shown, "Calendar · calendar")
+  assert.equal(Model.instanceLabel(Model.findInstance(config, "calendar")), "")
+})

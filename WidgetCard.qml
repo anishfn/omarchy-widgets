@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "Model.js" as Model
 
 // The surface every desktop widget is drawn on: a translucent card that takes
 // its colors from the active Omarchy theme and lets the wallpaper through.
@@ -14,7 +15,7 @@ BorderSurface {
 
   // -1 follows the theme's Hyprland rounding; anything else is literal px.
   property int cardRadius: 20
-  property real backgroundAlpha: 0.72
+  property real backgroundAlpha: Model.DEFAULT_OPACITY
 
   readonly property color surface: Util.alpha(Color.background, root.backgroundAlpha)
   readonly property color foreground: Color.foreground

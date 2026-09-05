@@ -514,6 +514,99 @@ Item {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
+                text: "Scale"
+                textFormat: Text.PlainText
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              // One field, in percent, set at 100: any whole number from 25
+              // to 200, typecast by the spinbox and written back as the
+              // factor. The floor is Model.MIN_SCALE, because a grid scaled
+              // to nothing cannot be clicked back.
+              NumberField {
+                anchors.verticalCenter: parent.verticalCenter
+                label: ""
+                value: Math.round(root.layout.scale * 100)
+                from: Math.round(Model.MIN_SCALE * 100)
+                to: Math.round(Model.MAX_SCALE * 100)
+                stepSize: 10
+                fieldWidth: Style.space(64)
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                onModified: function(v) { if (root.service) root.service.setScale(Number(v) / 100) }
+              }
+
+              PanelSeparator {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 1
+                height: Style.space(20)
+                foreground: root.foreground
+                strength: 0.25
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Opacity"
+                textFormat: Text.PlainText
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              // The whole grid's opacity, in percent. Moving it writes over any card's
+              // own opacity, so the whole grid matches again.
+              NumberField {
+                anchors.verticalCenter: parent.verticalCenter
+                label: ""
+                value: Math.round(root.layout.opacity * 100)
+                from: 0
+                to: 100
+                stepSize: 5
+                fieldWidth: Style.space(64)
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                onModified: function(v) { if (root.service) root.service.setLayoutOpacity(Number(v) / 100) }
+              }
+
+              PanelSeparator {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 1
+                height: Style.space(20)
+                foreground: root.foreground
+                strength: 0.25
+              }
+
+              // A small escape hatch from both the knobs above: scale and
+              // opacity (grid-wide and every card's) go back to their
+              // defaults.
+              Button {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Reset"
+                tooltipText: "Restore the default scale and opacity"
+                bordered: true
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                fontSize: Style.font.bodySmall
+                horizontalPadding: Style.space(10)
+                verticalPadding: Style.space(6)
+                onClicked: if (root.service) root.service.resetAppearance()
+              }
+
+              PanelSeparator {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 1
+                height: Style.space(20)
+                foreground: root.foreground
+                strength: 0.25
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
                 visible: root.selected !== null
                 text: root.nameFor(root.selected)
                 textFormat: Text.PlainText
@@ -584,11 +677,54 @@ Item {
             // What the selected widget can be told. Every control here is
             // built from the type's own settings schema, so a widget added
             // later gets this panel by describing itself — nothing in the
-            // editor knows what a clock is.
+            // editor knows what a clock is. Opacity is ahead of all of them
+            // because it is true of every card, not just the ones with
+            // settings.
             Row {
               anchors.horizontalCenter: parent.horizontalCenter
               spacing: Style.space(12)
-              visible: root.selected !== null && schemaRepeater.count > 0
+              visible: root.selected !== null
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Opacity"
+                textFormat: Text.PlainText
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              // Whole percent, from see-through to solid. Reads the card's
+              // own value when it has one, the layout's global otherwise;
+              // editing always sets the card's own.
+              NumberField {
+                anchors.verticalCenter: parent.verticalCenter
+                label: ""
+                value: root.selected ? Math.round(Model.effectiveOpacity(root.config, root.selected) * 100) : 100
+                from: 0
+                to: 100
+                stepSize: 5
+                fieldWidth: Style.space(64)
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                onModified: function(v) {
+                  if (root.service && root.selectedId) root.service.setOpacity(root.selectedId, Number(v) / 100)
+                }
+              }
+
+              // Give a card that set its own opacity back to the grid's.
+              Button {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.selected !== null && root.selected.opacity !== null
+                text: "↺"
+                tooltipText: "Follow the grid's opacity instead of this one"
+                bordered: true
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                onClicked: if (root.service && root.selectedId) root.service.clearOpacity(root.selectedId)
+              }
 
               Repeater {
                 id: schemaRepeater

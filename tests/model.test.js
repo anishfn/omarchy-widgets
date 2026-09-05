@@ -294,7 +294,7 @@ test("normalize survives junk without throwing", () => {
 
 test("normalize clamps the layout into range", () => {
   const out = Model.normalizeConfig({
-    layout: { side: "diagonal", columns: 999, cellSize: -5, gap: -3, marginX: 1e9, marginY: "x" }
+    layout: { side: "diagonal", columns: 999, cellSize: -5, gap: -3, marginX: 1e9, marginY: "x", scale: -9, opacity: 9 }
   })
   assert.equal(out.layout.side, "right")
   assert.equal(out.layout.columns, Model.MAX_COLUMNS)
@@ -302,6 +302,8 @@ test("normalize clamps the layout into range", () => {
   assert.equal(out.layout.gap, 0)
   assert.equal(out.layout.marginX, 4000)
   assert.equal(out.layout.marginY, Model.DEFAULT_LAYOUT.marginY)
+  assert.equal(out.layout.scale, Model.MIN_SCALE)
+  assert.equal(out.layout.opacity, 1)
 })
 
 test("normalize drops unknown types and unknown settings keys", () => {
@@ -413,6 +415,170 @@ test("a cell rect is the block it draws, gaps included", () => {
   assert.deepEqual(Model.cellRect(layout, 2560, 0, 1, 1, 1), { x: 2104, y: 256, width: 200, height: 200 })
   // A two-column block swallows the gap between them.
   assert.deepEqual(Model.cellRect(layout, 2560, 0, 0, 2, 1), { x: 2104, y: 40, width: 416, height: 200 })
+})
+
+test("scale multiplies cell, gap and drop probe, leaving cells alone", () => {
+  const base = Model.normalizeLayout(Model.DEFAULT_LAYOUT)
+  const scaled = Model.normalizeLayout({ ...Model.DEFAULT_LAYOUT, scale: 1.5 })
+
+  // 200 and 16 at 150% are 300 and 24; the grid width follows.
+  assert.equal(Model.scaledCell(base), 200)
+  assert.equal(Model.scaledGap(base), 16)
+  assert.equal(Model.scaledGap(scaled), 24)
+  assert.equal(Model.gridWidth(scaled), 624) // 2 * 300 + 24
+  assert.deepEqual(Model.cellRect(scaled, 2560, 0, 0, 1, 1), { x: 1896, y: 40, width: 300, height: 300 })
+  assert.deepEqual(Model.cellRect(scaled, 2560, 0, 0, 2, 1), { x: 1896, y: 40, width: 624, height: 300 })
+
+  // The second column sits one scaled step (300 + 24) from the first.
+  assert.deepEqual(Model.cellRect(scaled, 2560, 1, 0, 1, 1), { x: 2220, y: 40, width: 300, height: 300 })
+  assert.deepEqual(Model.cellRect(base, 2560, 1, 0, 1, 1), { x: 2320, y: 40, width: 200, height: 200 })
+
+  // The drop probe sits in the middle of a scaled cell, and self-consistency
+  // holds: a point inside a drawn scaled cell reads back as that same cell.
+  const s2 = Model.normalizeLayout({ ...Model.DEFAULT_LAYOUT, scale: 2 })
+  for (let col = 0; col < s2.columns; col++) {
+    const r = Model.cellRect(s2, 2560, col, 0, 1, 1)
+    assert.deepEqual(Model.cellFromPoint(s2, 2560, r.x + r.width / 2, r.y + 1),
+      { col, row: 0, side: s2.side })
+  }
+})
+
+test("setScale clamps into range and keeps its place in the layout", () => {
+  const cfg = Model.normalizeConfig({ widgets: [] })
+  assert.equal(cfg.layout.scale, 1)
+  assert.equal(Model.setScale(cfg, 1.25).layout.scale, 1.25)
+  assert.equal(Model.setScale(cfg, 99).layout.scale, Model.MAX_SCALE)
+  assert.equal(Model.setScale(cfg, -5).layout.scale, Model.MIN_SCALE)
+  assert.equal(Model.setScale(cfg, "nonsense").layout.scale, 1)
+  // Two decimals, so the file stays readable after a change.
+  assert.equal(Model.setScale(cfg, 1.234).layout.scale, 1.23)
+})
+
+test("the smallest scale still leaves a grid that can be clicked", () => {
+  // A scale of 0 would draw 0x0 cells and answer null for every point, so the
+  // widgets would be both invisible and undraggable. The floor is what stops
+  // the knob from having a setting that throws the grid away.
+  assert.ok(Model.MIN_SCALE > 0, "the floor is not zero")
+  const layout = Model.normalizeLayout({ ...Model.DEFAULT_LAYOUT, scale: Model.MIN_SCALE })
+  assert.equal(layout.scale, Model.MIN_SCALE, "a config asking for the floor gets it")
+  assert.ok(Model.scaledCell(layout) >= 1, "a cell is still worth drawing")
+
+  for (const side of Model.SIDES) {
+    const r = Model.cellRect(layout, 2560, 0, 0, 1, 1, side)
+    assert.ok(r.width > 0 && r.height > 0, `${side} cell has a size`)
+    assert.deepEqual(
+      Model.cellFromPoint(layout, 2560, r.x + r.width / 2, r.y + r.height / 2),
+      { col: 0, row: 0, side }, `${side} cell reads back at the smallest scale`)
+  }
+
+  // And a config that asks for zero anyway is clamped, not honoured.
+  assert.equal(Model.normalizeLayout({ ...Model.DEFAULT_LAYOUT, scale: 0 }).scale, Model.MIN_SCALE)
+})
+
+test("setOpacity is per widget and clamps into range", () => {
+  const cfg = Model.defaultConfig()
+  // A fresh widget has no opacity of its own; it follows the grid's 0.72.
+  assert.equal(Model.findInstance(cfg, "clock").opacity, null)
+  assert.equal(Model.effectiveOpacity(cfg, Model.findInstance(cfg, "clock")), 0.72)
+  assert.equal(Model.findInstance(Model.setOpacity(cfg, "clock", 0.4), "clock").opacity, 0.4)
+  assert.equal(Model.findInstance(Model.setOpacity(cfg, "clock", 99), "clock").opacity, 1)
+  assert.equal(Model.findInstance(Model.setOpacity(cfg, "clock", -0.1), "clock").opacity, 0)
+  // Two decimals, so the file stays readable after a change.
+  assert.equal(Model.findInstance(Model.setOpacity(cfg, "clock", 0.456), "clock").opacity, 0.46)
+  // Only the named widget moves; the change never leaks into the layout.
+  assert.equal(Model.setOpacity(cfg, "clock", 0.4).layout.opacity, 0.72)
+})
+
+test("moving the global opacity re-applies it to every card", () => {
+  const cfg = Model.defaultConfig()
+  const boosted = Model.setLayoutOpacity(cfg, 0.3)
+  assert.equal(boosted.layout.opacity, 0.3)
+  assert.equal(Model.findInstance(boosted, "clock").opacity, null)
+  assert.equal(Model.effectiveOpacity(boosted, Model.findInstance(boosted, "clock")), 0.3)
+
+  // A card set on its own overrides only itself, for now.
+  const own = Model.setOpacity(boosted, "clock", 0.8)
+  assert.equal(Model.effectiveOpacity(own, Model.findInstance(own, "clock")), 0.8)
+
+  // Moving the global again sweeps that override away: the whole grid follows.
+  const pushed = Model.setLayoutOpacity(own, 0.5)
+  const swept = Model.findInstance(pushed, "clock")
+  assert.equal(swept.opacity, null)
+  assert.equal(Model.effectiveOpacity(pushed, swept), 0.5)
+
+  // Clearing an override merely points the card back at the current global.
+  const ownAgain = Model.setOpacity(pushed, "clock", 0.25)
+  const cleared = Model.clearOpacity(ownAgain, "clock")
+  assert.equal(Model.findInstance(cleared, "clock").opacity, null)
+  assert.equal(Model.effectiveOpacity(cleared, Model.findInstance(cleared, "clock")), 0.5)
+
+  // Junk is ignored, and the range is 0..1.
+  assert.equal(Model.setLayoutOpacity(cleared, "nonsense").layout.opacity, 0.5)
+  assert.equal(Model.setLayoutOpacity(cleared, 9).layout.opacity, 1)
+  assert.equal(Model.setLayoutOpacity(cleared, -1).layout.opacity, 0)
+})
+
+test("every catalogue type starts following the grid's opacity", () => {
+  for (const type of Model.catalogTypes()) {
+    const inst = Model.defaultInstance(type, type)
+    assert.equal(inst.opacity, null)
+  }
+  const cfg = Model.defaultConfig()
+  for (const w of cfg.widgets) {
+    assert.ok(Model.effectiveOpacity(cfg, w) >= 0 && Model.effectiveOpacity(cfg, w) <= 1)
+  }
+})
+
+test("per-widget scale is gone: only the layout's scale exists", () => {
+  const base = Model.normalizeConfig({
+    widgets: [
+      { id: "clock", type: "clock", col: 0, row: 0 },
+      { id: "weather", type: "weather", col: 1, row: 0 }
+    ]
+  })
+  // Instances carry no scale of their own.
+  for (const w of base.widgets) assert.equal(w.scale, undefined)
+  // A stale per-widget scale in the file is dropped, not honoured.
+  const withStale = Model.normalizeConfig({
+    widgets: [{ id: "clock", type: "clock", col: 0, row: 0, scale: 2 }]
+  })
+  assert.equal(Model.findInstance(withStale, "clock").scale, undefined)
+
+  // Every card is drawn at exactly the cell the grid gives it.
+  const clock = Model.findInstance(base, "clock")
+  assert.deepEqual(Model.widgetRect(base.layout, clock, 2560),
+    Model.cellRect(base.layout, 2560, 0, 0, 1, 1))
+
+  // The one scale knob is the layout's, and junk is ignored.
+  assert.equal(Model.setScale(base, 0.8).layout.scale, 0.8)
+  assert.equal(Model.setScale(base, "junk").layout.scale, 1)
+  assert.equal(Model.setScale(base, 0.8).layout.opacity, base.layout.opacity)
+  assert.equal(Model.widgetRect(Model.setScale(base, 0.8).layout, clock, 2560).width,
+    Model.blockWidth({ ...base.layout, scale: 0.8 }, 1))
+})
+
+test("resetAppearance puts scale and opacity back to their defaults", () => {
+  const cfg = Model.normalizeConfig({
+    widgets: [
+      { id: "clock", type: "clock", col: 0, row: 0, scale: 2, opacity: 0.2 },
+      { id: "weather", type: "weather", col: 1, row: 0 }
+    ]
+  })
+  const messed = Model.setLayoutOpacity(Model.setScale(cfg, 1.9), 0.1)
+  assert.equal(messed.layout.scale, 1.9)
+
+  const reset = Model.resetAppearance(messed)
+  assert.equal(reset.layout.scale, Model.DEFAULT_LAYOUT.scale)
+  assert.equal(reset.layout.opacity, Model.DEFAULT_LAYOUT.opacity)
+  // No card keeps its own opacity; scale lives only on the layout.
+  for (const w of reset.widgets) {
+    assert.equal(w.opacity, null)
+    assert.equal(w.scale, undefined)
+  }
+  // Everything else about the config is untouched.
+  assert.equal(reset.widgets.length, 2)
+  assert.equal(reset.layout.columns, 2)
+  assert.deepEqual([Model.findInstance(reset, "clock").col, Model.findInstance(reset, "clock").row], [0, 0])
 })
 
 test("hit testing is the inverse of drawing, on both grids", () => {

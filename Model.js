@@ -16,6 +16,19 @@ var MAX_STRING = 256
 var MAX_COLUMNS = 6
 var MAX_ROWS = 24
 var MAX_MARGIN = 4000
+// Bounds of the global scale. `cellSize` stays base px at scale 1, so the
+// two read cleanly: a 200px cell at 1.5 is 300px.
+//
+// The floor is deliberately not 0. At zero every cell is 0x0: the grid draws
+// nothing and `cellFromPoint` answers null everywhere, so the widgets are
+// gone *and* unclickable, and the only way back is the editor's own chrome.
+// A quarter-size card is still small enough to mean "as small as it goes"
+// without the knob having a setting that throws the grid away.
+var MIN_SCALE = 0.25
+var MAX_SCALE = 2
+
+// The opacity every card starts at; a widget can override it on its own.
+var DEFAULT_OPACITY = 0.72
 
 // Which edge of the screen the grid hugs.
 var SIDES = ["left", "right"]
@@ -28,9 +41,10 @@ var SIDES = ["left", "right"]
 // finite set of places it can land — which is what makes dropping one
 // predictable rather than a game of pixels.
 //
-// `cellSize` is the side of one cell. `columns` is how many cells wide the
-// whole grid is, so widening the grid adds room rather than shrinking what is
-// already in it.
+// `cellSize` is the side of one cell in px at scale 1. `columns` is how many
+// cells wide the whole grid is, so widening the grid adds room rather than
+// shrinking what is already in it. `scale` multiplies cell and gap together,
+// so one knob resizes every widget at once.
 
 var DEFAULT_LAYOUT = {
   side: "right",
@@ -38,7 +52,9 @@ var DEFAULT_LAYOUT = {
   cellSize: 200,
   gap: 16,
   marginX: 40,
-  marginY: 40
+  marginY: 40,
+  scale: 1,
+  opacity: DEFAULT_OPACITY
 }
 
 // ---------------------------------------------------------------- catalogue
@@ -469,19 +485,36 @@ function normalizeLayout(raw) {
     cellSize: Math.round(clampNumber(source.cellSize, 60, 600, DEFAULT_LAYOUT.cellSize)),
     gap: Math.round(clampNumber(source.gap, 0, 120, DEFAULT_LAYOUT.gap)),
     marginX: Math.round(clampNumber(source.marginX, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginX)),
-    marginY: Math.round(clampNumber(source.marginY, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginY))
+    marginY: Math.round(clampNumber(source.marginY, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginY)),
+    scale: Math.round(clampNumber(source.scale, MIN_SCALE, MAX_SCALE, DEFAULT_LAYOUT.scale) * 100) / 100,
+    opacity: Math.round(clampNumber(source.opacity, 0, 1, DEFAULT_LAYOUT.opacity) * 100) / 100
   }
 }
 
-// Pixel size of a `cols` x `rows` block, gaps included.
+// The cell and the gap at the layout's current scale. Everything that measures
+// the grid — width, rects, hit testing, the drop probe — reads these, so a
+// scale change takes effect everywhere at once.
+function scaledCell(layout) {
+  return layout.cellSize * layout.scale
+}
+
+function scaledGap(layout) {
+  return layout.gap * layout.scale
+}
+
+// Pixel size of an `n`-block run at the layout's own scale, gaps included.
+// Widths and heights both read this, so a scale change takes effect
+// everywhere at once.
+function blockRunAt(layout, n) {
+  return n * layout.cellSize * layout.scale + (n - 1) * layout.gap * layout.scale
+}
+
 function blockWidth(layout, cols) {
-  var n = Math.max(1, Math.round(cols))
-  return n * layout.cellSize + (n - 1) * layout.gap
+  return blockRunAt(layout, Math.max(1, Math.round(cols)))
 }
 
 function blockHeight(layout, rows) {
-  var n = Math.max(1, Math.round(rows))
-  return n * layout.cellSize + (n - 1) * layout.gap
+  return blockRunAt(layout, Math.max(1, Math.round(rows)))
 }
 
 function gridWidth(layout) {
@@ -529,10 +562,11 @@ function columnOptions(layout, screenWidth) {
   return out
 }
 
-// Screen rectangle of a cell block. The grid's own origin is folded in, so
-// this is what both the drawing and the hit testing use — they cannot drift.
+// Screen rectangle of a cell block at the layout's scale. The grid's own
+// origin is folded in, so this is what both the drawing and the hit testing
+// use — they cannot drift.
 function cellRect(layout, screenWidth, col, row, cols, rows, side) {
-  var step = layout.cellSize + layout.gap
+  var step = scaledCell(layout) + scaledGap(layout)
   return {
     x: Math.round(gridOriginX(layout, screenWidth, side) + col * step),
     y: Math.round(layout.marginY + row * step),
@@ -541,14 +575,13 @@ function cellRect(layout, screenWidth, col, row, cols, rows, side) {
   }
 }
 
+// Screen rectangle of one widget, which is always the cell it occupies: scale
+// is the grid's alone, so there is nothing but the grid to measure.
 function widgetRect(layout, instance, screenWidth) {
   return cellRect(layout, screenWidth, instance.col, instance.row,
     instance.cols, instance.rows, sideOf(instance, layout))
 }
 
-// Which cell a screen point falls in. Returns null outside the grid's columns
-// or above its top, so a drag that wanders off does not silently snap back to
-// column zero.
 // Which cell of which grid a screen point falls in. Both are tried, and the
 // answer carries the side it came from, so a drag across the screen changes
 // which grid a widget belongs to without the caller having to ask.
@@ -556,7 +589,7 @@ function widgetRect(layout, instance, screenWidth) {
 // Returns null outside either grid's columns or above its top, so a drag that
 // wanders into the gap between them does not silently snap to one.
 function cellFromPoint(layout, screenWidth, x, y) {
-  var step = layout.cellSize + layout.gap
+  var step = scaledCell(layout) + scaledGap(layout)
   if (step <= 0) return null
   var localY = y - layout.marginY
   if (localY < 0) return null
@@ -587,7 +620,7 @@ function dropTarget(config, id, cardX, cardY, screenWidth) {
   if (!target) return { cell: null, valid: false, preview: null }
   var layout = config.layout
   var cell = cellFromPoint(layout, screenWidth,
-    cardX + layout.cellSize / 2, cardY + layout.cellSize / 2)
+    cardX + scaledCell(layout) / 2, cardY + scaledCell(layout) / 2)
   if (!cell) return { cell: null, valid: false, preview: null }
 
   // The preview *is* the drop, computed early. The editor lays the grid out
@@ -774,7 +807,9 @@ function defaultInstance(type, id) {
     row: 0,
     cols: size[0],
     rows: size[1],
-    opacity: 0.72,
+    // null means "follow the layout's global opacity"; a number overrides the
+    // layout for this card alone.
+    opacity: null,
     // -1 follows the theme's Hyprland rounding; anything else is literal px.
     // The default is a shape rather than the theme's because a desktop card is
     // an order of magnitude larger than the bar chrome `decoration:rounding`
@@ -871,7 +906,11 @@ function normalizeInstance(raw, index, layout) {
   out.col = Math.round(clampNumber(raw.col, 0, maxCol, 0))
   out.row = Math.round(clampNumber(raw.row, 0, MAX_ROWS - 1, 0))
 
-  out.opacity = clampNumber(raw.opacity, 0, 1, out.opacity)
+  // Absent or null keeps "follow the layout's global opacity"; anything else
+  // is a per-card override.
+  out.opacity = (raw.opacity === undefined || raw.opacity === null)
+    ? null
+    : Math.round(clampNumber(raw.opacity, 0, 1, DEFAULT_OPACITY) * 100) / 100
   out.radius = Math.round(clampNumber(raw.radius, -1, 400, out.radius))
   out.settings = normalizeSettings(entry, raw.settings)
   return out
@@ -1333,6 +1372,74 @@ function setColumns(config, columns) {
     if (w.col + w.cols > n) w.col = Math.max(0, n - w.cols)
   }
   return resolveOverlaps(next)
+}
+
+// The layout's global scale: one knob for every card. Scale is global only, so
+// the grid is the whole story — a card is exactly as big as its cell.
+function setScale(config, scale) {
+  var n = Number(scale)
+  if (!isFinite(n)) return normalizeConfig(config)
+  var next = normalizeConfig(config)
+  next.layout.scale = Math.round(clampNumber(n, MIN_SCALE, MAX_SCALE, DEFAULT_LAYOUT.scale) * 100) / 100
+  return next
+}
+
+// The layout's global opacity, the same deal as `setScale`: moving it writes
+// over any per-card opacity so the whole grid matches again. Opaque is 1, and
+// an invalid value falls back to the default opacity.
+function setLayoutOpacity(config, opacity) {
+  var n = Number(opacity)
+  if (!isFinite(n)) return normalizeConfig(config)
+  var next = normalizeConfig(config)
+  next.layout.opacity = Math.round(clampNumber(n, 0, 1, DEFAULT_LAYOUT.opacity) * 100) / 100
+  dropOpacityOverrides(next)
+  return next
+}
+
+// With the global opacity changed, a card that had its own keeps it no longer:
+// the point of touching the global is the whole grid moving together.
+function dropOpacityOverrides(config) {
+  for (var i = 0; i < config.widgets.length; i++) config.widgets[i].opacity = null
+}
+
+// Back to what the plugin ships with: the grid's default scale and opacity,
+// with no card keeping its own opacity. What was edited is lost — this is the
+// "I moved too many knobs" button.
+function resetAppearance(config) {
+  var next = normalizeConfig(config)
+  next.layout.scale = DEFAULT_LAYOUT.scale
+  next.layout.opacity = DEFAULT_LAYOUT.opacity
+  dropOpacityOverrides(next)
+  return next
+}
+
+// One widget's opacity on its own, so a card can sit over the wallpaper in a
+// way the rest of the grid does not need to follow.
+function setOpacity(config, id, opacity) {
+  var n = Number(opacity)
+  if (!isFinite(n)) return normalizeConfig(config)
+  var next = normalizeConfig(config)
+  var target = findInstance(next, id)
+  if (!target) return next
+  target.opacity = Math.round(clampNumber(n, 0, 1, DEFAULT_OPACITY) * 100) / 100
+  return next
+}
+
+// Give a card back to the layout's opacity after it had its own.
+function clearOpacity(config, id) {
+  var next = normalizeConfig(config)
+  var target = findInstance(next, id)
+  if (!target) return next
+  target.opacity = null
+  return next
+}
+
+// What the card actually renders: its own override when it set one, otherwise
+// the layout's global opacity.
+function effectiveOpacity(config, instance) {
+  if (instance && typeof instance.opacity === "number") return instance.opacity
+  var global = config && config.layout ? config.layout.opacity : undefined
+  return typeof global === "number" ? global : DEFAULT_LAYOUT.opacity
 }
 
 // Instances that should be drawn on the output named `screenName`. An empty
@@ -2992,6 +3099,8 @@ if (typeof module !== "undefined" && module.exports) {
     MAX_STRING: MAX_STRING,
     MAX_COLUMNS: MAX_COLUMNS,
     MAX_ROWS: MAX_ROWS,
+    MIN_SCALE: MIN_SCALE,
+    MAX_SCALE: MAX_SCALE,
     SIDES: SIDES,
     DEFAULT_LAYOUT: DEFAULT_LAYOUT,
     catalog: catalog,
@@ -3044,6 +3153,8 @@ if (typeof module !== "undefined" && module.exports) {
     clampString: clampString,
     clampNumber: clampNumber,
     normalizeLayout: normalizeLayout,
+    scaledCell: scaledCell,
+    scaledGap: scaledGap,
     blockWidth: blockWidth,
     blockHeight: blockHeight,
     gridWidth: gridWidth,
@@ -3095,6 +3206,12 @@ if (typeof module !== "undefined" && module.exports) {
     cycleSize: cycleSize,
     setSide: setSide,
     setColumns: setColumns,
+    setScale: setScale,
+    setLayoutOpacity: setLayoutOpacity,
+    setOpacity: setOpacity,
+    clearOpacity: clearOpacity,
+    effectiveOpacity: effectiveOpacity,
+    resetAppearance: resetAppearance,
     widgetsForScreen: widgetsForScreen,
     offWidgets: offWidgets,
     isInteractiveType: isInteractiveType,

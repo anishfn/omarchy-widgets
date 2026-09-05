@@ -88,16 +88,18 @@ Item {
     visible: root.ticks
     cardRadius: root.card ? root.card.radius : 20
     inset: Math.round(root.unit * 0.06)
-    tickLength: Math.max(2, Math.round(root.unit * 0.025))
-    spacing: Math.max(4, Math.round(root.unit * 0.045))
+    // Long enough to read against the card edge; the majors stay a clear
+    // step above them.
+    tickLength: Math.max(3, Math.round(root.unit * 0.04))
+    majorTickLength: Math.max(6, Math.round(root.unit * 0.08))
     tickColor: Util.alpha(root.foreground, 0.3)
   }
 
   Column {
     anchors.centerIn: parent
-    // Nudged up by the descender room the date line reserves but rarely
-    // uses, so the block reads centred rather than measuring centred.
-    anchors.verticalCenterOffset: -Math.round(root.unit * 0.01)
+    // A few pixels below dead centre so the eye line of the time matches the
+    // weather card's headline rather than floating above it.
+    anchors.verticalCenterOffset: Math.round(root.unit * 0.02)
     spacing: Math.round(root.unit * 0.02)
 
     Text {
@@ -118,7 +120,9 @@ Item {
       textFormat: Text.PlainText
       color: root.foreground
       font.family: root.fontFamily
-      font.pixelSize: Math.max(12, Math.round(root.unit * 0.21))
+      // The weather card's headline size, so the two cards agree about what
+      // a headline is.
+      font.pixelSize: Math.max(14, Math.round(root.unit * 0.24))
       font.weight: Font.Light
       renderType: Text.NativeRendering
     }

@@ -213,8 +213,18 @@ set of places it can land.
 |---|---|
 | **Side** | `left` or `right`. The buttons in the editor, or `side` in the config |
 | **Columns** | How many cells wide the grid is, 1–6. Two by default. The buttons in the editor, or `columns` in the config |
+| **Scale** | Grows or shrinks every card at once, 25–200% in the editor's field, or `scale` in the config. Global only: every card is exactly as big as its cell |
+| **Opacity** | How solid every card is over the wallpaper, 0–100% in the editor's field, or `opacity` in the config. The global re-applies to every card; any card can break away with its own (see below) |
 | **Cell** | 200px square by default. Widening the grid adds room, it does not shrink what is in it |
 | **Spans** | A widget takes one or more columns. The clock is square or double-width |
+
+Individual cards can drift from the grid's opacity. Select a widget and its
+own **Opacity** field appears — the value it shows is the card's own when one
+is set, the grid's otherwise — and **↺** sends the card back to following the
+grid. In the config the same is a per-widget `opacity` (see [Each
+widget](#each-widget)): a value is that card's own, omitting it means "follow
+the layout's". Nothing can do this to **Scale**, which is grid-wide and stays
+that way.
 
 The grid starts below the bar, not behind it: the surface asks the compositor
 for the area the bar has already claimed, so the top row lines up under it on
@@ -628,7 +638,9 @@ are halfway through an edit — and the reason is logged.
     "cellSize": 200,
     "gap": 16,
     "marginX": 40,
-    "marginY": 40
+    "marginY": 40,
+    "scale": 1,
+    "opacity": 0.72
   },
   "widgets": [
     {
@@ -640,7 +652,6 @@ are halfway through an edit — and the reason is logged.
       "row": 0,
       "cols": 1,
       "rows": 1,
-      "opacity": 0.72,
       "radius": 20,
       "settings": {
         "timezone": "Asia/Kolkata",
@@ -669,10 +680,12 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 |---|---|
 | `side` | `left` or `right`: the side a widget goes to when it has not named one of its own |
 | `columns` | How many cells wide the grid is, 1–6 |
-| `cellSize` | The side of one cell in px |
+| `cellSize` | The side of one cell in px at scale 1 |
 | `gap` | Space between cells |
 | `marginX` | Distance from the edge named by `side` |
 | `marginY` | Distance from the top of the usable desktop |
+| `scale` | Multiplies cell and gap together, `0.25`–`2` (25–200%). Global only: every card follows it |
+| `opacity` | How solid cards are over the wallpaper, `0`–`1`. Moving it applies to every card and clears the field below on each |
 
 ### Each widget
 
@@ -687,7 +700,7 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 | `row` | Which row it starts in, counting from the top |
 | `cols` | How many columns it spans. Must be a size the type offers |
 | `rows` | How many rows it spans. Must be a size the type offers |
-| `opacity` | How solid the card is over the wallpaper, `0`–`1` |
+| `opacity` | This card's own solidity, `0`–`1`. Omit it (or the **Opacity ↺** button) to follow the layout's `opacity`; the next grid-wide change re-applies over it |
 | `radius` | Corner rounding in px, or `-1` to follow Hyprland's `decoration:rounding` |
 
 `radius` defaults to `20` rather than to the theme, because a desktop card is

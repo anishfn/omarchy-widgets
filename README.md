@@ -49,6 +49,8 @@ on your desktop.
 | **Weather** | Now, today's range, and the condition | `wttr.in` |
 | **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
 | **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
+| **Calendar** | What is next in your Google Calendar, and when | `calendar.google.com` |
+| **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
 | **Music** | What is playing, how far in, and a play/pause button | local (MPRIS) |
 
 ```
@@ -57,14 +59,18 @@ on your desktop.
    │  13:15  │   12°   │
    ├─────────┴─────────┤        drag to move
    │ ▪▫▪▪▫▪▪▫▪▪▫▪▪▫▪▪ │        drag to the tray to take one off
+   ├───────────────────┤
+   │ 09:00  standup    │        some widgets span two columns
+   │ 14:00  review     │
    ├─────────┬─────────┤
-   │  omara  │ ♪ track │        some widgets span two columns
+   │  omara  │ ♪ track │        ...and some span two rows
    └─────────┴─────────┘
 ```
 
-No account, no telemetry. The clock and the music widget touch nothing outside
-your machine. Three widgets do make requests, **each only while it is switched
-on**, each to one host and no third party — the table above says which.
+No account, no telemetry. The clock, the todo list and the music widget touch
+nothing outside your machine. Four widgets do make requests, **each only while
+it is switched on**, each to one host and no third party — the table above
+says which.
 
 ---
 
@@ -73,13 +79,23 @@ on**, each to one host and no third party — the table above says which.
 - [What it does](#what-it-does)
 - [Install](#install)
 - [Turning widgets on and off](#turning-widgets-on-and-off)
+  - [More than one of the same widget](#more-than-one-of-the-same-widget)
 - [Arranging them](#arranging-them)
+  - [Two sides](#two-sides)
   - [The grid](#the-grid)
   - [Dragging](#dragging)
+    - [Dropping onto an occupied cell](#dropping-onto-an-occupied-cell)
 - [The clock](#the-clock)
 - [The weather](#the-weather)
 - [The contribution graph](#the-contribution-graph)
 - [Repo pulse](#repo-pulse)
+- [The calendar](#the-calendar)
+  - [Connecting your Google Calendar](#connecting-your-google-calendar)
+  - [Three sizes](#three-sizes)
+- [Todos](#todos)
+  - [The file](#the-file)
+  - [Ticking things off](#ticking-things-off)
+  - [Scrolling, and opening the file](#scrolling-and-opening-the-file)
 - [Music](#music)
 - [Config file](#config-file)
   - [The layout block](#the-layout-block)
@@ -99,12 +115,12 @@ Draws widget cards on the desktop:
 
 | | |
 |---|---|
-| **Where** | A grid down the left or right edge, on the Bottom layer — above the wallpaper, beneath every window |
+| **Where** | A grid down the left edge, the right, or both, on the Bottom layer — above the wallpaper, beneath every window |
 | **Colors** | From the active theme's palette; switching themes re-colors them live |
-| **Input** | None, unless a widget asks for it — see [Music](#music) |
+| **Input** | None, unless a widget asks for it — [Music](#music), [Repo pulse](#repo-pulse), [Todos](#todos) |
 | **Space** | Reserves none, and stays inside the area the bar has already claimed |
 | **Screens** | Every output by default, or one you name |
-| **Network** | Only the weather and GitHub widgets, only while they are on |
+| **Network** | Only the weather, GitHub and calendar widgets, only while they are on |
 
 Nothing here is a window. You cannot focus a widget or click it — it is
 something you see when you clear the screen. Arranging them happens in an
@@ -136,11 +152,55 @@ A widget you switch off is off, not gone: its settings stay in the config
 file, and switching it back on brings them back — in its old cell if it is
 still free, and in the next free one if it is not.
 
+### More than one of the same widget
+
+Three timezones, two repositories, a work list and a personal one. Open the
+layout editor, click a widget, and press **Duplicate** — you get a copy with
+the same settings and the same shape, already selected so you can change the
+one field that differs. **Remove** deletes a spare and its settings.
+
+The button only appears for types where a second one can say something
+different. The weather reads one location and the music card follows one
+player, so duplicating either would be the same card twice; those two show no
+Duplicate button, and there is nothing to configure to change that.
+
+**The last of a type cannot be deleted, only switched off.** Every type in the
+catalogue has a row in the bar popup, and that row *is* an instance — deleting
+the last one would only mean the next config read put a fresh one back,
+switched off, which looks exactly like the delete failing.
+
+Copies are named `clock-2`, `clock-3`, and so on, and the editor tells them
+apart by the **Label** (or **Title**) you give them, falling back to the id.
+The id is yours: rename it in the config file and it changes everywhere,
+including on the command line.
+
 ## Arranging them
 
 **Arrange…** in the same popup opens the layout editor: the desktop dims, the
 grid appears under your widgets, and you can drag them around. Escape or
 **Done** closes it.
+
+### Two sides
+
+Widgets can sit on the **left edge, the right edge, or both at once**. The
+editor draws both grids whether or not you are using them — the unused one
+fainter, as an invitation — and dragging a card from one to the other is all
+it takes to move it across. Nothing to switch on first.
+
+Each widget remembers its own side, so the two grids are two independent
+boards: the same cell on the left and on the right are different places, and a
+widget on one can never collide with a widget on the other.
+
+The **Side** buttons in the toolbar put *everything* on one side, which is what
+they have always done and what they look like they do. `layout.side` is also
+where a new widget goes when it has no opinion of its own.
+
+> [!NOTE]
+> Both grids have to fit the screen, so the **Columns** ceiling is now what
+> fits *twice*, not once — five columns a side on a 2560px display rather than
+> six. The other side is always one drag away, and a column count that only
+> works until you use it is a trap rather than a setting. A config that already
+> holds a wider grid keeps it and can still be narrowed.
 
 ### The grid
 
@@ -176,9 +236,14 @@ is repacked in reading order.
 
 ### Dragging
 
-- **Move one** — drag it to another cell. The cell you are over lights up in
-  the accent color when the drop is legal and in the urgent color when it is
-  not, so a refused drop is refused before it happens.
+- **Move one** — drag it to another cell, on either side of the screen. The
+  cell you are over lights up in the accent color when the drop is legal and
+  in the urgent color when it is not, so a refused drop is refused before it
+  happens.
+- **Send one across** — drag it to the other side's grid. The grid you are
+  over brightens as you cross, so you can see which board you are aiming at.
+- **Drop it on another widget** — the other one moves out of the way. See
+  below.
 - **Take one off** — drag it down into the tray at the bottom.
 - **Put one back** — drag it out of the tray onto a cell.
 - **Resize one** — click it, then the size button (`1×1`) in the toolbar. It
@@ -190,6 +255,31 @@ is repacked in reading order.
 What decides a drop is the corner of the card you are holding, not the point
 of the pointer — the same rule the highlight draws, so the two can never
 disagree.
+
+#### Dropping onto an occupied cell
+
+An occupied cell is the most natural place to aim for — it is where you can
+*see* a widget already fits — so the thing already there moves rather than the
+drop being refused. Two rules, in this order:
+
+- **Same footprint: they swap.** Drop the clock on the weather and the weather
+  takes the clock's cell. Shortest distance anything has to travel, and the
+  grid stays as full as it was.
+- **Anything else: it goes below.** Drop a two-column calendar onto a row
+  holding music and a repo card, and both of them move to the first free row
+  at or below the drop. Not up into whatever gap happened to exist above it —
+  below is the direction the gesture means.
+
+The grid rearranges **while you are still holding the card**, so you see what
+the drop will do before you commit to it, and the displaced widgets slide
+rather than teleport. What you are shown is not an approximation of the drop:
+it *is* the drop, worked out early by the same code that will apply it on
+release. Escape still cancels the whole thing.
+
+A drop is only ever refused for running off the grid — or, in the one corner
+case, when a widget coming in from the tray lands on a grid so full that the
+occupant has nowhere to go. Then nothing moves at all, because half a
+rearrangement is worse than none.
 
 ## The clock
 
@@ -311,6 +401,165 @@ anywhere on it are caught — only the name does anything with them.
 Data comes from the public REST API, unauthenticated: sixty requests an hour
 per address, two per repository every half hour.
 
+## The calendar
+
+What is next, and when. The card is a list of times against sentences, which
+is what a calendar is once you take the week grid away — a grid of squares on
+a wallpaper tells you that Thursday is busy; it does not tell you what you are
+late for.
+
+Recurring events, all-day events, moved instances and cancelled ones are all
+handled, and times are shown in your own clock however the event was written.
+
+### Connecting your Google Calendar
+
+Google publishes every calendar as an iCalendar file at a private address.
+That address is the whole connection: **there is no OAuth client to register
+and no token for the shell to hold.**
+
+1. Google Calendar → hover the calendar in the left sidebar → **⋮** →
+   **Settings and sharing**
+2. Scroll to **Integrate calendar**
+3. Copy **Secret address in iCal format**
+4. Paste it into the widget's **Secret iCal address** in the layout editor
+
+The plugin fetches that URL and nothing else, every 15 minutes, only while a
+calendar widget is switched on, straight to `calendar.google.com`. Nothing is
+sent but the address itself, and no third-party proxy is involved. Only
+addresses matching Google's own iCal shape are accepted; anything else is
+refused rather than fetched.
+
+> [!IMPORTANT]
+> **That address is a read-only copy of your calendar to anyone who has it,**
+> and it goes into `~/.config/omarchy/widgets.json` in plain text. Do not
+> commit that file to a public dotfiles repo. Google can revoke and reissue
+> the address from the same settings page (**Reset private URLs**) if it gets
+> out.
+
+If you would rather not put a secret in the file at all, a **public** iCal
+address works too — for a calendar you have already shared publicly, or one of
+Google's holiday calendars.
+
+### Three sizes
+
+| | |
+|---|---|
+| **1×1** | The next thing on its own: what it is, when it starts, how long you have |
+| **2×1** | Two or three rows — time, event, and the day in the margin where it changes |
+| **2×2** | The agenda, broken into days, as far ahead as the card holds |
+
+The next event carries a short accent rule in the margin. That is the whole of
+the card's emphasis: everything below it is simply what comes after.
+
+The tall card dates every group it draws, so it drops the date across the top
+— that line would be saying "Today" twice. It keeps the line if you have given
+the widget a **Label**, which is the one thing the day headings cannot say.
+
+Times are shown on a 24-hour clock by default; **Clock** switches to 12-hour.
+**All-day events** and **Location** can each be turned off.
+
+## Todos
+
+Today's list, read from a text file.
+
+The file is the interface. There is no todo service worth making a wallpaper
+depend on, and the thing every editor, every dotfiles repo and every sync tool
+already handles is a file with a line in it per thing to do. So the card
+reads, and ticking something off is a keystroke in the editor you already have
+open — which is also why this widget takes no clicks. A checkbox on a card
+that lives under your windows is a checkbox you have to clear the screen to
+reach.
+
+### The file
+
+`~/.config/omarchy/todos.txt` by default; set **List file** to point somewhere
+else. It is watched, so the card follows the file as you save it.
+
+```
+# Friday
+- [ ] ship the calendar widget
+- [x] reply to the issue
+! call the bank
+* buy milk
+x 2026-09-04 restart the shell
+plain lines work too
+```
+
+The grammar is deliberately forgiving, because it is meant to accept what you
+already type:
+
+| | |
+|---|---|
+| `- [ ]` / `- [x]` | A markdown checkbox. Anything but a space between the brackets means done |
+| `x ` at the start | todo.txt's done marker. A completion date after it is dropped |
+| `-` `*` `+` `•` | A bullet, optional |
+| `!` at the start | Important. It goes to the top of the card |
+| `# heading` | The first one names the list; the rest are comments |
+| `---` | A divider. Not something to do |
+| anything else | An item |
+
+**What is left comes first**, marked items ahead of it, and finished ones
+last — a list drawn in file order puts three things you have already done at
+the top of a card with room for four. Inside each band the file's own order
+survives.
+
+| | |
+|---|---|
+| **1×1** | How much is left, and the one thing to do next |
+| **2×1** | The top of the list |
+| **2×2** | The list |
+
+### Ticking things off
+
+**Click the ring beside an item.** It rewrites that one line of the file and
+leaves every other byte alone — your indentation, your bullet, your wording,
+your other lines. A card that reformatted the whole list every time you ticked
+something off would be a card that fights the editor you wrote it in.
+
+What it writes depends on what is already there:
+
+| The line says | Ticking it gives |
+|---|---|
+| `- [ ] thing` | `- [x] thing` |
+| `x 2026-09-04 thing` | `thing` — unticking drops the completion date with the mark |
+| `* thing` | `* [x] thing` — it gains a checkbox and keeps its bullet |
+| `thing` | `[x] thing` |
+
+A line that gains a checkbox keeps it: unticking leaves `[ ] thing` rather
+than guessing its way back to a bare line. That round-trips; guessing would
+not.
+
+Turn **Tick items off** off in the editor if you would rather the card were
+read-only.
+
+> [!NOTE]
+> The card and your editor are two writers on one file. If you have the list
+> open with unsaved changes and tick something on the card, whichever saves
+> last wins — the same as any two editors on one file.
+
+### Scrolling, and opening the file
+
+**The list scrolls, vertically and horizontally.** The card shows what fits
+and you flick or wheel to the rest, so a list longer than the card is still a
+list you can read. Long items are *not* elided — an ellipsis promises the rest
+is unreachable, and here it is not; scroll sideways instead. A thin indicator
+appears on the right while there is more below, and along the bottom while you
+are actually moving sideways.
+
+**Clicking the title opens the list in your editor** — whichever one
+`omarchy default editor` names, in a terminal if that is what it is. On a
+first run, before the file exists, the path in the middle of the empty card
+does the same thing, so making the list is one click.
+
+This is the third widget you can click, after [Music](#music) and
+[Repo pulse](#repo-pulse), and the one that stretches the rule furthest.
+[DESIGN.md](DESIGN.md) records why. The usual caveat applies twice over here:
+the card sits *under* your windows, so it can only be ticked, scrolled or
+opened where nothing is covering it.
+
+**Finished items** can be hidden, and **Progress** turns off the hairline
+along the bottom. Nothing here leaves your machine.
+
 ## Music
 
 What is playing, from **MPRIS** — so it is whatever is actually playing,
@@ -406,7 +655,7 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 
 | Key | Meaning |
 |---|---|
-| `side` | `left` or `right`: which edge the grid hugs |
+| `side` | `left` or `right`: the side a widget goes to when it has not named one of its own |
 | `columns` | How many cells wide the grid is, 1–6 |
 | `cellSize` | The side of one cell in px |
 | `gap` | Space between cells |
@@ -417,10 +666,11 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 
 | Key | Meaning |
 |---|---|
-| `id` | Yours, and unique. The name the popup, the editor and the CLI use |
-| `type` | Which widget. `clock` is the only one today |
+| `id` | Yours, and unique. The name the popup, the editor and the CLI use. Rename it and the widget is renamed everywhere |
+| `type` | Which widget: `clock`, `weather`, `github`, `repo-pulse`, `calendar`, `todos`, `music` |
 | `enabled` | Whether it is on the desktop. The popup switch writes this |
 | `monitor` | Output name (`hyprctl monitors`), or `""` for all of them |
+| `side` | `left` or `right`. Omit it (or write anything else) and it is filled in with the layout's own side when the file is read |
 | `col` | Which column it starts in, counting from the grid's left |
 | `row` | Which row it starts in, counting from the top |
 | `cols` | How many columns it spans. Must be a size the type offers |
@@ -470,6 +720,26 @@ is refused outright.
 | `repo` | `owner/name` |
 | `showStats` | The figures along the bottom |
 
+#### Calendar
+
+| Key | Meaning |
+|---|---|
+| `icsUrl` | The secret iCal address from Google Calendar's **Integrate calendar** panel. Only `calendar.google.com` addresses are fetched |
+| `label` | The line across the top. `""` says today's date, and the tall card drops it |
+| `format` | `24h` or `12h` |
+| `showAllDay` | Whether all-day events appear at all |
+| `showLocation` | Append the event's location to its line |
+
+#### Todos
+
+| Key | Meaning |
+|---|---|
+| `file` | Path to the list. `""` means `~/.config/omarchy/todos.txt`; `~/` and a bare name resolve against home |
+| `title` | The name on the card. `""` uses the file's first `#` heading, then `Todo` |
+| `showDone` | Whether finished items appear |
+| `showProgress` | The hairline along the bottom |
+| `canTick` | Whether clicking a ring marks the item done. Off makes the card read-only |
+
 #### Music
 
 | Key | Meaning |
@@ -489,25 +759,42 @@ omarchy-shell widgets disable blr
 omarchy-shell widgets toggle blr
 
 omarchy-shell widgets move blr 1 2  # move to column 1, row 2
+omarchy-shell widgets move blr 1 2 left   # ...on the left-hand grid
 omarchy-shell widgets place blr 1 2 # same, but switch it on if it was off
 omarchy-shell widgets size blr      # step to the next size the type offers
 omarchy-shell widgets select blr    # what the editor's controls act on
 omarchy-shell widgets set blr timezone Asia/Kolkata
 omarchy-shell widgets set blr format 'hh:mm AP'
-omarchy-shell widgets side left     # left | right
-omarchy-shell widgets columns 4     # 1-6, whatever fits the screen
+omarchy-shell widgets side left     # move everything to the left
+omarchy-shell widgets side left blr # ...or just this one
+omarchy-shell widgets add clock     # another one, at its defaults
+omarchy-shell widgets duplicate blr # ...or a copy of one you configured
+omarchy-shell widgets remove blr-2  # delete a spare and its settings
+omarchy-shell widgets columns 4     # 1-6, whatever fits both grids
 omarchy-shell widgets edit          # open the layout editor
 omarchy-shell widgets done          # close it
 omarchy-shell widgets weather       # the current reading
 omarchy-shell widgets github        # the fetched graphs
 omarchy-shell widgets repos         # the fetched repositories
+omarchy-shell widgets calendar      # the next few events, per calendar
+omarchy-shell widgets todos         # the list, as it was parsed
+omarchy-shell widgets todo '' 3 true # tick line 3 of the only list off
 omarchy-shell widgets reload        # re-read the file now
 
 omarchy-shell shell toggle io.github.anishfn.widgets   # open the bar popup
 ```
 
-`move` and `place` answer `ok`, or say that the cell is taken or off the grid
-— the same judgement the editor's highlight makes. `set` answers with the
+`add` and `duplicate` answer with the id of the widget they made, so a script
+can configure it in the next line. `move` and `place` take an optional side;
+without one they stay on whichever grid the widget is already on.
+
+`move` and `place` answer `ok` unless the cell is off the grid — a cell with
+something in it is not a refusal, because the occupant moves. That is the same
+judgement the editor's highlight makes; see [Dragging](#dragging).
+
+`todo` takes the list's path (or `''` when only one list is on), the line
+number as `widgets todos` prints it, and `true` or `false`. It answers `ok`,
+or says the line is not a task or is already in that state. `set` answers with the
 value that was actually stored, which is not always the one you sent: a
 setting is coerced to the kind its widget declared, so a bad value comes back
 as the default rather than being kept.

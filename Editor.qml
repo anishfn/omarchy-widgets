@@ -131,6 +131,23 @@ Item {
         property bool dropValid: false
         property bool overTray: false
 
+        // The grid as it *would* be if the pointer let go now, worked out by
+        // the same function that will perform the drop. Everything the drag
+        // shows is read off this, so the preview and the result cannot come
+        // apart -- there is only one answer, asked once per pointer move.
+        property var dropPreview: null
+
+        // Where a widget sits while a drag is in progress. The one in hand
+        // keeps its old cell and fades, so the grid still shows where it came
+        // from; everything else slides to wherever the drop would put it.
+        function previewInstance(instance) {
+          if (!instance) return instance
+          if (!win.dragging || !win.dropPreview) return instance
+          if (instance.id === win.dragId) return instance
+          var moved = Model.findInstance(win.dropPreview, instance.id)
+          return moved ? moved : instance
+        }
+
         function startDrag(instance, localGrabX, localGrabY, px, py) {
           if (!instance) return
           win.dragId = String(instance.id)
@@ -155,6 +172,7 @@ Item {
           if (win.overTray) {
             win.hoverCell = null
             win.dropValid = false
+            win.dropPreview = null
             return
           }
 
@@ -163,9 +181,10 @@ Item {
           // disagree — they are one answer, asked once.
           var target = root.config
             ? Model.dropTarget(root.config, win.dragId, win.ghostX, win.ghostY, win.width)
-            : { cell: null, valid: false }
+            : { cell: null, valid: false, preview: null }
           win.hoverCell = target.cell
           win.dropValid = target.valid
+          win.dropPreview = target.valid ? target.preview : null
         }
 
         function dragMove(px, py) {
@@ -181,7 +200,8 @@ Item {
           if (win.overTray) {
             if (root.service) root.service.setEnabled(id, false)
           } else if (win.hoverCell && win.dropValid && root.service) {
-            root.service.placeWidget(id, win.hoverCell.col, win.hoverCell.row)
+            root.service.placeWidget(id, win.hoverCell.col, win.hoverCell.row,
+              win.hoverCell.side)
           }
           win.dragCancel()
         }
@@ -191,6 +211,7 @@ Item {
           win.dragId = ""
           win.hoverCell = null
           win.dropValid = false
+          win.dropPreview = null
           win.overTray = false
         }
 
@@ -236,14 +257,33 @@ Item {
         readonly property int gridRows: Math.min(Model.MAX_ROWS,
           (root.config ? Model.usedRows(root.config) : 0) + 1)
 
+        // Both grids, always. The other side is drawn even when nothing is on
+        // it, because that is the only way anyone finds out it is there --
+        // an empty half of the screen tells you nothing, and a second grid of
+        // cells is an invitation you can drag something into.
+        //
+        // The unused one is drawn fainter, so at a glance the desktop still
+        // reads as "my widgets are on the right" rather than as two equal
+        // columns you have to choose between.
+        readonly property var sideUse: root.config
+          ? Model.sidesInUse(root.config) : ({ left: true, right: true })
+
         Repeater {
-          model: win.gridRows * root.layout.columns
+          model: win.gridRows * root.layout.columns * Model.SIDES.length
 
           delegate: Rectangle {
             required property int index
-            readonly property int col: index % root.layout.columns
-            readonly property int row: Math.floor(index / root.layout.columns)
-            readonly property var rect: Model.cellRect(root.layout, win.width, col, row, 1, 1)
+            readonly property int perSide: win.gridRows * root.layout.columns
+            readonly property string side: Model.SIDES[Math.floor(index / perSide)]
+            readonly property int cell: index % perSide
+            readonly property int col: cell % root.layout.columns
+            readonly property int row: Math.floor(cell / root.layout.columns)
+            readonly property var rect: Model.cellRect(root.layout, win.width,
+              col, row, 1, 1, side)
+            // Lit while a card is being carried over this grid, so the side
+            // you are heading for answers before you let go.
+            readonly property bool live: win.dragging
+              && win.hoverCell !== null && win.hoverCell.side === side
 
             x: rect.x
             y: rect.y
@@ -252,7 +292,8 @@ Item {
             radius: Style.cornerRadius > 0 ? Style.cornerRadius : 0
             color: "transparent"
             border.width: 1
-            border.color: Util.alpha(root.foreground, 0.18)
+            border.color: Util.alpha(root.foreground,
+              win.sideUse[side] || live ? 0.18 : 0.07)
           }
         }
 
@@ -263,7 +304,7 @@ Item {
           visible: win.dragging && win.hoverCell !== null
           readonly property var rect: win.hoverCell
             ? Model.cellRect(root.layout, win.width, win.hoverCell.col, win.hoverCell.row,
-                win.dragCols, win.dragRows)
+                win.dragCols, win.dragRows, win.hoverCell.side)
             : ({ x: 0, y: 0, width: 0, height: 0 })
           x: rect.x
           y: rect.y
@@ -284,7 +325,13 @@ Item {
             id: slot
             required property var modelData
 
-            readonly property var rect: Model.widgetRect(root.layout, modelData, win.width)
+            // Where the drop would put it, which is its own cell whenever
+            // nothing is being dragged. The Repeater's model stays the real
+            // config throughout, so only x and y re-evaluate as the pointer
+            // moves -- rebuilding the delegates would tear every card down
+            // and build it again on every mouse move.
+            readonly property var rect: Model.widgetRect(root.layout,
+              win.previewInstance(modelData), win.width)
             readonly property bool isDragged: win.dragging && win.dragId === modelData.id
             readonly property bool isSelected: root.selectedId === modelData.id
 
@@ -295,6 +342,14 @@ Item {
             // Left in place but faded while it is in hand, so the grid keeps
             // showing where it came from.
             opacity: isDragged ? 0.25 : 1
+
+            // The one place motion earns its keep. DESIGN.md rules animation
+            // out on the desktop and allows it here, and this is why: a card
+            // that teleports out from under the one you are holding reads as
+            // a glitch, and the same card sliding down reads as the grid
+            // making room. Short enough to be over before you have let go.
+            Behavior on x { enabled: !slot.isDragged; NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+            Behavior on y { enabled: !slot.isDragged; NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
 
             WidgetInstance {
               anchors.fill: parent
@@ -481,6 +536,40 @@ Item {
                 onClicked: if (root.service) root.service.cycleSize(root.selectedId)
               }
 
+              // Another one of these. Only for a type that says a second one
+              // means something -- a duplicate weather card would be the same
+              // reading twice.
+              Button {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.selected !== null
+                  && Model.allowsMultiple(root.selected ? root.selected.type : "")
+                text: "Duplicate"
+                tooltipText: "Add another " + (root.selected
+                  ? Model.catalogEntry(root.selected.type).name.toLowerCase() : "widget")
+                  + ", with these settings"
+                bordered: true
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                onClicked: if (root.service) root.service.duplicateWidget(root.selectedId)
+              }
+
+              // ...and away again. Only ever offered for a spare: the last of
+              // a type is switched off rather than deleted, because deleting
+              // it would only mean the next config read put a fresh one back.
+              Button {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.selected !== null && root.config !== null
+                  && Model.canRemove(root.config, root.selectedId)
+                text: "Remove"
+                tooltipText: "Delete " + root.nameFor(root.selected) + " and its settings"
+                bordered: true
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                onClicked: if (root.service) root.service.removeWidget(root.selectedId)
+              }
+
               Button {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "Done"
@@ -665,8 +754,8 @@ Item {
               wrapMode: Text.Wrap
               textFormat: Text.PlainText
               text: root.selected !== null
-                ? "Drag it to move it, or into the bar below to take it off the desktop."
-                : "Drag a widget to move it. Click one to change its settings."
+                ? "Drag it anywhere — either side of the screen, or onto another widget to swap. Into the bar below takes it off."
+                : "Drag a widget to either side of the screen. Click one to change its settings, or to duplicate it."
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption

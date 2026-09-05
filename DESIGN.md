@@ -135,9 +135,29 @@ that size, not the same one stretched.
 
 - `[1, 1]` — one value and its label. The default shape.
 - `[2, 1]` — room for a second value beside the first, a sparkline, a range.
+- `[2, 2]` — a list long enough to be worth reading. Rare, and only for a
+  widget that genuinely has more to say than a row can hold.
 
 If your `[2, 1]` is your `[1, 1]` with more whitespace, do not offer it. The
 size button should feel like a choice, not a stretch.
+
+**A size taller than one row sizes its type from a cell, not from the card.**
+`Math.min(width, height)` is the right unit while every size you offer is one
+row tall — it is the cell size, and it is what keeps the drawing identical at
+160px and at 260px. On a `[2, 2]` it is suddenly twice as large, and a widget
+that sized type from it would answer a bigger card with bigger letters. What
+the reader asked a second row for is more content:
+
+```qml
+readonly property int spanCols: instance && instance.cols > 0 ? instance.cols : 1
+readonly property int spanRows: instance && instance.rows > 0 ? instance.rows : 1
+readonly property real unit: Math.min(width / spanCols, height / spanRows)
+```
+
+That is still one number, still derived from the rectangle, and identical to
+`Math.min(width, height)` at every single-row size. `widgets/Calendar.qml` and
+`widgets/Todos.qml` are the worked examples: both work out how many rows fit
+and draw that many, rather than fixing a count that suits one cell size.
 
 ## Decoration
 
@@ -160,6 +180,12 @@ you are working is a distraction you cannot turn off without deleting it.
 - The only motion worth having is in the editor, where you are looking at it
   on purpose.
 
+The editor is where that last line is spent. Dropping a widget onto an
+occupied cell moves the occupant, and the occupant *slides* — 130ms, and only
+while the editor is open. A card that teleported out from under the one you
+were holding would read as a glitch; the same card sliding down reads as the
+grid making room, which is the one thing the gesture has to communicate.
+
 ## What a widget is not
 
 - **Not interactive, unless it has to be.** The desktop surface has an empty
@@ -173,9 +199,23 @@ you are working is a distraction you cannot turn off without deleting it.
   described. Both are the single thing you would reach for while looking at
   that card, and neither needs anything drawn to explain it.
 
-  What fails the test: a settings button, a menu, a list to scroll, anything
-  that opens more interface. That is a bar widget or a panel. A wallpaper is
-  not somewhere to put controls.
+  What fails the test: a settings button, a menu, anything that opens more
+  interface. That is a bar widget or a panel. A wallpaper is not somewhere to
+  put controls.
+
+  **`todos` is the exception, and it is recorded here so it stays one.** It
+  takes a tick per row, a title that opens the file, and a list that scrolls
+  in both directions — three things, where the rule says one. What earns it:
+  every one of them is about an item already on the card, a tick is the only
+  thing anybody ever does to a list, and a list is the single subject on a
+  wallpaper that genuinely holds more than a card can show. Eliding the
+  eleventh item into a card that cannot reach it is worse than letting it be
+  reached.
+
+  Do not read that as the rule loosening. A scrolling list is still the wrong
+  shape for almost everything: it is content you read a line at a time, and a
+  wallpaper is read at a glance. If your widget wants one, the question to
+  answer first is whether it wants to be a panel.
 
   Three things follow, and all three are on you:
 
@@ -186,6 +226,11 @@ you are working is a distraction you cannot turn off without deleting it.
     your windows; that is the point of them.
   - **Targets have to be hittable without aiming.** This is a wallpaper, not a
     toolbar.
+
+  Where a card does take a click, **the hover state is the whole of the
+  affordance**: it is the only thing telling the user which part of a
+  click-through desktop is live. A link underlines and takes the accent; a
+  checkbox fills faintly. Nothing is drawn to explain it in words.
 
 - **Not a notification.** No demands for attention, no urgent colour for
   things that are merely notable.

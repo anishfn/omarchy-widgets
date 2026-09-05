@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Ui
 import "../Model.js" as Model
 
 // The desktop pet's card: a switch, a row of skins, and the two dials a pet
@@ -337,6 +338,80 @@ Item {
       renderType: Text.NativeRendering
     }
 
+    // Roaming, in the panel's own terms: the same switch component, and the
+    // same write -- setRoaming, never a bare updateSettings.
+    Item {
+      width: parent.width
+      height: Math.round(root.unit * 0.09)
+      visible: root.live
+
+      Text {
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Roaming"
+        textFormat: Text.PlainText
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: root.smallSize
+        renderType: Text.NativeRendering
+      }
+
+      ToggleSwitch {
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        checked: root.live && root.omate.roaming
+        enabled: root.live
+        trackHeight: Math.round(root.unit * 0.06)
+        onToggled: {
+          if (!root.live) return
+          if (typeof root.omate.setRoaming === "function")
+            root.omate.setRoaming(!checked)
+        }
+      }
+    }
+
+    // Naps and chatter, the panel's two cadences. The panel types them into
+    // spin boxes; this card never takes the keyboard, so the same numbers --
+    // same floors, same ceilings -- are stepped rather than typed.
+    Item {
+      width: parent.width
+      height: Math.round(root.unit * 0.09)
+      visible: root.live
+
+      Text {
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Naps / chatter"
+        textFormat: Text.PlainText
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: root.smallSize
+        renderType: Text.NativeRendering
+      }
+
+      Row {
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Math.round(root.unit * 0.06)
+
+        DialStepper {
+          value: root.live && omate.settings ? Math.round(omate.settings.sleepMinutes) : 10
+          from: 0
+          to: 120
+          enabled: root.live
+          onChange: function (v) { omate.updateSettings({ sleepMinutes: v }) }
+        }
+
+        DialStepper {
+          value: root.live && omate.settings ? Math.round(omate.settings.chatterMinutes) : 4
+          from: 1
+          to: 60
+          enabled: root.live
+          onChange: function (v) { omate.updateSettings({ chatterMinutes: v }) }
+        }
+      }
+    }
+
     CardSlider {
       width: parent.width
       height: Math.round(root.unit * 0.12)
@@ -420,7 +495,8 @@ Item {
       Row {
         id: chaseChips
 
-        anchors.right: parent.right
+        // Left, under the caption's first word: the row reads top to
+        // bottom, Off first, rather than trailing the card's right edge.
         spacing: Math.round(root.unit * 0.025)
 
         Repeater {
@@ -495,6 +571,90 @@ Item {
     font.family: root.fontFamily
     font.pixelSize: root.bodySize
     renderType: Text.NativeRendering
+  }
+
+  // ------------------------------------------------------------------ stepper
+  //
+  // Minutes, stepped. The quiet counterpart of the panel's spin box: the
+  // value, a minus and a plus, nothing else. Each click is one settings
+  // write, the same commit the panel's onModified makes per step -- there
+  // is no drag here to batch.
+
+  component StepButton: Item {
+    id: stepButton
+
+    property string glyph: ""
+    // Whether pressing it can still move the value, so the dead end of
+    // the range sits back instead of pretending.
+    property bool live: true
+
+    signal clicked()
+
+    width: Math.max(12, Math.round(root.unit * 0.07))
+    height: width
+
+    Text {
+      anchors.centerIn: parent
+      text: stepButton.glyph
+      textFormat: Text.PlainText
+      color: !stepButton.enabled || !stepButton.live
+        ? root.faint
+        : (stepMouse.containsMouse ? root.foreground : root.dim)
+      font.family: root.fontFamily
+      font.pixelSize: root.smallSize
+      renderType: Text.NativeRendering
+
+      Behavior on color { ColorAnimation { duration: 90 } }
+    }
+
+    MouseArea {
+      id: stepMouse
+
+      anchors.fill: parent
+      anchors.margins: -Math.round(root.unit * 0.02)
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      enabled: stepButton.enabled && stepButton.live
+      onClicked: stepButton.clicked()
+    }
+  }
+
+  component DialStepper: Row {
+    id: stepper
+
+    property int value: 0
+    property int from: 0
+    property int to: 99
+    property bool enabled: true
+    signal change(int value)
+
+    spacing: Math.round(root.unit * 0.02)
+
+    StepButton {
+      glyph: "\u2212"
+      enabled: stepper.enabled
+      live: stepper.value > stepper.from
+      onClicked: stepper.change(stepper.value - 1)
+    }
+
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      width: Math.max(implicitWidth, Math.round(root.unit * 0.12))
+      horizontalAlignment: Text.AlignHCenter
+      text: stepper.value + "m"
+      textFormat: Text.PlainText
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: root.smallSize
+      renderType: Text.NativeRendering
+    }
+
+    StepButton {
+      glyph: "+"
+      enabled: stepper.enabled
+      live: stepper.value < stepper.to
+      onClicked: stepper.change(stepper.value + 1)
+    }
   }
 
   // ------------------------------------------------------------------ slider

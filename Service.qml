@@ -111,6 +111,24 @@ Item {
 
   function setScale(scale) { apply(Model.setScale(config, scale)) }
 
+  // The layout's global opacity; a card with its own `opacity` keeps its own.
+  function setLayoutOpacity(opacity) { apply(Model.setLayoutOpacity(config, opacity)) }
+
+  function setOpacity(id, opacity) { apply(Model.setOpacity(config, id, opacity)) }
+
+  // Put a card back on the layout's global opacity after it had its own.
+  function clearOpacity(id) { apply(Model.clearOpacity(config, id)) }
+
+  // One card's scale on its own; the layout's `setScale` still governs the rest.
+  function setWidgetScale(id, scale) { apply(Model.setWidgetScale(config, id, scale)) }
+
+  // Put a card back on the layout's global scale after it had its own.
+  function clearScale(id) { apply(Model.clearScale(config, id)) }
+
+  // Restore the grid's default scale and opacity, and drop every per-card
+  // override of either.
+  function resetAppearance() { apply(Model.resetAppearance(config)) }
+
   function openEditor() { service.editing = true }
 
   function closeEditor() { service.editing = false }
@@ -154,7 +172,14 @@ Item {
   }
 
   function serialize() {
-    return JSON.stringify(config, null, 2) + "\n"
+    // `null` on a widget's `opacity` means "no override: follow the layout's
+    // global opacity", and spelling that out in the file would just beg future
+    // readers to wonder whether the plugin lost a value. Absent is the honest
+    // form, so drop the key rather than write `null`.
+    return JSON.stringify(config, function (key, value) {
+      return (key === "opacity" && value === null) || (key === "scale" && value === null)
+        ? undefined : value
+    }, 2) + "\n"
   }
 
   function save() {
@@ -687,6 +712,41 @@ Item {
     function scale(value: string): string {
       service.setScale(Number(value))
       return String(service.layout.scale)
+    }
+
+    // The layout's global opacity; cards with their own keep their own.
+    function opacityAll(value: string): string {
+      service.setLayoutOpacity(Number(value))
+      return String(service.layout.opacity)
+    }
+
+    function opacity(id: string, value: string): string {
+      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
+      service.setOpacity(id, Number(value))
+      return String(Model.findInstance(service.config, id).opacity)
+    }
+
+    function opacityClear(id: string): string {
+      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
+      service.clearOpacity(id)
+      return "ok"
+    }
+
+    function scaleEach(id: string, value: string): string {
+      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
+      service.setWidgetScale(id, Number(value))
+      return String(Model.findInstance(service.config, id).scale)
+    }
+
+    function scaleClear(id: string): string {
+      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
+      service.clearScale(id)
+      return "ok"
+    }
+
+    function resetAppearance(): string {
+      service.resetAppearance()
+      return "ok"
     }
 
     function edit(): string {

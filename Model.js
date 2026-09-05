@@ -16,12 +16,10 @@ var MAX_STRING = 256
 var MAX_COLUMNS = 6
 var MAX_ROWS = 24
 var MAX_MARGIN = 4000
-// Bounds of the global scale multiplier, and the steps the layout editor
-// offers. `cellSize` stays the base px at scale 1, so the two read cleanly:
-// 200px cells at 150% is 300px cells.
-var MIN_SCALE = 0.5
+// Bounds of the global scale. `cellSize` stays base px at scale 1, so the
+// two read cleanly: a 200px cell at 1.5 is 300px.
+var MIN_SCALE = 0
 var MAX_SCALE = 2
-var SCALE_OPTIONS = [0.75, 1, 1.25, 1.5, 2]
 
 // Which edge of the screen the grid hugs.
 var SIDES = ["left", "right"]
@@ -37,8 +35,7 @@ var SIDES = ["left", "right"]
 // `cellSize` is the side of one cell in px at scale 1. `columns` is how many
 // cells wide the whole grid is, so widening the grid adds room rather than
 // shrinking what is already in it. `scale` multiplies cell and gap together,
-// which is how the layout editor grows or shrinks every widget at once without
-// touching their cells — the grid keeps its shape, just at another size.
+// so one knob resizes every widget at once.
 
 var DEFAULT_LAYOUT = {
   side: "right",
@@ -47,7 +44,9 @@ var DEFAULT_LAYOUT = {
   gap: 16,
   marginX: 40,
   marginY: 40,
-  scale: 1
+  scale: 1,
+  // The opacity every card starts at. A widget can override it on its own.
+  opacity: 0.72
 }
 
 // ---------------------------------------------------------------- catalogue
@@ -345,13 +344,14 @@ function normalizeLayout(raw) {
     gap: Math.round(clampNumber(source.gap, 0, 120, DEFAULT_LAYOUT.gap)),
     marginX: Math.round(clampNumber(source.marginX, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginX)),
     marginY: Math.round(clampNumber(source.marginY, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginY)),
-    scale: Math.round(clampNumber(source.scale, MIN_SCALE, MAX_SCALE, DEFAULT_LAYOUT.scale) * 100) / 100
+    scale: Math.round(clampNumber(source.scale, MIN_SCALE, MAX_SCALE, DEFAULT_LAYOUT.scale) * 100) / 100,
+    opacity: Math.round(clampNumber(source.opacity, 0, 1, DEFAULT_LAYOUT.opacity) * 100) / 100
   }
 }
 
 // The cell and the gap at the layout's current scale. Everything that measures
 // the grid — width, rects, hit testing, the drop probe — reads these, so a
-// scale change is felt everywhere at once and nowhere needs to know it again.
+// scale change takes effect everywhere at once.
 function scaledCell(layout) {
   return layout.cellSize * layout.scale
 }
@@ -360,15 +360,39 @@ function scaledGap(layout) {
   return layout.gap * layout.scale
 }
 
+// Pixel size of an `n`-block run at a given scale, gaps included. Everything
+// else measures the global grid at `layout.scale`; a card with an override
+// measures itself at its own.
+function blockRunAt(layout, n, scale) {
+  return n * layout.cellSize * scale + (n - 1) * layout.gap * scale
+}
+
+// The scale this card actually renders at: its own override when it set one,
+// otherwise the layout's global. Geometry and hit testing both read this, so
+// a card that breaks the grid reads the same broken size everywhere.
+function effectiveScale(layout, instance) {
+  if (instance && typeof instance.scale === "number") return instance.scale
+  return layout ? layout.scale : DEFAULT_LAYOUT.scale
+}
+
 // Pixel size of a `cols` x `rows` block, gaps included.
 function blockWidth(layout, cols) {
   var n = Math.max(1, Math.round(cols))
-  return n * scaledCell(layout) + (n - 1) * scaledGap(layout)
+  return blockRunAt(layout, n, layout.scale)
 }
 
+// Pixel size of a `rows`-row block, gaps included, at the layout's scale. The
+// editor's per-cell outline and the grid's height both read this.
 function blockHeight(layout, rows) {
   var n = Math.max(1, Math.round(rows))
-  return n * scaledCell(layout) + (n - 1) * scaledGap(layout)
+  return blockRunAt(layout, n, layout.scale)
+}
+
+// Grid cell size (horizontal spacing in px) at the given scale. The cells
+// before an `effectiveScale`-scaled card are laid out with the layout's own
+// scale — an override is that card's own business, not the neighbours'.
+function cellRunStep(layout, scale) {
+  return layout.cellSize * scale + layout.gap * scale
 }
 
 function gridWidth(layout) {
@@ -404,8 +428,9 @@ function columnOptions(layout, screenWidth) {
   return out
 }
 
-// Screen rectangle of a cell block. The grid's own origin is folded in, so
-// this is what both the drawing and the hit testing use — they cannot drift.
+// Screen rectangle of a cell block at the grid's own scale. The editor's cell
+// outline, the drop probe and the grid's overall height all draw the *grid*,
+// so they use the layout scale on every cell and never see an override.
 function cellRect(layout, screenWidth, col, row, cols, rows) {
   var step = scaledCell(layout) + scaledGap(layout)
   return {
@@ -416,8 +441,24 @@ function cellRect(layout, screenWidth, col, row, cols, rows) {
   }
 }
 
+// Screen rectangle of one widget: its own scale when it overrides the grid,
+// the cell's exact rectangle otherwise. This is what actually draws the card,
+// so `scale` on a widget dwarfs that card but leaves its neighbours alone.
+// The cell edge may carry the round (or a card down to an empty cell), but the
+// placement math above always reads the grid, so an override cannot make a
+// card start mid-cell or land where it overlaps another.
 function widgetRect(layout, instance, screenWidth) {
-  return cellRect(layout, screenWidth, instance.col, instance.row, instance.cols, instance.rows)
+  var scale = effectiveScale(layout, instance)
+  if (scale === null || Math.round(scale * 100) / 100 === Math.round(layout.scale * 100) / 100) {
+    return cellRect(layout, screenWidth, instance.col, instance.row, instance.cols, instance.rows)
+  }
+  var step = scaledCell(layout) + scaledGap(layout)
+  return {
+    x: Math.round(gridOriginX(layout, screenWidth) + Math.round(instance.col) * step),
+    y: Math.round(layout.marginY + Math.round(instance.row) * step),
+    width: blockRunAt(layout, instance.cols, scale),
+    height: blockRunAt(layout, instance.rows, scale)
+  }
 }
 
 // Which cell a screen point falls in. Returns null outside the grid's columns
@@ -487,7 +528,12 @@ function defaultInstance(type, id) {
     row: 0,
     cols: size[0],
     rows: size[1],
-    opacity: 0.72,
+    // scale: null means "render at the layout's global scale"; a number
+    // overrides the layout for this card alone.
+    scale: null,
+    // null means "follow the layout's global opacity"; a number overrides the
+    // layout for this card alone.
+    opacity: null,
     // -1 follows the theme's Hyprland rounding; anything else is literal px.
     // The default is a shape rather than the theme's because a desktop card is
     // an order of magnitude larger than the bar chrome `decoration:rounding`
@@ -571,7 +617,16 @@ function normalizeInstance(raw, index, layout) {
   out.col = Math.round(clampNumber(raw.col, 0, maxCol, 0))
   out.row = Math.round(clampNumber(raw.row, 0, MAX_ROWS - 1, 0))
 
-  out.opacity = clampNumber(raw.opacity, 0, 1, out.opacity)
+  // Absent or null keeps "follow the layout's global scale"; anything else is
+  // a per-card multiplier, clamped to the same range the global accepts.
+  out.scale = (raw.scale === undefined || raw.scale === null)
+    ? null
+    : Math.round(clampNumber(raw.scale, MIN_SCALE, MAX_SCALE, DEFAULT_LAYOUT.scale) * 100) / 100
+  // Absent or null keeps "follow the layout's global opacity"; anything else
+  // is a per-card override.
+  out.opacity = (raw.opacity === undefined || raw.opacity === null)
+    ? null
+    : Math.round(clampNumber(raw.opacity, 0, 1, 0.72) * 100) / 100
   out.radius = Math.round(clampNumber(raw.radius, -1, 400, out.radius))
   out.settings = normalizeSettings(entry, raw.settings)
   return out
@@ -869,11 +924,95 @@ function setColumns(config, columns) {
   return resolveOverlaps(next)
 }
 
+// The layout's global scale. The global is authoritative: moving it re-applies
+// it to every card, bringing any that had set their own back in line with the
+// rest. A card only earns an override again by being edited on its own.
 function setScale(config, scale) {
   var n = Number(scale)
   if (!isFinite(n)) return normalizeConfig(config)
   var next = normalizeConfig(config)
   next.layout.scale = Math.round(clampNumber(n, MIN_SCALE, MAX_SCALE, 1) * 100) / 100
+  dropPerWidget(next, "scale")
+  return next
+}
+
+// The layout's global opacity, the same deal as `setScale`: moving it writes
+// over any per-card opacity so the whole grid matches again. Opaque is 1 and
+// the default is 0.72.
+function setLayoutOpacity(config, opacity) {
+  var n = Number(opacity)
+  if (!isFinite(n)) return normalizeConfig(config)
+  var next = normalizeConfig(config)
+  next.layout.opacity = Math.round(clampNumber(n, 0, 1, DEFAULT_LAYOUT.opacity) * 100) / 100
+  dropPerWidget(next, "opacity")
+  return next
+}
+
+// With the global changed, a card that had its own value keeps it no longer:
+// the point of touching the global is the whole grid moving together.
+function dropPerWidget(config, key) {
+  for (var i = 0; i < config.widgets.length; i++) config.widgets[i][key] = null
+}
+
+// Back to the sizes and solidities the plugin ships with: the grid's default
+// scale and opacity, and no card overriding either. The field a widget was
+// edited to is lost — this is the "I moved too many knobs" button.
+function resetAppearance(config) {
+  var next = normalizeConfig(config)
+  next.layout.scale = DEFAULT_LAYOUT.scale
+  next.layout.opacity = DEFAULT_LAYOUT.opacity
+  dropPerWidget(next, "scale")
+  dropPerWidget(next, "opacity")
+  return next
+}
+
+// One widget's opacity on its own, so a card can sit over the wallpaper in a
+// way the rest of the grid does not need to follow.
+function setOpacity(config, id, opacity) {
+  var n = Number(opacity)
+  if (!isFinite(n)) return normalizeConfig(config)
+  var next = normalizeConfig(config)
+  var target = findInstance(next, id)
+  if (!target) return next
+  target.opacity = Math.round(clampNumber(n, 0, 1, 0.72) * 100) / 100
+  return next
+}
+
+// Give a card back to the layout's opacity after it had its own.
+function clearOpacity(config, id) {
+  var next = normalizeConfig(config)
+  var target = findInstance(next, id)
+  if (!target) return next
+  target.opacity = null
+  return next
+}
+
+// What the card actually renders: its own override when it set one, otherwise
+// the layout's global opacity.
+function effectiveOpacity(config, instance) {
+  if (instance && typeof instance.opacity === "number") return instance.opacity
+  var global = config && config.layout ? config.layout.opacity : undefined
+  return typeof global === "number" ? global : DEFAULT_LAYOUT.opacity
+}
+
+// One widget's scale on its own, so a card can break the grid's uniform size
+// the way an accent card breaks its opacity.
+function setWidgetScale(config, id, scale) {
+  var n = Number(scale)
+  if (!isFinite(n)) return normalizeConfig(config)
+  var next = normalizeConfig(config)
+  var target = findInstance(next, id)
+  if (!target) return next
+  target.scale = Math.round(clampNumber(n, MIN_SCALE, MAX_SCALE, DEFAULT_LAYOUT.scale) * 100) / 100
+  return next
+}
+
+// Give a card back to the layout's scale after it had its own.
+function clearScale(config, id) {
+  var next = normalizeConfig(config)
+  var target = findInstance(next, id)
+  if (!target) return next
+  target.scale = null
   return next
 }
 
@@ -1518,7 +1657,6 @@ if (typeof module !== "undefined" && module.exports) {
     MAX_ROWS: MAX_ROWS,
     MIN_SCALE: MIN_SCALE,
     MAX_SCALE: MAX_SCALE,
-    SCALE_OPTIONS: SCALE_OPTIONS,
     SIDES: SIDES,
     DEFAULT_LAYOUT: DEFAULT_LAYOUT,
     catalog: catalog,
@@ -1572,6 +1710,8 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeLayout: normalizeLayout,
     scaledCell: scaledCell,
     scaledGap: scaledGap,
+    effectiveScale: effectiveScale,
+    blockRunAt: blockRunAt,
     blockWidth: blockWidth,
     blockHeight: blockHeight,
     gridWidth: gridWidth,
@@ -1610,6 +1750,13 @@ if (typeof module !== "undefined" && module.exports) {
     setSide: setSide,
     setColumns: setColumns,
     setScale: setScale,
+    setLayoutOpacity: setLayoutOpacity,
+    setOpacity: setOpacity,
+    clearOpacity: clearOpacity,
+    effectiveOpacity: effectiveOpacity,
+    setWidgetScale: setWidgetScale,
+    clearScale: clearScale,
+    resetAppearance: resetAppearance,
     widgetsForScreen: widgetsForScreen,
     offWidgets: offWidgets,
     isInteractiveType: isInteractiveType,

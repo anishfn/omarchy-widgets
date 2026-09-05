@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import "Model.js" as Model
 
 // One configured widget, drawn. The card chrome plus whichever QML file the
 // catalogue names for its type.
@@ -18,8 +19,11 @@ Item {
   // would be right by accident rather than by contract.
   property url widgetSource: ""
 
-  readonly property real cardOpacity: instance && instance.opacity !== undefined
-    ? instance.opacity : 0.72
+  readonly property real cardOpacity: {
+    if (service && service.config && service.config.layout)
+      return Model.effectiveOpacity(service.config, instance)
+    return instance && typeof instance.opacity === "number" ? instance.opacity : 0.72
+  }
   readonly property int radius: instance && instance.radius !== undefined
     ? instance.radius : 20
 

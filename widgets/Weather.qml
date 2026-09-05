@@ -150,13 +150,15 @@ Item {
     }
 
     // Today's range, along the bottom. Dropped rather than crowded when the
-    // card is short enough that it would collide with the condition.
+    // card is short enough that it would collide with the condition — or
+    // climb back up into the temperature above it.
     Text {
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.bottom: parent.bottom
       visible: root.range !== ""
         && y > conditionText.y + conditionText.height
+        && y > temperatureText.y + temperatureText.height + Math.round(root.unit * 0.04)
       textFormat: Text.PlainText
       text: root.range
       color: root.dim

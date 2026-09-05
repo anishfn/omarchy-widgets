@@ -5,8 +5,8 @@ import Quickshell.Widgets
 import qs.Commons
 import "../Model.js" as Model
 
-// What is playing: the art, the title, who by, how far through, and a button
-// to stop it.
+// What is playing: the art, the title, who by, how far through, and the
+// transport for it — back, play or pause, forward.
 //
 // Two compositions, not one stretched. A wide card puts the art down the left
 // and the words beside it. A square card has no room for that — the art alone
@@ -15,10 +15,14 @@ import "../Model.js" as Model
 //
 // This is the one widget in the set that takes a click, which it gets by
 // declaring `interactive` in the catalogue: the desktop surface then turns
-// this rectangle, and only this rectangle, back into an input region.
+// this rectangle, and only this rectangle, back into an input region. The
+// controls stay one obvious action about the track already on the card —
+// skipping is the same gesture as pausing, not a menu — and play/pause keeps
+// the weight, with back and forward drawn quietly beside it.
 //
 // The player comes from MPRIS, so it is whatever is actually playing —
-// Spotify, a browser tab, mpv — rather than any one application.
+// Spotify, a browser tab, mpv — rather than any one application, unless the
+// `player` setting names one to follow.
 Item {
   id: root
 
@@ -38,6 +42,11 @@ Item {
 
   readonly property bool showArt: settings.showArt !== false
   readonly property bool showProgress: settings.showProgress !== false
+  readonly property bool showSkip: settings.showSkip !== false
+
+  // Blank follows whatever is playing. A name is matched against the player's
+  // identity and its bus name, so "spotify" and "firefox" both work.
+  readonly property string preferredPlayer: String(settings.player || "")
 
   // Square-ish cards get the compact layout.
   readonly property bool compact: width < unit * 1.4
@@ -47,7 +56,7 @@ Item {
   // ------------------------------------------------------------ the player
 
   readonly property var players: Mpris.players ? Mpris.players.values : null
-  readonly property int index: Model.pickPlayerIndex(players, "")
+  readonly property int index: Model.pickPlayerIndex(players, root.preferredPlayer)
   readonly property var player: players && index >= 0 && index < players.length
     ? players[index] : null
 
@@ -56,7 +65,19 @@ Item {
   readonly property string artist: hasPlayer ? String(player.trackArtist || "") : ""
   readonly property string artUrl: hasPlayer ? String(player.trackArtUrl || "") : ""
   readonly property bool playing: hasPlayer && player.isPlaying === true
-  readonly property bool canToggle: hasPlayer && player.canTogglePlaying === true
+  // What this player will actually answer. A stream has somewhere to pause
+  // and nowhere to skip to, so the buttons follow the player rather than the
+  // setting alone.
+  readonly property var transport: Model.playerTransport(player)
+  readonly property bool canToggle: transport.toggle
+  readonly property bool canPrevious: root.showSkip && transport.previous
+  readonly property bool canNext: root.showSkip && transport.next
+
+  // Glyphs, not literal characters: a private-use character renders as
+  // nothing if any tool along the way drops it.
+  readonly property string iconPrevious: "\uf048"
+  readonly property string iconNext: "\uf051"
+  readonly property string iconToggle: root.playing ? "\uf04c" : "\uf04b"
 
   readonly property real position: hasPlayer && player.positionSupported ? player.position : 0
   readonly property real length: hasPlayer && player.lengthSupported ? player.length : 0
@@ -179,12 +200,14 @@ Item {
     Text {
       id: compactArtist
       anchors.left: parent.left
-      anchors.right: toggleCompact.left
+      anchors.right: parent.right
       anchors.leftMargin: root.pad
-      anchors.rightMargin: Math.round(root.unit * 0.04)
-      anchors.bottom: parent.bottom
-      anchors.bottomMargin: root.pad + (root.showProgress && root.length > 0
-        ? Math.round(root.unit * 0.05) : 0)
+      anchors.rightMargin: root.pad
+      anchors.bottom: compactControls.visible ? compactControls.top : parent.bottom
+      anchors.bottomMargin: compactControls.visible
+        ? Math.round(root.unit * 0.03)
+        : root.pad + (root.showProgress && root.length > 0
+          ? Math.round(root.unit * 0.05) : 0)
       textFormat: Text.PlainText
       text: root.artist
       color: root.dim
@@ -194,17 +217,56 @@ Item {
       renderType: Text.NativeRendering
     }
 
-    MusicButton {
-      id: toggleCompact
-      anchors.right: parent.right
-      anchors.rightMargin: root.pad
-      anchors.verticalCenter: compactArtist.verticalCenter
-      size: Math.max(20, Math.round(root.unit * 0.18))
-      playing: root.playing
-      accent: root.accent
-      fontFamily: root.fontFamily
-      visible: root.canToggle
-      onPressed: if (root.player && root.canToggle) root.player.togglePlaying()
+    // The controls get a line of their own, centred, with the words stacked
+    // above them. Sharing the artist's line is what a single button could
+    // afford; three of them left the artist five characters wide, and a card
+    // that cannot say who is playing is not worth the buttons.
+    //
+    // Only play/pause is drawn as a target. Three pills on a tile this size
+    // would read as a control panel rather than a card you can pause.
+    Row {
+      id: compactControls
+      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: Math.round(root.pad * 0.7)
+        + (root.showProgress && root.length > 0 ? Math.round(root.unit * 0.05) : 0)
+      visible: root.canToggle || root.canPrevious || root.canNext
+      spacing: Math.round(root.unit * 0.045)
+
+      readonly property real toggleSize: Math.max(20, Math.round(root.unit * 0.18))
+      readonly property real skipSize: Math.max(14, Math.round(toggleSize * 0.78))
+
+      MusicButton {
+        anchors.verticalCenter: parent.verticalCenter
+        size: compactControls.skipSize
+        icon: root.iconPrevious
+        prominent: false
+        accent: root.accent
+        fontFamily: root.fontFamily
+        visible: root.canPrevious
+        onPressed: if (root.player && root.canPrevious) root.player.previous()
+      }
+
+      MusicButton {
+        anchors.verticalCenter: parent.verticalCenter
+        size: compactControls.toggleSize
+        icon: root.iconToggle
+        accent: root.accent
+        fontFamily: root.fontFamily
+        visible: root.canToggle
+        onPressed: if (root.player && root.canToggle) root.player.togglePlaying()
+      }
+
+      MusicButton {
+        anchors.verticalCenter: parent.verticalCenter
+        size: compactControls.skipSize
+        icon: root.iconNext
+        prominent: false
+        accent: root.accent
+        fontFamily: root.fontFamily
+        visible: root.canNext
+        onPressed: if (root.player && root.canNext) root.player.next()
+      }
     }
 
     // A hairline along the very bottom of the card, edge to edge — there is
@@ -287,6 +349,7 @@ Item {
     }
 
     Text {
+      id: wideArtist
       x: parent.textLeft
       y: wideTitle.y + wideTitle.height + Math.round(root.unit * 0.025)
       width: Math.max(0, parent.width - x - root.pad)
@@ -299,17 +362,58 @@ Item {
       renderType: Text.NativeRendering
     }
 
-    MusicButton {
-      id: toggleWide
+    // There is room for the row here, so it sits under the words with the
+    // progress bar below it, in the reading order the card already has —
+    // centred in what the words leave rather than dropped to the floor,
+    // which is what left a hole under a short title.
+    Row {
+      id: wideControls
       x: parent.textLeft
-      y: parent.height - root.pad - size
-        - (wideProgress.visible ? wideProgress.height + Math.round(root.unit * 0.055) : 0)
-      size: Math.max(18, Math.round(root.unit * 0.16))
-      playing: root.playing
-      accent: root.accent
-      fontFamily: root.fontFamily
-      visible: root.canToggle
-      onPressed: if (root.player && root.canToggle) root.player.togglePlaying()
+      y: {
+        var top = wideArtist.y + wideArtist.height
+        var bottom = wideProgress.visible
+          ? wideProgress.y - Math.round(root.unit * 0.02)
+          : parent.height - root.pad
+        var centred = Math.round((top + bottom - height) / 2)
+        // Never closer to the artist than the line spacing above it.
+        return Math.max(top + Math.round(root.unit * 0.045), centred)
+      }
+      spacing: Math.round(root.unit * 0.035)
+
+      readonly property real toggleSize: Math.max(18, Math.round(root.unit * 0.16))
+      readonly property real skipSize: Math.max(14, Math.round(toggleSize * 0.82))
+
+      MusicButton {
+        anchors.verticalCenter: parent.verticalCenter
+        size: wideControls.skipSize
+        icon: root.iconPrevious
+        prominent: false
+        accent: root.accent
+        fontFamily: root.fontFamily
+        visible: root.canPrevious
+        onPressed: if (root.player && root.canPrevious) root.player.previous()
+      }
+
+      MusicButton {
+        anchors.verticalCenter: parent.verticalCenter
+        size: wideControls.toggleSize
+        icon: root.iconToggle
+        accent: root.accent
+        fontFamily: root.fontFamily
+        visible: root.canToggle
+        onPressed: if (root.player && root.canToggle) root.player.togglePlaying()
+      }
+
+      MusicButton {
+        anchors.verticalCenter: parent.verticalCenter
+        size: wideControls.skipSize
+        icon: root.iconNext
+        prominent: false
+        accent: root.accent
+        fontFamily: root.fontFamily
+        visible: root.canNext
+        onPressed: if (root.player && root.canNext) root.player.next()
+      }
     }
 
     Item {

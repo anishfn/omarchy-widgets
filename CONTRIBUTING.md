@@ -13,6 +13,7 @@ what keeps a hundred contributed widgets looking like one set.
 - [The catalogue entry](#the-catalogue-entry)
 - [What your widget is handed](#what-your-widget-is-handed)
 - [Sizes](#sizes)
+- [More than one of your widget](#more-than-one-of-your-widget)
 - [Settings](#settings)
 - [Names are a promise](#names-are-a-promise)
 - [Changing a widget that people already have](#changing-a-widget-that-people-already-have)
@@ -50,12 +51,15 @@ to reach is not a play/pause. `repo-pulse` passes it — the name opens the
 repository it is describing. A settings button, a menu, or anything that
 opens more interface does not; that is a bar widget or a panel.
 
+`todos` takes more than one action, and [DESIGN.md](DESIGN.md) records why
+that is an exception rather than a precedent. Read it before you reach for the
+same latitude.
+
 Note that the *whole card* becomes an input region, not just your control, so
 whatever is live has to look live. See [DESIGN.md](DESIGN.md).
 
 Good candidates: a clock in another timezone, the weather, disk or battery
-headroom, next calendar event, now playing, a countdown, moon phase, a
-sparkline of something slow.
+headroom, now playing, a countdown, moon phase, a sparkline of something slow.
 
 Poor candidates: anything with a scrollbar, anything needing a legend,
 anything that is only interesting for two seconds a day.
@@ -219,6 +223,7 @@ this shape; read it alongside.
 | `settings` | Your whole tunable surface, as a schema. See [Settings](#settings) |
 | `network` | The host you talk to, if you talk to one. Omit it if you do not |
 | `interactive` | `true` if the widget needs clicks. Omit it unless it does |
+| `multiple` | `true` if a second one of your widget could say something different. Omit it if it reads a single source |
 
 ## What your widget is handed
 
@@ -227,7 +232,7 @@ Three properties are injected. Declare them; leave them `null`-safe.
 | Property | |
 |---|---|
 | `service` | The plugin service. `service.zoneOffsets` is the resolved timezone table; treat the rest as read-only |
-| `instance` | Your configured instance: `id`, `cols`, `rows`, `opacity`, `radius`, and `settings` |
+| `instance` | Your configured instance: `id`, `side`, `cols`, `rows`, `opacity`, `radius`, and `settings` |
 | `card` | The `WidgetCard` you are drawn on. Read `card.radius` if you need to follow its corners |
 
 Your widget is inside the card, filling it. **Do not draw your own background
@@ -243,6 +248,32 @@ just "the same thing but stretched" is a worse option, not an extra one.
 
 Your QML is given the pixel rectangle for the footprint in use. Read `width`
 and `height` and lay out from them; do not assume square.
+
+If you offer a size **taller than one row**, size your type from a cell rather
+than from the card's short axis — otherwise a `[2, 2]` gets letters twice the
+size instead of twice the content. See [DESIGN.md](DESIGN.md#sizes) for the
+three lines that do it.
+
+## More than one of your widget
+
+Set `multiple: true` if a second copy could say something the first cannot —
+a different timezone, a different repository, a different file. That puts a
+**Duplicate** button on it in the editor and lets `omarchy-shell widgets add`
+make another.
+
+Leave it off if your widget reads a single source. `weather` reads one
+location and `music` follows one player, so a second card would be the first
+one twice; both omit it deliberately.
+
+Nothing else changes. Instances have always been independent — your QML is
+handed one `instance` and reads its `settings`, and it has no way of knowing
+whether there are others.
+
+If your widget has a setting called `label` or `title`, the editor uses it to
+tell copies apart in the tray and the popup. That is the whole convention: a
+key by either of those names is taken to be the user's own word for the thing
+on the card. Nothing else in your schema is ever displayed as a name, so a
+setting holding something private is never shown by accident.
 
 ## Settings
 

@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 import "Model.js" as Model
 
 // Single source of truth for the Widgets plugin: which widgets exist, which
@@ -85,6 +86,7 @@ Item {
     onTriggered: {
       service.refreshContributions(false)
       service.refreshRepos(false)
+      service.refreshCalendars(false)
     }
   }
 
@@ -92,12 +94,35 @@ Item {
 
   function toggle(id) { apply(Model.toggleEnabled(config, id)) }
 
-  // Move a widget already on the grid. A cell it does not fit in leaves the
-  // config untouched, so a refused drop costs nothing.
-  function moveWidget(id, col, row) { apply(Model.moveWidget(config, id, col, row)) }
+  // Move a widget already on the grid, on either side. Whatever is in the way
+  // moves rather than the drop being refused.
+  function moveWidget(id, col, row, side) { apply(Model.moveWidget(config, id, col, row, side)) }
 
   // Drop onto a cell, switching the widget on if it was in the tray.
-  function placeWidget(id, col, row) { apply(Model.placeWidget(config, id, col, row)) }
+  function placeWidget(id, col, row, side) { apply(Model.placeWidget(config, id, col, row, side)) }
+
+  // Send one widget to a side without naming a cell.
+  function setWidgetSide(id, side) { apply(Model.setWidgetSide(config, id, side)) }
+
+  // Another of a type, at its defaults, and a copy of a configured one. Both
+  // land switched on, because a widget you asked for is one you want to see.
+  function addWidget(type, side) { apply(Model.addWidget(config, type, side)) }
+
+  function duplicateWidget(id) {
+    var before = Model.countOfType(config, Model.findInstance(config, id)
+      ? Model.findInstance(config, id).type : "")
+    var next = Model.duplicateWidget(config, id)
+    apply(next)
+    // Select what was just made, so the settings panel is already pointed at
+    // the thing you are about to change -- a copy exists to be edited.
+    var source = Model.findInstance(next, id)
+    if (source && Model.countOfType(next, source.type) > before) {
+      var made = next.widgets[next.widgets.length - 1]
+      if (made) service.select(made.id)
+    }
+  }
+
+  function removeWidget(id) { apply(Model.removeWidget(config, id)) }
 
   function setSetting(id, key, value) { apply(Model.setSetting(config, id, key, value)) }
 
@@ -609,6 +634,215 @@ Item {
     onTriggered: service.refreshRepos(true)
   }
 
+  // ------------------------------------------------------------- calendar
+  //
+  // Google publishes every calendar as an iCalendar file at a private
+  // address, which is the only way to read one without a wallpaper
+  // decoration holding an OAuth token it would then have to refresh. One GET
+  // to Google's own host, nothing sent but the address itself, no third
+  // party in the middle.
+  //
+  // The file is fetched here rather than in the widget for the usual reason:
+  // one request serves however many cards point at the same calendar, on
+  // however many monitors. It is also parsed here, once per fetch, because
+  // expanding a series of recurring meetings is the expensive part and the
+  // card only ever draws the next handful.
+  //
+  // That parse is the one blocking thing this plugin does: a 120 KB calendar
+  // takes about 13ms, or roughly one dropped frame, once every fifteen
+  // minutes per calendar. The alternative -- parsing lazily as the card
+  // draws -- would pay it on every repaint instead.
+
+  // ics url -> { events: [{start, end, allDay, summary, location}] }
+  property var calendars: ({})
+  property string calendarError: ""
+  property var calendarQueue: []
+
+  // How much of the future is expanded. Wide enough that the tall card is
+  // never short of rows, and narrow enough that a daily standup started in
+  // 2019 does not turn into ten thousand objects.
+  readonly property int calendarWindowDays: 60
+
+  readonly property bool calendarWanted: {
+    for (var i = 0; i < widgets.length; i++)
+      if (widgets[i].enabled && widgets[i].type === "calendar") return true
+    return false
+  }
+
+  onCalendarWantedChanged: if (calendarWanted) refreshCalendars(false)
+
+  // `force` re-fetches everything, which is what the timer wants. Without it
+  // only calendars with nothing drawn yet are queued, which is what a config
+  // change wants: pasting an address should fetch it, and dragging the card
+  // across the grid should not.
+  function refreshCalendars(force) {
+    if (!service.calendarWanted) return
+    var urls = Model.calendarsInUse(config)
+    var queue = []
+    for (var i = 0; i < urls.length; i++) {
+      if (force === true || !service.calendars[urls[i]]) queue.push(urls[i])
+    }
+    if (queue.length === 0) return
+    service.calendarQueue = queue
+    startNextCalendar()
+  }
+
+  function startNextCalendar() {
+    if (calendarProc.running) return
+    var queue = service.calendarQueue
+    if (!queue || queue.length === 0) return
+    var url = String(queue[0])
+    service.calendarQueue = queue.slice(1)
+    // Checked again here rather than trusted from the queue: this string is
+    // about to be handed to curl as a URL.
+    if (!Model.isSafeIcsUrl(url)) { startNextCalendar(); return }
+    calendarProc.url = url
+    // `--max-filesize` is a ceiling on a document that arrives from outside
+    // and is turned into objects inside the process that draws the desktop.
+    calendarProc.command = ["/usr/bin/timeout", "-k", "2", "35",
+      "/usr/bin/curl", "-fsSL", "--max-time", "30",
+      "--max-filesize", "8388608",
+      "-H", "Accept: text/calendar",
+      url]
+    calendarProc.running = true
+  }
+
+  Process {
+    id: calendarProc
+    running: false
+    property string url: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var now = Date.now()
+        var parsed = Model.parseCalendar(text,
+          now - Model.DAY_MS,
+          now + service.calendarWindowDays * Model.DAY_MS,
+          300)
+        if (parsed) {
+          // Reassign whole, never mutate: a binding reading one calendar only
+          // re-evaluates when the property itself changes.
+          var next = ({})
+          for (var key in service.calendars) next[key] = service.calendars[key]
+          next[calendarProc.url] = parsed
+          service.calendars = next
+          service.calendarError = ""
+        } else {
+          // Keep whatever is on screen. Yesterday's agenda still has today's
+          // meetings in it; a card that has emptied itself has nothing.
+          service.calendarError = service.calendars[calendarProc.url] ? "stale" : "unavailable"
+        }
+      }
+    }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextCalendar)
+  }
+
+  Timer {
+    // A calendar moves when somebody sends an invitation, which is not
+    // something a wallpaper has to see inside the minute. The countdown on
+    // the card is local arithmetic and updates every minute regardless.
+    interval: 900000
+    repeat: true
+    running: service.calendarWanted
+    triggeredOnStart: true
+    onTriggered: service.refreshCalendars(true)
+  }
+
+  // ---------------------------------------------------------------- todos
+  //
+  // A text file, watched. No request, no daemon, no format anybody has to
+  // learn -- the list is a file you already know how to edit, and the widget
+  // is the part that reads it.
+  //
+  // The watch lives here rather than in the widget so two cards on the same
+  // file are one watch, and so the parse happens once per change rather than
+  // once per card per monitor.
+
+  // absolute path -> parsed list, or null when the file is not there
+  property var todos: ({})
+
+  // ...and the bytes it was parsed from. Kept because ticking a box is a
+  // *rewrite* of the file the user typed, not a re-serialisation of what was
+  // parsed out of it: the parse throws away blank lines, headings, dividers
+  // and every choice of bullet, and writing back from it would reformat
+  // somebody's file every time they ticked something off.
+  property var todoTexts: ({})
+
+  readonly property var todoPaths: Model.todoPathsInUse(config, home)
+
+  function storeTodos(path, raw) {
+    var key = String(path)
+    var parsed = ({})
+    var texts = ({})
+    for (var k in service.todos) parsed[k] = service.todos[k]
+    for (var t in service.todoTexts) texts[t] = service.todoTexts[t]
+    parsed[key] = raw === null ? null : Model.parseTodos(raw)
+    texts[key] = raw === null ? "" : String(raw)
+    service.todos = parsed
+    service.todoTexts = texts
+  }
+
+  // Tick or untick one line, and write the file back.
+  //
+  // The desired state is passed rather than flipped, so two clicks that land
+  // in the same frame settle on what was asked for instead of cancelling each
+  // other out. `setTodoDone` answers null when the line is not a task or is
+  // already in that state, and null means no write at all -- a widget under
+  // your windows should not be able to touch a file by being looked at.
+  function setTodoDone(path, lineIndex, done) {
+    var key = String(path)
+    var index = service.todoPaths.indexOf(key)
+    if (index === -1) return false
+    var next = Model.setTodoDone(service.todoTexts[key], lineIndex, done)
+    if (next === null) return false
+
+    var view = todoWatches.objectAt(index)
+    if (!view) return false
+    // Stored before the write so the card redraws now rather than after the
+    // watch has been round the file system and back.
+    service.storeTodos(key, next)
+    view.setText(next)
+    return true
+  }
+
+  // Open the list in whatever editor Omarchy has been told to use. Its own
+  // launcher, rather than xdg-open: `omarchy-launch-editor` is what every
+  // other "edit this" in the desktop goes through, so a list opens in the
+  // same editor as everything else, in a terminal if that is what it is.
+  //
+  // `execArgv` runs it without a shell interpreting the arguments, which
+  // matters because the path came out of a config file.
+  function openTodoFile(path) {
+    var key = String(path)
+    if (!key || service.todoPaths.indexOf(key) === -1) return false
+    Util.execArgv([service.omarchyPath + "/bin/omarchy-launch-editor", key])
+    return true
+  }
+
+  Instantiator {
+    id: todoWatches
+    model: service.todoPaths
+    delegate: FileView {
+      required property var modelData
+      path: String(modelData)
+      watchChanges: true
+      printErrors: false
+      // Written whole, and atomically: this file is somebody's list, and a
+      // half-written one is worse than a stale one.
+      atomicWrites: true
+      // `text()` is stale inside the change signal, so both paths go through
+      // reload -> onLoaded and always parse fresh bytes. Re-reading our own
+      // write costs one parse and cannot clobber anything, so unlike the
+      // config there is no echo to suppress.
+      onFileChanged: reload()
+      // A file that is not there yet is not an error worth drawing: the card
+      // says how to make one.
+      onLoadFailed: service.storeTodos(path, null)
+      onLoaded: service.storeTodos(path, text())
+      Component.onCompleted: reload()
+    }
+  }
+
   // ----------------------------------------------------------------- IPC
 
   IpcHandler {
@@ -619,11 +853,15 @@ Item {
       for (var i = 0; i < service.widgets.length; i++) {
         var w = service.widgets[i]
         out.push((w.enabled ? "on   " : "off  ") + w.id
-          + "  (" + w.type + ", col " + w.col + " row " + w.row
+          + "  (" + w.type + ", " + Model.sideOf(w, service.layout)
+          + " col " + w.col + " row " + w.row
           + ", " + w.cols + "x" + w.rows + ")")
       }
-      var head = "grid: " + service.layout.columns + " columns, "
-        + service.layout.side + " side"
+      var used = Model.sidesInUse(service.config)
+      var where = used.left && used.right ? "both sides"
+        : (used.left || used.right ? service.layout.side + " side" : "nothing placed")
+      var head = "grid: " + service.layout.columns + " columns, " + where
+        + " (new widgets go " + service.layout.side + ")"
       return head + (out.length ? "\n" + out.join("\n") : "\nno widgets configured")
     }
 
@@ -647,22 +885,55 @@ Item {
       return "ok"
     }
 
-    function move(id: string, col: string, row: string): string {
+    function move(id: string, col: string, row: string, side: string): string {
       if (!Model.findInstance(service.config, id)) return "no widget with id " + id
-      service.moveWidget(id, Number(col), Number(row))
+      service.moveWidget(id, Number(col), Number(row), side)
       var now = Model.findInstance(service.config, id)
       return now.col === Number(col) && now.row === Number(row)
         ? "ok"
-        : "cell " + col + "," + row + " is taken or off the grid"
+        : "cell " + col + "," + row + " is off the grid"
     }
 
-    function place(id: string, col: string, row: string): string {
+    function place(id: string, col: string, row: string, side: string): string {
       if (!Model.findInstance(service.config, id)) return "no widget with id " + id
-      service.placeWidget(id, Number(col), Number(row))
+      service.placeWidget(id, Number(col), Number(row), side)
       var now = Model.findInstance(service.config, id)
       return now.enabled && now.col === Number(col) && now.row === Number(row)
         ? "ok"
-        : "cell " + col + "," + row + " is taken or off the grid"
+        : "cell " + col + "," + row + " is off the grid, or the grid is full"
+    }
+
+    function add(type: string): string {
+      if (!Model.catalogEntry(type)) return "no widget type '" + type
+        + "'; there is: " + Model.catalogTypes().join(", ")
+      var before = Model.countOfType(service.config, type)
+      service.addWidget(type, "")
+      var after = Model.countOfType(service.config, type)
+      if (after > before) return service.config.widgets[service.config.widgets.length - 1].id
+      return Model.allowsMultiple(type)
+        ? "no room for another widget"
+        : type + " reads one source, so one of it is all there is"
+    }
+
+    function duplicate(id: string): string {
+      var target = Model.findInstance(service.config, id)
+      if (!target) return "no widget with id " + id
+      if (!Model.allowsMultiple(target.type))
+        return target.type + " reads one source, so one of it is all there is"
+      var before = Model.countOfType(service.config, target.type)
+      service.duplicateWidget(id)
+      return Model.countOfType(service.config, target.type) > before
+        ? service.config.widgets[service.config.widgets.length - 1].id
+        : "no room for another widget"
+    }
+
+    function remove(id: string): string {
+      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
+      if (!Model.canRemove(service.config, id))
+        return "that is the only " + Model.findInstance(service.config, id).type
+          + "; switch it off instead"
+      service.removeWidget(id)
+      return "ok"
     }
 
     function select(id: string): string {
@@ -690,11 +961,14 @@ Item {
       return now.cols + "x" + now.rows
     }
 
-    function side(value: string): string {
+    // With no id, everything moves; with one, just that widget.
+    function side(value: string, id: string): string {
       if (Model.SIDES.indexOf(String(value)) === -1)
         return "side must be one of: " + Model.SIDES.join(", ")
-      service.setSide(value)
-      return "ok"
+      if (!String(id)) { service.setSide(value); return "ok" }
+      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
+      service.setWidgetSide(id, value)
+      return Model.sideOf(Model.findInstance(service.config, id), service.layout)
     }
 
     function columns(value: string): string {
@@ -790,6 +1064,57 @@ Item {
     function refreshWeather(): string {
       service.refreshWeather()
       return "ok"
+    }
+
+    function calendar(): string {
+      var urls = Model.calendarsInUse(service.config)
+      if (urls.length === 0) return "no calendar widget has an iCal address set"
+      var now = Date.now()
+      var out = []
+      for (var i = 0; i < urls.length; i++) {
+        var data = service.calendars[urls[i]]
+        if (!data) { out.push("calendar " + (i + 1) + ": " + (service.calendarError || "not fetched yet")); continue }
+        var next = Model.upcomingEvents(data.events, now, 5, true)
+        // The address itself is not printed: it is the secret, and this
+        // answer goes wherever the caller sends it.
+        out.push("calendar " + (i + 1) + ": " + data.events.length + " events in the window")
+        for (var e = 0; e < next.length; e++) {
+          out.push("  " + Model.dayHeading(next[e].start, now) + " "
+            + Model.eventTimeLabel(next[e], false) + "  " + next[e].summary)
+        }
+      }
+      return out.join("\n")
+    }
+
+    function todo(path: string, line: string, done: string): string {
+      var target = String(path) || (service.todoPaths.length === 1 ? service.todoPaths[0] : "")
+      if (!target) return "say which list: " + service.todoPaths.join(", ")
+      var wanted = String(done) !== "false" && String(done) !== "0"
+      return service.setTodoDone(target, Number(line), wanted)
+        ? "ok"
+        : "line " + line + " is not a task, or is already " + (wanted ? "done" : "not done")
+    }
+
+    function refreshCalendar(): string {
+      service.refreshCalendars(true)
+      return "ok"
+    }
+
+    function todos(): string {
+      var paths = service.todoPaths
+      if (paths.length === 0) return "no todos widget is on"
+      var out = []
+      for (var i = 0; i < paths.length; i++) {
+        var list = service.todos[paths[i]]
+        if (!list) { out.push(paths[i] + ": no such file"); continue }
+        out.push(paths[i] + ": " + list.remaining + " left of " + list.total)
+        var shown = Model.visibleTodos(list, true, 10)
+        for (var t = 0; t < shown.length; t++) {
+          out.push("  [" + (shown[t].done ? "x" : " ") + "] "
+            + (shown[t].important ? "! " : "") + shown[t].text)
+        }
+      }
+      return out.join("\n")
     }
 
     function reload(): string {

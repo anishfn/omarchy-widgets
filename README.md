@@ -367,7 +367,8 @@ are halfway through an edit — and the reason is logged.
     "cellSize": 200,
     "gap": 16,
     "marginX": 40,
-    "marginY": 40
+    "marginY": 40,
+    "scale": 1
   },
   "widgets": [
     {
@@ -408,10 +409,11 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 |---|---|
 | `side` | `left` or `right`: which edge the grid hugs |
 | `columns` | How many cells wide the grid is, 1–6 |
-| `cellSize` | The side of one cell in px |
+| `cellSize` | The side of one cell in px at scale 1 |
 | `gap` | Space between cells |
 | `marginX` | Distance from the edge named by `side` |
 | `marginY` | Distance from the top of the usable desktop |
+| `scale` | Global multiplier over cell and gap, `0.5`–`2`. Grows or shrinks every widget at once without moving their cells, so the grid keeps its shape at another size |
 
 ### Each widget
 

@@ -16,6 +16,12 @@ var MAX_STRING = 256
 var MAX_COLUMNS = 6
 var MAX_ROWS = 24
 var MAX_MARGIN = 4000
+// Bounds of the global scale multiplier, and the steps the layout editor
+// offers. `cellSize` stays the base px at scale 1, so the two read cleanly:
+// 200px cells at 150% is 300px cells.
+var MIN_SCALE = 0.5
+var MAX_SCALE = 2
+var SCALE_OPTIONS = [0.75, 1, 1.25, 1.5, 2]
 
 // Which edge of the screen the grid hugs.
 var SIDES = ["left", "right"]
@@ -28,9 +34,11 @@ var SIDES = ["left", "right"]
 // finite set of places it can land — which is what makes dropping one
 // predictable rather than a game of pixels.
 //
-// `cellSize` is the side of one cell. `columns` is how many cells wide the
-// whole grid is, so widening the grid adds room rather than shrinking what is
-// already in it.
+// `cellSize` is the side of one cell in px at scale 1. `columns` is how many
+// cells wide the whole grid is, so widening the grid adds room rather than
+// shrinking what is already in it. `scale` multiplies cell and gap together,
+// which is how the layout editor grows or shrinks every widget at once without
+// touching their cells — the grid keeps its shape, just at another size.
 
 var DEFAULT_LAYOUT = {
   side: "right",
@@ -38,7 +46,8 @@ var DEFAULT_LAYOUT = {
   cellSize: 200,
   gap: 16,
   marginX: 40,
-  marginY: 40
+  marginY: 40,
+  scale: 1
 }
 
 // ---------------------------------------------------------------- catalogue
@@ -335,19 +344,31 @@ function normalizeLayout(raw) {
     cellSize: Math.round(clampNumber(source.cellSize, 60, 600, DEFAULT_LAYOUT.cellSize)),
     gap: Math.round(clampNumber(source.gap, 0, 120, DEFAULT_LAYOUT.gap)),
     marginX: Math.round(clampNumber(source.marginX, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginX)),
-    marginY: Math.round(clampNumber(source.marginY, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginY))
+    marginY: Math.round(clampNumber(source.marginY, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginY)),
+    scale: Math.round(clampNumber(source.scale, MIN_SCALE, MAX_SCALE, DEFAULT_LAYOUT.scale) * 100) / 100
   }
+}
+
+// The cell and the gap at the layout's current scale. Everything that measures
+// the grid — width, rects, hit testing, the drop probe — reads these, so a
+// scale change is felt everywhere at once and nowhere needs to know it again.
+function scaledCell(layout) {
+  return layout.cellSize * layout.scale
+}
+
+function scaledGap(layout) {
+  return layout.gap * layout.scale
 }
 
 // Pixel size of a `cols` x `rows` block, gaps included.
 function blockWidth(layout, cols) {
   var n = Math.max(1, Math.round(cols))
-  return n * layout.cellSize + (n - 1) * layout.gap
+  return n * scaledCell(layout) + (n - 1) * scaledGap(layout)
 }
 
 function blockHeight(layout, rows) {
   var n = Math.max(1, Math.round(rows))
-  return n * layout.cellSize + (n - 1) * layout.gap
+  return n * scaledCell(layout) + (n - 1) * scaledGap(layout)
 }
 
 function gridWidth(layout) {
@@ -386,7 +407,7 @@ function columnOptions(layout, screenWidth) {
 // Screen rectangle of a cell block. The grid's own origin is folded in, so
 // this is what both the drawing and the hit testing use — they cannot drift.
 function cellRect(layout, screenWidth, col, row, cols, rows) {
-  var step = layout.cellSize + layout.gap
+  var step = scaledCell(layout) + scaledGap(layout)
   return {
     x: Math.round(gridOriginX(layout, screenWidth) + col * step),
     y: Math.round(layout.marginY + row * step),
@@ -403,7 +424,7 @@ function widgetRect(layout, instance, screenWidth) {
 // or above its top, so a drag that wanders off does not silently snap back to
 // column zero.
 function cellFromPoint(layout, screenWidth, x, y) {
-  var step = layout.cellSize + layout.gap
+  var step = scaledCell(layout) + scaledGap(layout)
   if (step <= 0) return null
   var localX = x - gridOriginX(layout, screenWidth)
   var localY = y - layout.marginY
@@ -429,7 +450,7 @@ function dropTarget(config, id, cardX, cardY, screenWidth) {
   if (!target) return { cell: null, valid: false }
   var layout = config.layout
   var cell = cellFromPoint(layout, screenWidth,
-    cardX + layout.cellSize / 2, cardY + layout.cellSize / 2)
+    cardX + scaledCell(layout) / 2, cardY + scaledCell(layout) / 2)
   if (!cell) return { cell: null, valid: false }
   return {
     cell: cell,
@@ -846,6 +867,14 @@ function setColumns(config, columns) {
     if (w.col + w.cols > n) w.col = Math.max(0, n - w.cols)
   }
   return resolveOverlaps(next)
+}
+
+function setScale(config, scale) {
+  var n = Number(scale)
+  if (!isFinite(n)) return normalizeConfig(config)
+  var next = normalizeConfig(config)
+  next.layout.scale = Math.round(clampNumber(n, MIN_SCALE, MAX_SCALE, 1) * 100) / 100
+  return next
 }
 
 // Instances that should be drawn on the output named `screenName`. An empty
@@ -1487,6 +1516,9 @@ if (typeof module !== "undefined" && module.exports) {
     MAX_STRING: MAX_STRING,
     MAX_COLUMNS: MAX_COLUMNS,
     MAX_ROWS: MAX_ROWS,
+    MIN_SCALE: MIN_SCALE,
+    MAX_SCALE: MAX_SCALE,
+    SCALE_OPTIONS: SCALE_OPTIONS,
     SIDES: SIDES,
     DEFAULT_LAYOUT: DEFAULT_LAYOUT,
     catalog: catalog,
@@ -1538,6 +1570,8 @@ if (typeof module !== "undefined" && module.exports) {
     clampString: clampString,
     clampNumber: clampNumber,
     normalizeLayout: normalizeLayout,
+    scaledCell: scaledCell,
+    scaledGap: scaledGap,
     blockWidth: blockWidth,
     blockHeight: blockHeight,
     gridWidth: gridWidth,
@@ -1575,6 +1609,7 @@ if (typeof module !== "undefined" && module.exports) {
     cycleSize: cycleSize,
     setSide: setSide,
     setColumns: setColumns,
+    setScale: setScale,
     widgetsForScreen: widgetsForScreen,
     offWidgets: offWidgets,
     isInteractiveType: isInteractiveType,

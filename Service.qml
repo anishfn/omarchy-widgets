@@ -109,6 +109,8 @@ Item {
 
   function setColumns(columns) { apply(Model.setColumns(config, columns)) }
 
+  function setScale(scale) { apply(Model.setScale(config, scale)) }
+
   function openEditor() { service.editing = true }
 
   function closeEditor() { service.editing = false }
@@ -680,6 +682,11 @@ Item {
     function columns(value: string): string {
       service.setColumns(Number(value))
       return String(service.layout.columns)
+    }
+
+    function scale(value: string): string {
+      service.setScale(Number(value))
+      return String(service.layout.scale)
     }
 
     function edit(): string {

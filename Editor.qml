@@ -459,6 +459,42 @@ Item {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
+                text: "Scale"
+                textFormat: Text.PlainText
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              // Picks from the catalogue's steps, so the grid keeps pageable
+              // sizes rather than anything a slider could land between.
+              ButtonGroup {
+                anchors.verticalCenter: parent.verticalCenter
+                options: {
+                  var list = Model.SCALE_OPTIONS
+                  var out = []
+                  for (var i = 0; i < list.length; i++)
+                    out.push({ value: String(list[i]), label: Math.round(list[i] * 100) + "%" })
+                  return out
+                }
+                value: String(root.layout.scale)
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                focusable: false
+                onChanged: function(v) { if (root.service) root.service.setScale(Number(v)) }
+              }
+
+              PanelSeparator {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 1
+                height: Style.space(20)
+                foreground: root.foreground
+                strength: 0.25
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
                 visible: root.selected !== null
                 text: root.nameFor(root.selected)
                 textFormat: Text.PlainText

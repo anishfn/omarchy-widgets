@@ -294,7 +294,7 @@ test("normalize survives junk without throwing", () => {
 
 test("normalize clamps the layout into range", () => {
   const out = Model.normalizeConfig({
-    layout: { side: "diagonal", columns: 999, cellSize: -5, gap: -3, marginX: 1e9, marginY: "x" }
+    layout: { side: "diagonal", columns: 999, cellSize: -5, gap: -3, marginX: 1e9, marginY: "x", scale: -9 }
   })
   assert.equal(out.layout.side, "right")
   assert.equal(out.layout.columns, Model.MAX_COLUMNS)
@@ -302,6 +302,7 @@ test("normalize clamps the layout into range", () => {
   assert.equal(out.layout.gap, 0)
   assert.equal(out.layout.marginX, 4000)
   assert.equal(out.layout.marginY, Model.DEFAULT_LAYOUT.marginY)
+  assert.equal(out.layout.scale, Model.MIN_SCALE)
 })
 
 test("normalize drops unknown types and unknown settings keys", () => {
@@ -413,6 +414,42 @@ test("a cell rect is the block it draws, gaps included", () => {
   assert.deepEqual(Model.cellRect(layout, 2560, 0, 1, 1, 1), { x: 2104, y: 256, width: 200, height: 200 })
   // A two-column block swallows the gap between them.
   assert.deepEqual(Model.cellRect(layout, 2560, 0, 0, 2, 1), { x: 2104, y: 40, width: 416, height: 200 })
+})
+
+test("scale multiplies cell, gap and drop probe, leaving cells alone", () => {
+  const base = Model.normalizeLayout(Model.DEFAULT_LAYOUT)
+  const scaled = Model.normalizeLayout({ ...Model.DEFAULT_LAYOUT, scale: 1.5 })
+
+  // 200 and 16 at 150% are 300 and 24; the grid width follows.
+  assert.equal(Model.scaledCell(base), 200)
+  assert.equal(Model.scaledGap(base), 16)
+  assert.equal(Model.scaledGap(scaled), 24)
+  assert.equal(Model.gridWidth(scaled), 624) // 2 * 300 + 24
+  assert.deepEqual(Model.cellRect(scaled, 2560, 0, 0, 1, 1), { x: 1896, y: 40, width: 300, height: 300 })
+  assert.deepEqual(Model.cellRect(scaled, 2560, 0, 0, 2, 1), { x: 1896, y: 40, width: 624, height: 300 })
+
+  // Cells are unchanged by scale; only their pixels are.
+  assert.deepEqual(Model.cellRect(scaled, 2560, 1, 0, 1, 1), { x: 2220, y: 40, width: 300, height: 300 })
+  assert.deepEqual(Model.cellRect(base, 2560, 1, 0, 1, 1), { x: 2320, y: 40, width: 200, height: 200 })
+
+  // The drop probe sits in the middle of a scaled cell, and self-consistency
+  // holds: a point inside a drawn scaled cell reads back as that same cell.
+  const s2 = Model.normalizeLayout({ ...Model.DEFAULT_LAYOUT, scale: 2 })
+  for (let col = 0; col < s2.columns; col++) {
+    const r = Model.cellRect(s2, 2560, col, 0, 1, 1)
+    assert.deepEqual(Model.cellFromPoint(s2, 2560, r.x + r.width / 2, r.y + 1), { col, row: 0 })
+  }
+})
+
+test("setScale clamps into range and keeps its place in the layout", () => {
+  const cfg = Model.normalizeConfig({ widgets: [] })
+  assert.equal(cfg.layout.scale, 1)
+  assert.equal(Model.setScale(cfg, 1.25).layout.scale, 1.25)
+  assert.equal(Model.setScale(cfg, 99).layout.scale, Model.MAX_SCALE)
+  assert.equal(Model.setScale(cfg, 0.001).layout.scale, Model.MIN_SCALE)
+  assert.equal(Model.setScale(cfg, "nonsense").layout.scale, 1)
+  // Two decimals, so a legally-typed value is written back cleanly.
+  assert.equal(Model.setScale(cfg, 1.234).layout.scale, 1.23)
 })
 
 test("hit testing is the inverse of drawing", () => {

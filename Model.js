@@ -58,6 +58,13 @@ var DEFAULT_LAYOUT = {
 // so a new widget gets a working settings panel by describing itself — and a
 // key that is not in the list is a key the config cannot set.
 //
+// `multiple: true` says the type is worth having more than one of, and is
+// what puts a "Duplicate" button on it in the editor and a "+" beside it in
+// the bar popup. It is opt-in rather than the default because for some types
+// a second copy is the same card twice: the weather reads one location and
+// the music card follows one player, so duplicating either would produce a
+// widget that can never say anything different from the one beside it.
+//
 // Supported setting types: "text", "boolean", "choice" (needs `options`),
 // and "timezone" (an IANA zone name, offered as a searchable list).
 
@@ -68,6 +75,9 @@ function catalog() {
       name: "Clock",
       description: "The time, in any timezone, and how far that is from your own.",
       source: "widgets/Clock.qml",
+      // Several is the point: the widget exists to show a zone that is not
+      // yours, and one of those is rarely the only one you care about.
+      multiple: true,
       sizes: [[1, 1], [2, 1]],
       settings: [
         {
@@ -149,6 +159,8 @@ function catalog() {
       source: "widgets/Github.qml",
       // Wide first: seven rows of squares want length, and a square card can
       // only hold a couple of months of them.
+      // One per person whose year you want on the wall.
+      multiple: true,
       sizes: [[2, 1], [1, 1]],
       network: "github.com",
       settings: [
@@ -173,6 +185,8 @@ function catalog() {
       description: "Stars, forks, issues and open pull requests for a repository.",
       source: "widgets/RepoPulse.qml",
       sizes: [[1, 1], [2, 1]],
+      // One per repository. Nobody watches exactly one.
+      multiple: true,
       network: "api.github.com",
       // The name opens the repository. Same exception the music card takes,
       // and the same justification: the action is about the thing on the
@@ -572,7 +586,133 @@ function displayName(config, instance) {
   var list = config && Array.isArray(config.widgets) ? config.widgets : []
   var sameType = 0
   for (var i = 0; i < list.length; i++) if (list[i].type === instance.type) sameType++
-  return sameType > 1 ? typeName + " · " + instance.id : typeName
+  if (sameType <= 1) return typeName
+  return typeName + " · " + (instanceLabel(instance) || instance.id)
+}
+
+// ------------------------------------------------------- more than one of a type
+//
+// The config has always held any number of instances -- every widget carries
+// its own id and its own settings, and the grid never cared how many there
+// were. What was missing was a way to make one without opening the file, which
+// meant three timezones was a feature only the people who read the JSON knew
+// they had.
+
+function allowsMultiple(type) {
+  var entry = catalogEntry(type)
+  return !!(entry && entry.multiple === true)
+}
+
+// How many of a type are configured, on the grid or in the tray.
+function countOfType(config, type) {
+  var list = config && Array.isArray(config.widgets) ? config.widgets : []
+  var key = String(type || "")
+  var n = 0
+  for (var i = 0; i < list.length; i++) if (list[i].type === key) n++
+  return n
+}
+
+// The next free id for a type: "clock", then "clock-2", "clock-3". Numbered
+// rather than random because it is a name a person types at a command line and
+// writes in a config file, and because the first one keeps the bare type name
+// it has always had -- an update that renamed everyone's "clock" to "clock-1"
+// would break every config that mentions it.
+function nextInstanceId(config, type) {
+  var key = String(type || "")
+  if (!findInstance(config, key)) return key
+  for (var n = 2; n <= MAX_WIDGETS + 1; n++) {
+    var candidate = key + "-" + n
+    if (!findInstance(config, candidate)) return candidate
+  }
+  return key + "-" + Date.now()
+}
+
+// Somewhere to put a new widget: the first free cell on the side it belongs
+// to, or the row below everything if that side is packed. Never nowhere -- a
+// widget you asked for and cannot find is worse than one in an awkward cell.
+function landingCell(config, cols, rows, side) {
+  var where = SIDES.indexOf(String(side)) === -1 ? config.layout.side : String(side)
+  var others = occupants(config)
+  for (var row = 0; row < MAX_ROWS; row++) {
+    for (var col = 0; col + cols <= config.layout.columns; col++) {
+      var block = { col: col, row: row, cols: cols, rows: rows, side: where }
+      if (fitsAmong(config.layout, block, others)) return { col: col, row: row, side: where }
+    }
+  }
+  return { col: 0, row: Math.min(MAX_ROWS - rows, usedRows(config)), side: where }
+}
+
+// Add another of a type, at its defaults.
+function addWidget(config, type, side) {
+  var next = normalizeConfig(config)
+  var entry = catalogEntry(type)
+  if (!entry) return next
+  if (next.widgets.length >= MAX_WIDGETS) return next
+  // The first of a type is always allowed -- that is what puts a type on the
+  // list at all. Only the second and beyond ask whether it makes sense.
+  if (countOfType(next, entry.type) > 0 && !allowsMultiple(entry.type)) return next
+
+  var instance = defaultInstance(entry.type, nextInstanceId(next, entry.type))
+  instance.enabled = true
+  var cell = landingCell(next, instance.cols, instance.rows, side)
+  instance.col = cell.col
+  instance.row = cell.row
+  instance.side = cell.side
+  next.widgets.push(instance)
+  return next
+}
+
+// Copy one, settings and shape and all, and put it beside the original.
+//
+// The useful shape of "another one of these": a second repository card is a
+// first one with the name changed, not something you configure from nothing.
+function duplicateWidget(config, id) {
+  var next = normalizeConfig(config)
+  var source = findInstance(next, id)
+  if (!source) return next
+  if (next.widgets.length >= MAX_WIDGETS) return next
+  if (!allowsMultiple(source.type)) return next
+
+  var copy = defaultInstance(source.type, nextInstanceId(next, source.type))
+  copy.enabled = true
+  copy.monitor = source.monitor
+  copy.cols = source.cols
+  copy.rows = source.rows
+  copy.opacity = source.opacity
+  copy.radius = source.radius
+  // Through the same gate a config file goes through, so a copy can never hold
+  // a value the original was only getting away with.
+  copy.settings = normalizeSettings(catalogEntry(source.type), source.settings)
+
+  var cell = landingCell(next, copy.cols, copy.rows, source.side)
+  copy.col = cell.col
+  copy.row = cell.row
+  copy.side = cell.side
+  next.widgets.push(copy)
+  return next
+}
+
+// Whether a widget can be deleted outright, as opposed to switched off.
+//
+// The last of a type cannot: every type in the catalogue has a row in the bar
+// popup, and that row is an instance. Deleting it would only mean the next
+// config read put a fresh one back, switched off -- which looks exactly like
+// the delete failing. Switching it off is the operation that was wanted.
+function canRemove(config, id) {
+  var target = findInstance(config, id)
+  return !!target && countOfType(config, target.type) > 1
+}
+
+function removeWidget(config, id) {
+  var next = normalizeConfig(config)
+  if (!canRemove(next, id)) return next
+  var key = String(id)
+  var kept = []
+  for (var i = 0; i < next.widgets.length; i++) {
+    if (next.widgets[i].id !== key) kept.push(next.widgets[i])
+  }
+  next.widgets = kept
+  return next
 }
 
 // ------------------------------------------------------------------- config
@@ -2755,6 +2895,15 @@ if (typeof module !== "undefined" && module.exports) {
     cellFromPoint: cellFromPoint,
     dropTarget: dropTarget,
     displayName: displayName,
+    instanceLabel: instanceLabel,
+    allowsMultiple: allowsMultiple,
+    countOfType: countOfType,
+    nextInstanceId: nextInstanceId,
+    landingCell: landingCell,
+    addWidget: addWidget,
+    duplicateWidget: duplicateWidget,
+    canRemove: canRemove,
+    removeWidget: removeWidget,
     defaultInstance: defaultInstance,
     defaultConfig: defaultConfig,
     normalizeSettings: normalizeSettings,

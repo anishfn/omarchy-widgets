@@ -13,6 +13,7 @@ what keeps a hundred contributed widgets looking like one set.
 - [The catalogue entry](#the-catalogue-entry)
 - [What your widget is handed](#what-your-widget-is-handed)
 - [Sizes](#sizes)
+- [More than one of your widget](#more-than-one-of-your-widget)
 - [Settings](#settings)
 - [Names are a promise](#names-are-a-promise)
 - [Changing a widget that people already have](#changing-a-widget-that-people-already-have)
@@ -246,6 +247,32 @@ just "the same thing but stretched" is a worse option, not an extra one.
 
 Your QML is given the pixel rectangle for the footprint in use. Read `width`
 and `height` and lay out from them; do not assume square.
+
+If you offer a size **taller than one row**, size your type from a cell rather
+than from the card's short axis — otherwise a `[2, 2]` gets letters twice the
+size instead of twice the content. See [DESIGN.md](DESIGN.md#sizes) for the
+three lines that do it.
+
+## More than one of your widget
+
+Set `multiple: true` if a second copy could say something the first cannot —
+a different timezone, a different repository, a different file. That puts a
+**Duplicate** button on it in the editor and lets `omarchy-shell widgets add`
+make another.
+
+Leave it off if your widget reads a single source. `weather` reads one
+location and `music` follows one player, so a second card would be the first
+one twice; both omit it deliberately.
+
+Nothing else changes. Instances have always been independent — your QML is
+handed one `instance` and reads its `settings`, and it has no way of knowing
+whether there are others.
+
+If your widget has a setting called `label` or `title`, the editor uses it to
+tell copies apart in the tray and the popup. That is the whole convention: a
+key by either of those names is taken to be the user's own word for the thing
+on the card. Nothing else in your schema is ever displayed as a name, so a
+setting holding something private is never shown by accident.
 
 ## Settings
 

@@ -515,6 +515,40 @@ Item {
                 onClicked: if (root.service) root.service.cycleSize(root.selectedId)
               }
 
+              // Another one of these. Only for a type that says a second one
+              // means something -- a duplicate weather card would be the same
+              // reading twice.
+              Button {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.selected !== null
+                  && Model.allowsMultiple(root.selected ? root.selected.type : "")
+                text: "Duplicate"
+                tooltipText: "Add another " + (root.selected
+                  ? Model.catalogEntry(root.selected.type).name.toLowerCase() : "widget")
+                  + ", with these settings"
+                bordered: true
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                onClicked: if (root.service) root.service.duplicateWidget(root.selectedId)
+              }
+
+              // ...and away again. Only ever offered for a spare: the last of
+              // a type is switched off rather than deleted, because deleting
+              // it would only mean the next config read put a fresh one back.
+              Button {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.selected !== null && root.config !== null
+                  && Model.canRemove(root.config, root.selectedId)
+                text: "Remove"
+                tooltipText: "Delete " + root.nameFor(root.selected) + " and its settings"
+                bordered: true
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+                onClicked: if (root.service) root.service.removeWidget(root.selectedId)
+              }
+
               Button {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "Done"

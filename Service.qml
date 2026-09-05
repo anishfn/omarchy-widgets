@@ -93,12 +93,35 @@ Item {
 
   function toggle(id) { apply(Model.toggleEnabled(config, id)) }
 
-  // Move a widget already on the grid. A cell it does not fit in leaves the
-  // config untouched, so a refused drop costs nothing.
-  function moveWidget(id, col, row) { apply(Model.moveWidget(config, id, col, row)) }
+  // Move a widget already on the grid, on either side. Whatever is in the way
+  // moves rather than the drop being refused.
+  function moveWidget(id, col, row, side) { apply(Model.moveWidget(config, id, col, row, side)) }
 
   // Drop onto a cell, switching the widget on if it was in the tray.
-  function placeWidget(id, col, row) { apply(Model.placeWidget(config, id, col, row)) }
+  function placeWidget(id, col, row, side) { apply(Model.placeWidget(config, id, col, row, side)) }
+
+  // Send one widget to a side without naming a cell.
+  function setWidgetSide(id, side) { apply(Model.setWidgetSide(config, id, side)) }
+
+  // Another of a type, at its defaults, and a copy of a configured one. Both
+  // land switched on, because a widget you asked for is one you want to see.
+  function addWidget(type, side) { apply(Model.addWidget(config, type, side)) }
+
+  function duplicateWidget(id) {
+    var before = Model.countOfType(config, Model.findInstance(config, id)
+      ? Model.findInstance(config, id).type : "")
+    var next = Model.duplicateWidget(config, id)
+    apply(next)
+    // Select what was just made, so the settings panel is already pointed at
+    // the thing you are about to change -- a copy exists to be edited.
+    var source = Model.findInstance(next, id)
+    if (source && Model.countOfType(next, source.type) > before) {
+      var made = next.widgets[next.widgets.length - 1]
+      if (made) service.select(made.id)
+    }
+  }
+
+  function removeWidget(id) { apply(Model.removeWidget(config, id)) }
 
   function setSetting(id, key, value) { apply(Model.setSetting(config, id, key, value)) }
 
@@ -837,22 +860,55 @@ Item {
       return "ok"
     }
 
-    function move(id: string, col: string, row: string): string {
+    function move(id: string, col: string, row: string, side: string): string {
       if (!Model.findInstance(service.config, id)) return "no widget with id " + id
-      service.moveWidget(id, Number(col), Number(row))
+      service.moveWidget(id, Number(col), Number(row), side)
       var now = Model.findInstance(service.config, id)
       return now.col === Number(col) && now.row === Number(row)
         ? "ok"
-        : "cell " + col + "," + row + " is taken or off the grid"
+        : "cell " + col + "," + row + " is off the grid"
     }
 
-    function place(id: string, col: string, row: string): string {
+    function place(id: string, col: string, row: string, side: string): string {
       if (!Model.findInstance(service.config, id)) return "no widget with id " + id
-      service.placeWidget(id, Number(col), Number(row))
+      service.placeWidget(id, Number(col), Number(row), side)
       var now = Model.findInstance(service.config, id)
       return now.enabled && now.col === Number(col) && now.row === Number(row)
         ? "ok"
-        : "cell " + col + "," + row + " is taken or off the grid"
+        : "cell " + col + "," + row + " is off the grid, or the grid is full"
+    }
+
+    function add(type: string): string {
+      if (!Model.catalogEntry(type)) return "no widget type '" + type
+        + "'; there is: " + Model.catalogTypes().join(", ")
+      var before = Model.countOfType(service.config, type)
+      service.addWidget(type, "")
+      var after = Model.countOfType(service.config, type)
+      if (after > before) return service.config.widgets[service.config.widgets.length - 1].id
+      return Model.allowsMultiple(type)
+        ? "no room for another widget"
+        : type + " reads one source, so one of it is all there is"
+    }
+
+    function duplicate(id: string): string {
+      var target = Model.findInstance(service.config, id)
+      if (!target) return "no widget with id " + id
+      if (!Model.allowsMultiple(target.type))
+        return target.type + " reads one source, so one of it is all there is"
+      var before = Model.countOfType(service.config, target.type)
+      service.duplicateWidget(id)
+      return Model.countOfType(service.config, target.type) > before
+        ? service.config.widgets[service.config.widgets.length - 1].id
+        : "no room for another widget"
+    }
+
+    function remove(id: string): string {
+      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
+      if (!Model.canRemove(service.config, id))
+        return "that is the only " + Model.findInstance(service.config, id).type
+          + "; switch it off instead"
+      service.removeWidget(id)
+      return "ok"
     }
 
     function select(id: string): string {

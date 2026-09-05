@@ -351,76 +351,133 @@ Item {
       onCommit: function (v) { omate.updateSettings({ scale: Math.round(v) }) }
     }
 
-    Row {
+    Column {
       id: cursorRow
 
-      readonly property real rowHeight: Math.round(root.unit * 0.12)
+      // Cursor chasing, in the omate panel's own terms: one control for the
+      // on/off and the cadence, because the interesting choice is not
+      // "should it happen" but "how often". The chips, the labels and the
+      // write path are the panel's -- setChaseCooldown then setCursorChase,
+      // never a bare updateSettings -- so the card and the panel cannot
+      // disagree about what the feature is.
+      readonly property var chaseOptions: [
+        { value: "off",  label: "Off" },
+        { value: "10",   label: "10s" },
+        { value: "60",   label: "1 min" },
+        { value: "300",  label: "5 min" },
+        { value: "1800", label: "30 min" }
+      ]
+      readonly property string chaseValue: root.live && root.omate.cursorChase
+        ? String(root.omate.chaseCooldownSec) : "off"
+      // The panel's wording. A cooldown set from the IPC is a legitimate
+      // value with no chip of its own, so it is spelled out rather than
+      // leaving the row looking unset.
+      readonly property string chaseDescription: {
+        if (!root.live || !root.omate.cursorChase) return "Off"
+        switch (root.omate.chaseCooldownSec) {
+          case 10: return "Playful"
+          case 60: return "Now and then"
+          case 300: return "Occasional"
+          case 1800: return "Rare"
+        }
+        return "Every " + root.omate.chaseCooldownSec + "s"
+      }
 
       width: parent.width
-      height: rowHeight
-      spacing: Math.round(root.unit * 0.04)
+      spacing: Math.round(root.unit * 0.025)
 
-      // Whether the chase exists at all. A chip rather than a second
-      // slider: it is a yes or no about the feature, and the slider beside
-      // it is only about how fast.
-      Rectangle {
-        id: cursorChip
-
-        readonly property bool chaseOn: root.live && omate.cursorChase
-
-        width: cursorLabel.implicitWidth + Math.round(root.unit * 0.1)
-        height: parent.height
-        radius: height / 2
-        color: chaseOn ? Util.alpha(root.accent, 0.2) : "transparent"
-        border.width: 1
-        border.color: chaseOn ? root.accent : root.faint
-
-        Behavior on color { ColorAnimation { duration: 90 } }
+      // The caption line: what the row is, and what it is currently saying
+      // -- the panel carries the same sentence beside its chips.
+      Item {
+        width: parent.width
+        height: chaseTitle.implicitHeight
 
         Text {
-          id: cursorLabel
+          id: chaseTitle
 
-          anchors.centerIn: parent
-          text: "Cursor"
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Chase cursor"
           textFormat: Text.PlainText
-          color: parent.chaseOn ? root.accent : root.dim
+          color: root.dim
           font.family: root.fontFamily
           font.pixelSize: root.smallSize
           renderType: Text.NativeRendering
         }
 
-        MouseArea {
-          anchors.fill: parent
-          anchors.margins: -Math.round(root.unit * 0.02)
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: {
-            if (!root.live) return
-            omate.updateSettings({ cursorChase: !omate.cursorChase })
-          }
+        Text {
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          text: cursorRow.chaseDescription
+          textFormat: Text.PlainText
+          color: root.faint
+          font.family: root.fontFamily
+          font.pixelSize: root.smallSize
+          renderType: Text.NativeRendering
         }
       }
 
-      CardSlider {
-        width: parent.width - cursorChip.width - parent.spacing
-        height: parent.height
+      Row {
+        id: chaseChips
 
-        caption: "Speed"
-        from: 0
-        to: 1
-        // A cooldown of seconds, mapped on a curve: five seconds to an
-        // hour is a range no straight slider can hold, and the interesting
-        // half of it is all below a minute.
-        value: root.live
-          ? Math.log(Math.max(5, omate.chaseCooldownSec) / 5) / Math.log(720)
-          : 0
-        format: function (t) {
-          var sec = Math.round(5 * Math.pow(720, t))
-          return sec < 60 ? sec + "s" : Math.round(sec / 60) + "m"
-        }
-        enabled: root.live
-        onCommit: function (t) {
-          omate.updateSettings({ chaseCooldownSec: Math.round(5 * Math.pow(720, t)) })
+        anchors.right: parent.right
+        spacing: Math.round(root.unit * 0.025)
+
+        Repeater {
+          model: cursorRow.chaseOptions
+
+          delegate: Rectangle {
+            id: chaseChip
+
+            required property var modelData
+
+            readonly property bool selected: cursorRow.chaseValue === modelData.value
+
+            width: chaseLabel.implicitWidth + Math.round(root.unit * 0.075)
+            height: Math.round(root.unit * 0.075)
+            radius: height / 2
+            color: selected
+              ? Util.alpha(root.accent, 0.2)
+              : (chaseMouse.containsMouse ? Util.alpha(root.foreground, 0.06) : "transparent")
+            border.width: 1
+            border.color: selected ? root.accent : root.faint
+
+            Behavior on color { ColorAnimation { duration: 90 } }
+
+            Text {
+              id: chaseLabel
+
+              anchors.centerIn: parent
+              text: chaseChip.modelData.label
+              textFormat: Text.PlainText
+              color: chaseChip.selected ? root.accent : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: root.smallSize
+              renderType: Text.NativeRendering
+            }
+
+            MouseArea {
+              id: chaseMouse
+
+              anchors.fill: parent
+              anchors.margins: -Math.round(root.unit * 0.015)
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              enabled: root.live
+              onClicked: {
+                if (!root.live) return
+                if (chaseChip.modelData.value === "off") {
+                  if (typeof root.omate.setCursorChase === "function")
+                    root.omate.setCursorChase(false)
+                  return
+                }
+                if (typeof root.omate.setChaseCooldown === "function")
+                  root.omate.setChaseCooldown(Number(chaseChip.modelData.value))
+                if (typeof root.omate.setCursorChase === "function")
+                  root.omate.setCursorChase(true)
+              }
+            }
+          }
         }
       }
     }

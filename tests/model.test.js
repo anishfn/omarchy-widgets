@@ -454,6 +454,27 @@ test("setScale clamps into range and keeps its place in the layout", () => {
   assert.equal(Model.setScale(cfg, 1.234).layout.scale, 1.23)
 })
 
+test("the smallest scale still leaves a grid that can be clicked", () => {
+  // A scale of 0 would draw 0x0 cells and answer null for every point, so the
+  // widgets would be both invisible and undraggable. The floor is what stops
+  // the knob from having a setting that throws the grid away.
+  assert.ok(Model.MIN_SCALE > 0, "the floor is not zero")
+  const layout = Model.normalizeLayout({ ...Model.DEFAULT_LAYOUT, scale: Model.MIN_SCALE })
+  assert.equal(layout.scale, Model.MIN_SCALE, "a config asking for the floor gets it")
+  assert.ok(Model.scaledCell(layout) >= 1, "a cell is still worth drawing")
+
+  for (const side of Model.SIDES) {
+    const r = Model.cellRect(layout, 2560, 0, 0, 1, 1, side)
+    assert.ok(r.width > 0 && r.height > 0, `${side} cell has a size`)
+    assert.deepEqual(
+      Model.cellFromPoint(layout, 2560, r.x + r.width / 2, r.y + r.height / 2),
+      { col: 0, row: 0, side }, `${side} cell reads back at the smallest scale`)
+  }
+
+  // And a config that asks for zero anyway is clamped, not honoured.
+  assert.equal(Model.normalizeLayout({ ...Model.DEFAULT_LAYOUT, scale: 0 }).scale, Model.MIN_SCALE)
+})
+
 test("setOpacity is per widget and clamps into range", () => {
   const cfg = Model.defaultConfig()
   // A fresh widget has no opacity of its own; it follows the grid's 0.72.

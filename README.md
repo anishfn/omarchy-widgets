@@ -213,7 +213,7 @@ set of places it can land.
 |---|---|
 | **Side** | `left` or `right`. The buttons in the editor, or `side` in the config |
 | **Columns** | How many cells wide the grid is, 1–6. Two by default. The buttons in the editor, or `columns` in the config |
-| **Scale** | Grows or shrinks every card at once, 0–200% in the editor's field, or `scale` in the config. Global only: every card is exactly as big as its cell |
+| **Scale** | Grows or shrinks every card at once, 25–200% in the editor's field, or `scale` in the config. Global only: every card is exactly as big as its cell |
 | **Opacity** | How solid every card is over the wallpaper, 0–100% in the editor's field, or `opacity` in the config. The global re-applies to every card; any card can break away with its own (see below) |
 | **Cell** | 200px square by default. Widening the grid adds room, it does not shrink what is in it |
 | **Spans** | A widget takes one or more columns. The clock is square or double-width |
@@ -684,7 +684,7 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 | `gap` | Space between cells |
 | `marginX` | Distance from the edge named by `side` |
 | `marginY` | Distance from the top of the usable desktop |
-| `scale` | Multiplies cell and gap together, `0`–`2` (0–200%). Global only: every card follows it |
+| `scale` | Multiplies cell and gap together, `0.25`–`2` (25–200%). Global only: every card follows it |
 | `opacity` | How solid cards are over the wallpaper, `0`–`1`. Moving it applies to every card and clears the field below on each |
 
 ### Each widget

@@ -18,7 +18,13 @@ var MAX_ROWS = 24
 var MAX_MARGIN = 4000
 // Bounds of the global scale. `cellSize` stays base px at scale 1, so the
 // two read cleanly: a 200px cell at 1.5 is 300px.
-var MIN_SCALE = 0
+//
+// The floor is deliberately not 0. At zero every cell is 0x0: the grid draws
+// nothing and `cellFromPoint` answers null everywhere, so the widgets are
+// gone *and* unclickable, and the only way back is the editor's own chrome.
+// A quarter-size card is still small enough to mean "as small as it goes"
+// without the knob having a setting that throws the grid away.
+var MIN_SCALE = 0.25
 var MAX_SCALE = 2
 
 // The opacity every card starts at; a widget can override it on its own.

@@ -521,14 +521,16 @@ Item {
                 font.pixelSize: Style.font.bodySmall
               }
 
-              // One field, in percent, set at 100: any whole number from 0 to
-              // 200, typecast by the spinbox and written back as the factor.
+              // One field, in percent, set at 100: any whole number from 25
+              // to 200, typecast by the spinbox and written back as the
+              // factor. The floor is Model.MIN_SCALE, because a grid scaled
+              // to nothing cannot be clicked back.
               NumberField {
                 anchors.verticalCenter: parent.verticalCenter
                 label: ""
                 value: Math.round(root.layout.scale * 100)
-                from: 0
-                to: 200
+                from: Math.round(Model.MIN_SCALE * 100)
+                to: Math.round(Model.MAX_SCALE * 100)
                 stepSize: 10
                 fieldWidth: Style.space(64)
                 foreground: root.foreground

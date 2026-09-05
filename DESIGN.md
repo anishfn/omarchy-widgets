@@ -193,9 +193,23 @@ you are working is a distraction you cannot turn off without deleting it.
   described. Both are the single thing you would reach for while looking at
   that card, and neither needs anything drawn to explain it.
 
-  What fails the test: a settings button, a menu, a list to scroll, anything
-  that opens more interface. That is a bar widget or a panel. A wallpaper is
-  not somewhere to put controls.
+  What fails the test: a settings button, a menu, anything that opens more
+  interface. That is a bar widget or a panel. A wallpaper is not somewhere to
+  put controls.
+
+  **`todos` is the exception, and it is recorded here so it stays one.** It
+  takes a tick per row, a title that opens the file, and a list that scrolls
+  in both directions — three things, where the rule says one. What earns it:
+  every one of them is about an item already on the card, a tick is the only
+  thing anybody ever does to a list, and a list is the single subject on a
+  wallpaper that genuinely holds more than a card can show. Eliding the
+  eleventh item into a card that cannot reach it is worse than letting it be
+  reached.
+
+  Do not read that as the rule loosening. A scrolling list is still the wrong
+  shape for almost everything: it is content you read a line at a time, and a
+  wallpaper is read at a glance. If your widget wants one, the question to
+  answer first is whether it wants to be a panel.
 
   Three things follow, and all three are on you:
 

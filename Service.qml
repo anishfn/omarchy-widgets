@@ -87,6 +87,7 @@ Item {
       service.refreshContributions(false)
       service.refreshRepos(false)
       service.refreshCalendars(false)
+      service.refreshTodoist(false)
     }
   }
 
@@ -843,6 +844,240 @@ Item {
     }
   }
 
+  // --------------------------------------------------------------- todoist
+  //
+  // The same card as `todos`, for a list that lives in Todoist. It goes to
+  // Todoist's own API rather than through anything in the middle, and it
+  // fetches here rather than in the widget for the usual reason: one request
+  // serves however many cards are pointed at the same filter, on however many
+  // monitors.
+  //
+  // The token is read from a file rather than kept in `widgets.json`. The
+  // default is the path Omarchy's Todoist tooling already writes, so a desktop
+  // that has authorised Todoist once does not do it again here -- and a
+  // credential never lands in a config the editor renders.
+  //
+  // It never travels through argv or the environment either. `curl -K -` takes
+  // its config on stdin, so the token is not in `ps` output for anyone else on
+  // the box to read while a fetch is in flight.
+
+  // filter query -> { tasks, total, overdue }
+  property var todoist: ({})
+  property string todoistError: ""
+  property var todoistQueue: []
+
+  // token file path -> the token in it, or "" when there is not one
+  property var todoistTokens: ({})
+
+  // Task ids a tick has closed but a fetch has not caught up with yet. The
+  // card draws through this, so a ticked row leaves at once rather than in
+  // five minutes -- and a close that failed brings its row back on the next
+  // fetch rather than losing it silently.
+  property var todoistClosing: ({})
+
+  readonly property var todoistRequests: Model.todoistRequestsInUse(config, home)
+  readonly property var todoistTokenPaths: Model.todoistTokenPathsInUse(config, home)
+  readonly property bool todoistWanted: todoistRequests.length > 0
+
+  onTodoistWantedChanged: if (todoistWanted) refreshTodoist(false)
+
+  // Whether a card can fetch at all, which is what it draws instead of a list
+  // when it cannot. Asked with the widget's own setting rather than a resolved
+  // path, so the widget does not have to resolve one to find out.
+  function todoistTokenReady(setting) {
+    var path = Model.todoistTokenPath(setting, home)
+    return !!path && Model.isSafeTodoistToken(service.todoistTokens[path] || "")
+  }
+
+  function todoistTokenFor(query) {
+    for (var i = 0; i < service.todoistRequests.length; i++) {
+      if (service.todoistRequests[i].query !== query) continue
+      return service.todoistTokens[service.todoistRequests[i].tokenPath] || ""
+    }
+    return ""
+  }
+
+  function storeTodoistToken(path, raw) {
+    var next = ({})
+    for (var key in service.todoistTokens) next[key] = service.todoistTokens[key]
+    next[String(path)] = String(raw || "").replace(/^\s+|\s+$/g, "")
+    service.todoistTokens = next
+  }
+
+  function storeTodoist(query, parsed) {
+    var next = ({})
+    for (var key in service.todoist) next[key] = service.todoist[key]
+    next[String(query)] = parsed
+    service.todoist = next
+
+    // Anything ticked off has either gone from the list or was never closed.
+    // Either way the flag has done its job, so the map stays the size of what
+    // is actually in flight rather than growing for the life of the session.
+    var live = ({})
+    for (var q in next) {
+      var tasks = next[q] && next[q].tasks ? next[q].tasks : []
+      for (var t = 0; t < tasks.length; t++)
+        if (service.todoistClosing[tasks[t].id]) live[tasks[t].id] = true
+    }
+    service.todoistClosing = live
+  }
+
+  // `force` re-fetches everything, which is what the timer wants. Without it
+  // only filters with nothing drawn yet are queued, which is what a config
+  // change wants: typing a filter should fetch it, and dragging the card
+  // across the grid should not.
+  function refreshTodoist(force) {
+    if (!service.todoistWanted) return
+    var queue = []
+    for (var i = 0; i < service.todoistRequests.length; i++) {
+      var query = service.todoistRequests[i].query
+      if (force === true || !service.todoist[query]) queue.push(query)
+    }
+    if (queue.length === 0) return
+    service.todoistQueue = queue
+    startNextTodoist()
+  }
+
+  function startNextTodoist() {
+    if (todoistProc.running) return
+    var queue = service.todoistQueue
+    if (!queue || queue.length === 0) return
+    var query = String(queue[0])
+    service.todoistQueue = queue.slice(1)
+    var token = service.todoistTokenFor(query)
+    // A token that is missing or not shaped like one is not an error to draw
+    // over the list: the card already says the token is not set.
+    if (!Model.isSafeTodoistToken(token)) { Qt.callLater(service.startNextTodoist); return }
+    todoistProc.query = query
+    todoistProc.secret = token
+    // `--max-filesize` bounds a document that arrives from outside and is
+    // turned into objects inside the process that draws the desktop.
+    todoistProc.command = ["/usr/bin/timeout", "-k", "2", "20",
+      "/usr/bin/curl", "-fsS", "--max-time", "15",
+      "--max-filesize", "2097152",
+      "-H", "Accept: application/json",
+      "-K", "-",
+      "https://" + Model.TODOIST_HOST + "/api/v1/tasks/filter"
+        + "?limit=" + Model.TODOIST_MAX_TASKS
+        + "&query=" + encodeURIComponent(query)]
+    todoistProc.stdinEnabled = true
+    todoistProc.running = true
+  }
+
+  Process {
+    id: todoistProc
+    running: false
+    property string query: ""
+    property string secret: ""
+    stdinEnabled: false
+    // The one place the token is written, and stdin is closed straight after:
+    // `curl -K -` reads its config to end of file before it makes a request,
+    // so leaving it open would hang the fetch rather than authorise it.
+    onStarted: {
+      write('header = "Authorization: Bearer ' + todoistProc.secret + '"\n')
+      todoistProc.secret = ""
+      todoistProc.stdinEnabled = false
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var parsed = Model.parseTodoist(text, Date.now())
+        if (parsed) {
+          service.storeTodoist(todoistProc.query, parsed)
+          service.todoistError = ""
+        } else {
+          // Keep whatever is on screen. A card showing five-minute-old tasks
+          // beats one that has emptied itself because a request failed.
+          service.todoistError = service.todoist[todoistProc.query] ? "stale" : "unavailable"
+        }
+      }
+    }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextTodoist)
+  }
+
+  // Tick one task off. The id is checked here rather than trusted from the
+  // card, because it is about to become a URL path segment and
+  // `encodeURIComponent` leaves "/" alone.
+  function closeTodoistTask(query, id) {
+    var key = String(id)
+    if (!Model.isSafeTodoistId(key)) return false
+    if (service.todoistClosing[key] || todoistCloseProc.running) return false
+    var token = service.todoistTokenFor(String(query))
+    if (!Model.isSafeTodoistToken(token)) return false
+
+    // Flagged before the request, so the row goes now rather than after a
+    // round trip to Todoist and back.
+    var closing = ({})
+    for (var k in service.todoistClosing) closing[k] = service.todoistClosing[k]
+    closing[key] = true
+    service.todoistClosing = closing
+
+    todoistCloseProc.task = key
+    todoistCloseProc.secret = token
+    todoistCloseProc.command = ["/usr/bin/timeout", "-k", "2", "20",
+      "/usr/bin/curl", "-fsS", "--max-time", "15", "-X", "POST",
+      "-K", "-",
+      "https://" + Model.TODOIST_HOST + "/api/v1/tasks/" + key + "/close"]
+    todoistCloseProc.stdinEnabled = true
+    todoistCloseProc.running = true
+    return true
+  }
+
+  Process {
+    id: todoistCloseProc
+    running: false
+    property string task: ""
+    property string secret: ""
+    stdinEnabled: false
+    onStarted: {
+      write('header = "Authorization: Bearer ' + todoistCloseProc.secret + '"\n')
+      todoistCloseProc.secret = ""
+      todoistCloseProc.stdinEnabled = false
+    }
+    onExited: (code, status) => {
+      if (code !== 0) {
+        // Nothing was closed, so put the row back rather than leave a task
+        // hidden on a card that thinks it dealt with it.
+        var closing = ({})
+        for (var k in service.todoistClosing)
+          if (k !== todoistCloseProc.task) closing[k] = service.todoistClosing[k]
+        service.todoistClosing = closing
+        return
+      }
+      service.refreshTodoist(true)
+    }
+  }
+
+  // The token file is watched rather than read once: authorising Todoist
+  // while the shell is up should light the card, not wait for a restart.
+  Instantiator {
+    model: service.todoistTokenPaths
+    delegate: FileView {
+      required property var modelData
+      path: String(modelData)
+      watchChanges: true
+      printErrors: false
+      onFileChanged: reload()
+      // A file that is not there is not an error worth drawing: the card says
+      // where it looked.
+      onLoadFailed: service.storeTodoistToken(path, "")
+      onLoaded: service.storeTodoistToken(path, text())
+      Component.onCompleted: reload()
+    }
+  }
+
+  onTodoistTokensChanged: if (service.todoistWanted) service.refreshTodoist(false)
+
+  Timer {
+    // A task list moves when somebody adds a task, which is not something a
+    // wallpaper has to see inside the minute.
+    interval: 300000
+    repeat: true
+    running: service.todoistWanted
+    triggeredOnStart: true
+    onTriggered: service.refreshTodoist(true)
+  }
+
   // ----------------------------------------------------------------- IPC
 
   IpcHandler {
@@ -1115,6 +1350,56 @@ Item {
         }
       }
       return out.join("\n")
+    }
+
+    function todoist(): string {
+      if (!service.todoistWanted) return "no todoist widget is on"
+      var out = []
+      for (var i = 0; i < service.todoistRequests.length; i++) {
+        var query = service.todoistRequests[i].query
+        if (!Model.isSafeTodoistToken(service.todoistTokenFor(query))) {
+          // The path, never the token: this answer goes wherever the caller
+          // sends it.
+          out.push(query + ": no token in " + service.todoistRequests[i].tokenPath)
+          continue
+        }
+        var list = service.todoist[query]
+        if (!list) { out.push(query + ": " + (service.todoistError || "not fetched yet")); continue }
+        // Counted off what is actually drawn, not off the last fetch: a task
+        // ticked a second ago has left the card and should leave this too.
+        var tasks = Model.visibleTodoistTasks(list, service.todoistClosing)
+        var late = 0
+        for (var o = 0; o < tasks.length; o++) if (tasks[o].overdue) late++
+        out.push(query + ": " + tasks.length + " tasks, " + late + " overdue")
+        for (var t = 0; t < tasks.length && t < 10; t++) {
+          out.push("  [ ] " + tasks[t].content
+            + (tasks[t].due ? "  (" + tasks[t].due.label + ")" : ""))
+        }
+      }
+      return out.join("\n")
+    }
+
+    // The tick, from the command line. The same thing the ring on the card
+    // does, and here for the same reason `todo` is: a list is a thing scripts
+    // want to act on, and a card under your windows is not always reachable.
+    function todoistClose(id: string, filter: string): string {
+      if (!service.todoistWanted) return "no todoist widget is on"
+      var query = String(filter) || (service.todoistRequests.length === 1
+        ? service.todoistRequests[0].query : "")
+      if (!query) {
+        var queries = []
+        for (var i = 0; i < service.todoistRequests.length; i++)
+          queries.push(service.todoistRequests[i].query)
+        return "say which filter: " + queries.join(", ")
+      }
+      return service.closeTodoistTask(query, id)
+        ? "ok"
+        : "no task " + id + ", or no usable token for '" + query + "'"
+    }
+
+    function refreshTodoist(): string {
+      service.refreshTodoist(true)
+      return "ok"
     }
 
     function reload(): string {

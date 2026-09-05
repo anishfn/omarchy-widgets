@@ -329,6 +329,50 @@ function catalog() {
       ]
     },
     {
+      type: "todoist",
+      name: "Todoist",
+      description: "What is due, from Todoist. Tick things off.",
+      source: "widgets/Todoist.qml",
+      sizes: [[2, 1], [1, 1], [2, 2]],
+      // Todoist's own API, with a token read from a file. Nothing is sent but
+      // the filter you configured, and nothing is stored in this config.
+      network: "api.todoist.com",
+      // A tick per row, and nothing else -- one fewer action than `todos`,
+      // which is the widget this one borrows DESIGN.md's exception from.
+      interactive: true,
+      // One per filter. "today" and "this week" are two different cards.
+      multiple: true,
+      settings: [
+        {
+          key: "filter",
+          type: "text",
+          label: "Todoist filter",
+          help: "today | overdue",
+          defaultValue: ""
+        },
+        {
+          key: "title",
+          type: "text",
+          label: "Title",
+          help: "Empty uses the filter",
+          defaultValue: ""
+        },
+        {
+          key: "tokenFile",
+          type: "text",
+          label: "API token file",
+          help: "~/.config/omarchy/todoist.token",
+          defaultValue: ""
+        },
+        {
+          key: "canTick",
+          type: "boolean",
+          label: "Tick items off",
+          defaultValue: true
+        }
+      ]
+    },
+    {
       type: "music",
       name: "Music",
       description: "What is playing, how far in, and the transport for it.",
@@ -2887,20 +2931,28 @@ function groupEventsByDay(events, nowMs) {
 var TODO_MAX_ITEMS = 200
 var DEFAULT_TODO_FILE = ".config/omarchy/todos.txt"
 
-// Where a widget's list actually lives. Empty means the default, "~/" and a
-// bare name are both resolved against home, and a path that tries to climb
-// out with ".." is refused rather than cleaned up -- the same allowlist
-// habit the rest of this file has, applied to the one setting here that
-// names something on disk.
-function todoPath(setting, home) {
+// A setting that names a file. Empty means `fallback`, "~/" and a bare name
+// are both resolved against home, and a path that tries to climb out with
+// ".." is refused rather than cleaned up -- the same allowlist habit the rest
+// of this file has, applied to the settings that name something on disk.
+//
+// Two settings do: the list a `todos` card reads, and the file a `todoist`
+// card reads its API token out of. One resolver, so a path that is refused in
+// one place is refused in the other.
+function resolveHomePath(setting, home, fallback) {
   var base = String(home || "").replace(/\/+$/, "")
   var raw = clampString(setting).replace(/^\s+|\s+$/g, "")
-  if (raw === "") return base ? base + "/" + DEFAULT_TODO_FILE : ""
+  if (raw === "") return base ? base + "/" + fallback : ""
   if (raw.indexOf("~/") === 0) raw = base + raw.slice(1)
   else if (raw.charAt(0) !== "/") raw = base + "/" + raw
   var parts = raw.split("/")
   for (var i = 0; i < parts.length; i++) if (parts[i] === "..") return ""
   return raw
+}
+
+// Where a widget's list actually lives.
+function todoPath(setting, home) {
+  return resolveHomePath(setting, home, DEFAULT_TODO_FILE)
 }
 
 // Every distinct file the config asks for, so two cards on the same list are
@@ -3092,6 +3144,210 @@ function todoTitle(setting, parsed) {
   return "Todo"
 }
 
+// ----------------------------------------------------------------- todoist
+//
+// The same card as `todos`, for a list that already lives in Todoist rather
+// than in a file. Everything that can be wrong about it is here: the token
+// and id gates, the due-date grammar, and the order the card draws.
+//
+// Todoist writes a due date three ways, and only the first is a trap:
+//
+//   "2026-09-05"             a day, with no time in it
+//   "2026-09-05T14:00:00"    floating local time, as the app stores it
+//   "2026-09-05T12:00:00Z"   an explicit instant
+//
+// `new Date("2026-09-05")` is UTC by specification, so west of Greenwich a
+// task due today lands on yesterday. Date-only values are therefore split and
+// rebuilt as local midnight rather than parsed.
+
+var TODOIST_HOST = "api.todoist.com"
+var TODOIST_MAX_TASKS = 50
+var DEFAULT_TODOIST_TOKEN_FILE = ".config/omarchy/todoist.token"
+var DEFAULT_TODOIST_FILTER = "today | overdue"
+
+// The file the token is read out of. Defaults to the path
+// `omarchy plugin`-installed Todoist tooling already writes, so a desktop that
+// has authorised Todoist once does not have to do it again here.
+function todoistTokenPath(setting, home) {
+  return resolveHomePath(setting, home, DEFAULT_TODOIST_TOKEN_FILE)
+}
+
+// One opaque credential, and never a second line. This value is written into a
+// curl config file on stdin, where a line break would start a new directive
+// and a double quote would end the argument early -- so both are refused here
+// rather than escaped, the way `isSafeZone` refuses rather than sanitises.
+function isSafeTodoistToken(value) {
+  if (typeof value !== "string") return false
+  if (value.length < 20 || value.length > 512) return false
+  return /^[\x21-\x7e]+$/.test(value) && value.indexOf('"') === -1
+    && value.indexOf("\\") === -1
+}
+
+// An id, before it is spliced into a URL path. `encodeURIComponent` leaves
+// "/" alone, so an id of "../../projects/1" would travel through the path as
+// written and address an endpoint this widget never meant to call.
+function isSafeTodoistId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value)
+}
+
+// The filter a card asks for, defaulted. It becomes a query parameter, so it
+// is encoded rather than matched -- unlike an id or a token, every character
+// is legitimate in a Todoist filter and there is no allowlist to write.
+function todoistFilter(setting) {
+  var raw = clampString(setting).replace(/^\s+|\s+$/g, "")
+  return raw === "" ? DEFAULT_TODOIST_FILTER : raw
+}
+
+// Every request the config asks for: a filter, and the file the token for it
+// comes out of. Deduplicated by filter, so two cards showing "today" are one
+// request rather than two, and the first card asking for a filter is the one
+// whose token file is used for it.
+//
+// The pair travels together because a request needs both, and keeping them
+// apart would leave the queue holding a filter it could not authorise.
+function todoistRequestsInUse(config, home) {
+  var list = config && Array.isArray(config.widgets) ? config.widgets : []
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].type !== "todoist" || !list[i].enabled) continue
+    var settings = list[i].settings || {}
+    var query = todoistFilter(settings.filter)
+    if (seen[query]) continue
+    var tokenPath = todoistTokenPath(settings.tokenFile, home)
+    if (!tokenPath) continue
+    seen[query] = true
+    out.push({ query: query, tokenPath: tokenPath })
+  }
+  return out
+}
+
+// The distinct token files to watch, so two cards on one account are one
+// watch rather than two.
+function todoistTokenPathsInUse(config, home) {
+  var requests = todoistRequestsInUse(config, home)
+  var seen = {}
+  var out = []
+  for (var i = 0; i < requests.length; i++) {
+    if (seen[requests[i].tokenPath]) continue
+    seen[requests[i].tokenPath] = true
+    out.push(requests[i].tokenPath)
+  }
+  return out
+}
+
+// One Todoist due object into the fields a row draws. Answers null for a task
+// with no due date, which is a real state rather than a failure -- an item in
+// a filter can simply have no day attached to it.
+function parseTodoistDue(due, nowMs) {
+  if (!isPlainObject(due)) return null
+  var raw = clampString(due.date)
+  var timed = raw.length > 10
+  var ms
+
+  var parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+  if (parts) {
+    // Local midnight, rebuilt rather than parsed. See the note above.
+    ms = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])).getTime()
+  } else if (timed) {
+    // Both remaining forms parse correctly: a trailing "Z" is an instant, and
+    // a bare datetime is read as local, which is what floating time means.
+    ms = new Date(raw).getTime()
+  } else {
+    return null
+  }
+  if (isNaN(ms)) return null
+
+  var delta = daysApart(ms, nowMs)
+  var overdue = timed ? ms < nowMs : delta < 0
+  var stamp = dayHeading(ms, nowMs)
+  return {
+    ms: ms,
+    timed: timed,
+    overdue: overdue,
+    group: overdue ? "overdue" : (delta === 0 ? "today" : "later"),
+    recurring: due.is_recurring === true,
+    // "14:30" on its own for today, the day and the clock beyond it, and just
+    // the day when there is no clock to give.
+    label: timed
+      ? (delta === 0 ? clockLabel(ms, false) : stamp + " " + clockLabel(ms, false))
+      : stamp
+  }
+}
+
+var TODOIST_GROUP_RANK = { overdue: 0, today: 1, later: 2, none: 3 }
+
+// The response into what the card draws, or null when it is not a response at
+// all. Null means keep whatever is already on screen: a card showing
+// five-minute-old tasks beats one that has emptied itself because a request
+// failed.
+function parseTodoist(raw, nowMs) {
+  var parsed
+  try {
+    parsed = JSON.parse(typeof raw === "string" ? raw : "")
+  } catch (e) {
+    return null
+  }
+  // The v1 endpoint answers { results: [...], next_cursor }. A bare array is
+  // accepted too, which is the shape the older REST endpoint gave.
+  var results = Array.isArray(parsed) ? parsed
+    : (isPlainObject(parsed) && Array.isArray(parsed.results) ? parsed.results : null)
+  if (results === null) return null
+
+  var tasks = []
+  for (var i = 0; i < results.length && tasks.length < TODOIST_MAX_TASKS; i++) {
+    var task = results[i]
+    if (!isPlainObject(task)) continue
+    var id = clampString(task.id === undefined ? "" : String(task.id))
+    if (!isSafeTodoistId(id)) continue
+    var due = parseTodoistDue(task.due, nowMs)
+    tasks.push({
+      id: id,
+      content: clampString(task.content),
+      // Todoist's priority runs 1 (none) to 4 (urgent). Kept in its own terms
+      // rather than flipped into p-numbers, which are a display convention.
+      priority: clampNumber(task.priority, 1, 4, 1),
+      due: due,
+      group: due ? due.group : "none",
+      overdue: due ? due.overdue : false
+    })
+  }
+
+  tasks.sort(function (a, b) {
+    var rank = TODOIST_GROUP_RANK[a.group] - TODOIST_GROUP_RANK[b.group]
+    if (rank !== 0) return rank
+    if (a.due && b.due && a.due.ms !== b.due.ms) return a.due.ms - b.due.ms
+    if (a.priority !== b.priority) return b.priority - a.priority
+    return a.content.toLowerCase() < b.content.toLowerCase() ? -1 : 1
+  })
+
+  var overdue = 0
+  for (var t = 0; t < tasks.length; t++) if (tasks[t].overdue) overdue++
+  return { tasks: tasks, total: tasks.length, overdue: overdue }
+}
+
+// What the card draws: the fetched list, minus anything a tick has already
+// closed. The closed set is the widget's own optimistic state, so a ticked row
+// leaves at once rather than at the next poll.
+function visibleTodoistTasks(parsed, closing) {
+  var tasks = parsed && Array.isArray(parsed.tasks) ? parsed.tasks : []
+  var gone = isPlainObject(closing) ? closing : {}
+  var out = []
+  for (var i = 0; i < tasks.length; i++) {
+    if (gone[tasks[i].id]) continue
+    out.push(tasks[i])
+  }
+  return out
+}
+
+// The user's word for the card, else the filter it is showing. Never the word
+// "Todoist" -- the card is already a list of tasks, and a label repeating the
+// service is a line spent saying nothing.
+function todoistTitle(setting, filter) {
+  var chosen = clampString(setting).replace(/^\s+|\s+$/g, "")
+  return chosen ? chosen : todoistFilter(filter)
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     SCHEMA_VERSION: SCHEMA_VERSION,
@@ -3264,6 +3520,21 @@ if (typeof module !== "undefined" && module.exports) {
     rewriteTodoMark: rewriteTodoMark,
     visibleTodos: visibleTodos,
     todoProgress: todoProgress,
-    todoTitle: todoTitle
+    todoTitle: todoTitle,
+    resolveHomePath: resolveHomePath,
+    TODOIST_HOST: TODOIST_HOST,
+    TODOIST_MAX_TASKS: TODOIST_MAX_TASKS,
+    DEFAULT_TODOIST_TOKEN_FILE: DEFAULT_TODOIST_TOKEN_FILE,
+    DEFAULT_TODOIST_FILTER: DEFAULT_TODOIST_FILTER,
+    todoistTokenPath: todoistTokenPath,
+    isSafeTodoistToken: isSafeTodoistToken,
+    isSafeTodoistId: isSafeTodoistId,
+    todoistFilter: todoistFilter,
+    todoistRequestsInUse: todoistRequestsInUse,
+    todoistTokenPathsInUse: todoistTokenPathsInUse,
+    parseTodoistDue: parseTodoistDue,
+    parseTodoist: parseTodoist,
+    visibleTodoistTasks: visibleTodoistTasks,
+    todoistTitle: todoistTitle
   }
 }

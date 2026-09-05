@@ -51,6 +51,7 @@ on your desktop.
 | **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
 | **Calendar** | What is next in your Google Calendar, and when | `calendar.google.com` |
 | **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
+| **Todoist** | What is due, from Todoist. Tick things off | `api.todoist.com` |
 | **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
 
 ```
@@ -96,6 +97,10 @@ says which.
   - [The file](#the-file)
   - [Ticking things off](#ticking-things-off)
   - [Scrolling, and opening the file](#scrolling-and-opening-the-file)
+- [Todoist](#todoist)
+  - [The token](#the-token)
+  - [The filter](#the-filter)
+  - [Ticking things off, in Todoist](#ticking-things-off-in-todoist)
 - [Music](#music)
 - [Config file](#config-file)
   - [The layout block](#the-layout-block)
@@ -117,10 +122,10 @@ Draws widget cards on the desktop:
 |---|---|
 | **Where** | A grid down the left edge, the right, or both, on the Bottom layer — above the wallpaper, beneath every window |
 | **Colors** | From the active theme's palette; switching themes re-colors them live |
-| **Input** | None, unless a widget asks for it — [Music](#music), [Repo pulse](#repo-pulse), [Todos](#todos) |
+| **Input** | None, unless a widget asks for it — [Music](#music), [Repo pulse](#repo-pulse), [Todos](#todos), [Todoist](#todoist) |
 | **Space** | Reserves none, and stays inside the area the bar has already claimed |
 | **Screens** | Every output by default, or one you name |
-| **Network** | Only the weather, GitHub and calendar widgets, only while they are on |
+| **Network** | Only the weather, GitHub, calendar and Todoist widgets, only while they are on |
 
 Nothing here is a window. You cannot focus a widget or click it — it is
 something you see when you clear the screen. Arranging them happens in an
@@ -570,6 +575,78 @@ opened where nothing is covering it.
 **Finished items** can be hidden, and **Progress** turns off the hairline
 along the bottom. Nothing here leaves your machine.
 
+## Todoist
+
+The same card as [Todos](#todos), for a list that already lives in Todoist.
+
+It is deliberately the same drawing: a list on a wallpaper is a list on a
+wallpaper, and two cards showing the same thing from two sources should not be
+two designs. What differs is where the list comes from, and that there is no
+title link — a file is a thing you edit, and a stray click on a wallpaper
+launching a browser is worse than one opening an editor.
+
+> [!IMPORTANT]
+> This widget talks to `api.todoist.com`, and only while a Todoist card is
+> switched on. Nothing is sent but the filter you configured and the token,
+> straight to Todoist's own API — no third party in the middle.
+
+### The token
+
+The card reads an API token from a file. **`~/.config/omarchy/todoist.token`
+by default**, which is the path Omarchy's Todoist bar widget already writes,
+so a desktop that has authorised Todoist once does not do it again here. Set
+**API token file** to point somewhere else — two cards can read two files,
+which is how two accounts sit on one desktop.
+
+Get a token from Todoist's **Settings → Integrations → Developer**, then:
+
+```bash
+install -m 600 /dev/null ~/.config/omarchy/todoist.token
+printf '%s\n' 'YOUR_TOKEN' > ~/.config/omarchy/todoist.token
+```
+
+The file is watched, so the card lights up as soon as it appears — no restart.
+Until then it says **No API token** and the path it looked in, and makes no
+requests at all.
+
+The token never goes in `widgets.json`, never into the process arguments, and
+never into the environment: it is handed to `curl` on standard input, so it is
+not in `ps` output for anyone else on the machine to read while a fetch is in
+flight.
+
+### The filter
+
+**Todoist filter** takes a filter query — the same syntax the Todoist apps
+use. `today | overdue` by default.
+
+```
+today | overdue          what is due now
+7 days                   the week ahead
+@errand & today          today, in one label
+#Work & overdue          one project, late
+```
+
+One card is one filter, and a second card is a second filter. Cards sharing a
+filter share one request. The list refreshes every five minutes, and
+`omarchy-shell widgets refreshTodoist` fetches now.
+
+Late tasks come first, then today, then the rest, then anything with no due
+date; ties break on priority and then alphabetically. How many are late is the
+only colour on the card — a card with nothing overdue spends none.
+
+### Ticking things off, in Todoist
+
+**Click the ring beside a task** and it closes in Todoist. The row leaves the
+card straight away rather than waiting for the next fetch; if the request
+fails, it comes back.
+
+Recurring tasks behave the way closing one in the Todoist app does: the
+occurrence completes and the next one is scheduled.
+
+Turn **Tick items off** off in the editor if you would rather the card were
+read-only. The usual caveat applies: the card sits *under* your windows, so it
+can only be ticked or scrolled where nothing is covering it.
+
 ## Music
 
 What is playing, from **MPRIS** — so it is whatever is actually playing,
@@ -692,7 +769,7 @@ timezones, colors and rounding all survive, and each widget is given a cell.
 | Key | Meaning |
 |---|---|
 | `id` | Yours, and unique. The name the popup, the editor and the CLI use. Rename it and the widget is renamed everywhere |
-| `type` | Which widget: `clock`, `weather`, `github`, `repo-pulse`, `calendar`, `todos`, `music` |
+| `type` | Which widget: `clock`, `weather`, `github`, `repo-pulse`, `calendar`, `todos`, `todoist`, `music` |
 | `enabled` | Whether it is on the desktop. The popup switch writes this |
 | `monitor` | Output name (`hyprctl monitors`), or `""` for all of them |
 | `side` | `left` or `right`. Omit it (or write anything else) and it is filled in with the layout's own side when the file is read |
@@ -765,6 +842,15 @@ is refused outright.
 | `showProgress` | The hairline along the bottom |
 | `canTick` | Whether clicking a ring marks the item done. Off makes the card read-only |
 
+#### Todoist
+
+| Key | Meaning |
+|---|---|
+| `filter` | A Todoist filter query. `""` means `today \| overdue` |
+| `title` | The name on the card. `""` uses the filter |
+| `tokenFile` | Where the API token is read from. `""` means `~/.config/omarchy/todoist.token`; `~/` and a bare name resolve against home |
+| `canTick` | Whether clicking a ring closes the task. Off makes the card read-only |
+
 #### Music
 
 | Key | Meaning |
@@ -803,6 +889,8 @@ omarchy-shell widgets github        # the fetched graphs
 omarchy-shell widgets repos         # the fetched repositories
 omarchy-shell widgets calendar      # the next few events, per calendar
 omarchy-shell widgets todos         # the list, as it was parsed
+omarchy-shell widgets todoist       # the fetched tasks, per filter
+omarchy-shell widgets refreshTodoist # fetch now rather than in five minutes
 omarchy-shell widgets todo '' 3 true # tick line 3 of the only list off
 omarchy-shell widgets reload        # re-read the file now
 

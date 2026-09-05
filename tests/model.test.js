@@ -1572,6 +1572,7 @@ test("the widgets that reach the network each name where they go", () => {
   assert.equal(Model.catalogEntry("repo-pulse").network, "api.github.com")
   assert.equal(Model.catalogEntry("github").network, "github.com")
   assert.equal(Model.catalogEntry("weather").network, "wttr.in")
+  assert.equal(Model.catalogEntry("todoist").network, "api.todoist.com")
   // Music is local and must not claim otherwise.
   assert.equal(Model.catalogEntry("music").network, undefined)
   assert.equal(Model.catalogEntry("clock").network, undefined)
@@ -2692,7 +2693,7 @@ test("the types that take clicks are exactly the ones that say so", () => {
   // turns its own rectangle into an input region on the desktop, so one added
   // by accident is a card silently swallowing clicks meant for a window.
   const interactive = Model.catalogTypes().filter((t) => Model.isInteractiveType(t))
-  assert.deepEqual(interactive.sort(), ["music", "repo-pulse", "todos"])
+  assert.deepEqual(interactive.sort(), ["music", "repo-pulse", "todoist", "todos"])
   for (const quiet of ["clock", "weather", "github", "calendar"]) {
     assert.equal(Model.isInteractiveType(quiet), false, `${quiet} should stay click-through`)
   }
@@ -2866,4 +2867,233 @@ test("a secret never becomes the name of a widget", () => {
   assert.equal(shown.indexOf("private-secret"), -1, shown)
   assert.equal(shown, "Calendar · calendar")
   assert.equal(Model.instanceLabel(Model.findInstance(config, "calendar")), "")
+})
+
+// ----------------------------------------------------------------- todoist
+
+// A day in the middle of the month, at lunchtime, in local time. Every case
+// below is measured against this rather than against the wall clock, so the
+// suite says the same thing in every timezone and on every day of the year.
+const TODOIST_NOW = new Date(2026, 8, 5, 12, 0, 0).getTime()
+
+function todoistBody(tasks) {
+  return JSON.stringify({ results: tasks, next_cursor: null })
+}
+
+function todoistTask(over) {
+  return Object.assign({
+    id: "6hQ8PVXJjFV8Rggf",
+    content: "ship the todoist widget",
+    priority: 1,
+    due: { date: "2026-09-05", is_recurring: false }
+  }, over || {})
+}
+
+test("a token file path is resolved the same way a list file is", () => {
+  const home = "/home/dev"
+  assert.equal(Model.todoistTokenPath("", home), "/home/dev/.config/omarchy/todoist.token")
+  assert.equal(Model.todoistTokenPath("~/secrets/todoist", home), "/home/dev/secrets/todoist")
+  assert.equal(Model.todoistTokenPath("secrets/todoist", home), "/home/dev/secrets/todoist")
+  assert.equal(Model.todoistTokenPath("/etc/todoist", home), "/etc/todoist")
+  // Climbing out is refused rather than cleaned up, exactly as for a list.
+  assert.equal(Model.todoistTokenPath("../../etc/shadow", home), "")
+  assert.equal(Model.todoPath("../../etc/shadow", home), "")
+  // One resolver, so the two cannot drift apart.
+  assert.equal(Model.resolveHomePath("~/x", home, "fallback"), "/home/dev/x")
+  assert.equal(Model.resolveHomePath("", home, "fallback"), "/home/dev/fallback")
+})
+
+test("a token is refused unless it is one opaque credential", () => {
+  // It is written into a curl config file on stdin, where a line break starts
+  // a new directive and a double quote ends the argument early. Both are
+  // refused rather than escaped.
+  const good = "0123456789abcdef0123456789abcdef01234567"
+  assert.equal(Model.isSafeTodoistToken(good), true)
+  assert.equal(Model.isSafeTodoistToken(good + "\n"), false)
+  assert.equal(Model.isSafeTodoistToken(good + '"'), false)
+  assert.equal(Model.isSafeTodoistToken(good + "\\"), false)
+  assert.equal(Model.isSafeTodoistToken(good.slice(0, 20) + " " + good), false)
+  assert.equal(Model.isSafeTodoistToken("short"), false)
+  assert.equal(Model.isSafeTodoistToken(""), false)
+  assert.equal(Model.isSafeTodoistToken(null), false)
+  assert.equal(Model.isSafeTodoistToken("a".repeat(513)), false)
+})
+
+test("an id is refused unless it can only be one path segment", () => {
+  // `encodeURIComponent` leaves "/" alone, so an id carrying one would travel
+  // through the path as written and address an endpoint nothing meant to call.
+  assert.equal(Model.isSafeTodoistId("6hQ8PVXJjFV8Rggf"), true)
+  assert.equal(Model.isSafeTodoistId("a-b_c"), true)
+  assert.equal(Model.isSafeTodoistId("../../projects/1"), false)
+  assert.equal(Model.isSafeTodoistId("6hQ8/close"), false)
+  assert.equal(Model.isSafeTodoistId(""), false)
+  assert.equal(Model.isSafeTodoistId("a".repeat(65)), false)
+})
+
+test("a date-only due lands on the day it says, not the day UTC says", () => {
+  // `new Date("2026-09-05")` is UTC by specification, so west of Greenwich a
+  // task due today would draw as yesterday. The value is rebuilt as local
+  // midnight instead.
+  const due = Model.parseTodoistDue({ date: "2026-09-05" }, TODOIST_NOW)
+  const midnight = new Date(2026, 8, 5).getTime()
+  assert.equal(due.ms, midnight)
+  assert.equal(due.timed, false)
+  assert.equal(due.group, "today")
+  assert.equal(due.overdue, false)
+  assert.equal(due.label, "Today")
+})
+
+test("a due date knows overdue from later, and says which day", () => {
+  const yesterday = Model.parseTodoistDue({ date: "2026-09-04" }, TODOIST_NOW)
+  assert.equal(yesterday.group, "overdue")
+  assert.equal(yesterday.overdue, true)
+
+  const tomorrow = Model.parseTodoistDue({ date: "2026-09-06" }, TODOIST_NOW)
+  assert.equal(tomorrow.group, "later")
+  assert.equal(tomorrow.label, "Tomorrow")
+
+  // Past the end of the week a date says more than a count of days does.
+  const far = Model.parseTodoistDue({ date: "2026-09-18" }, TODOIST_NOW)
+  assert.equal(far.group, "later")
+  assert.equal(far.label, "Fri 18 Sep")
+
+  // A floating datetime is local, and today's shows the clock on its own.
+  const timed = Model.parseTodoistDue({ date: "2026-09-05T14:30:00" }, TODOIST_NOW)
+  assert.equal(timed.timed, true)
+  assert.equal(timed.label, "14:30")
+  assert.equal(timed.overdue, false)
+
+  // ...and one earlier today is late, where a date-only task today is not.
+  assert.equal(Model.parseTodoistDue({ date: "2026-09-05T09:00:00" }, TODOIST_NOW).overdue, true)
+
+  // A zoned instant is converted rather than read as local.
+  const zoned = Model.parseTodoistDue({ date: "2026-09-05T12:00:00Z" }, TODOIST_NOW)
+  assert.equal(zoned.ms, Date.UTC(2026, 8, 5, 12, 0, 0))
+
+  // No due date at all is a state, not a failure.
+  assert.equal(Model.parseTodoistDue(null, TODOIST_NOW), null)
+  assert.equal(Model.parseTodoistDue({ date: "" }, TODOIST_NOW), null)
+  assert.equal(Model.parseTodoistDue({ date: "not a date" }, TODOIST_NOW), null)
+})
+
+test("a response that is not one leaves the card alone", () => {
+  // null means "keep what is drawn", so every one of these has to answer null
+  // rather than an empty list -- an empty list is a card that has wiped itself
+  // because a request failed.
+  assert.equal(Model.parseTodoist("", TODOIST_NOW), null)
+  assert.equal(Model.parseTodoist("<html>502</html>", TODOIST_NOW), null)
+  assert.equal(Model.parseTodoist('{"error":"unauthorized"}', TODOIST_NOW), null)
+  assert.equal(Model.parseTodoist("null", TODOIST_NOW), null)
+  assert.equal(Model.parseTodoist(null, TODOIST_NOW), null)
+  // An empty filter is a real answer, and it is not null.
+  assert.deepEqual(Model.parseTodoist(todoistBody([]), TODOIST_NOW),
+    { tasks: [], total: 0, overdue: 0 })
+})
+
+test("tasks are drawn late first, then by when they are due", () => {
+  const parsed = Model.parseTodoist(todoistBody([
+    todoistTask({ id: "later", content: "later", due: { date: "2026-09-18" } }),
+    todoistTask({ id: "none", content: "no due date", due: null }),
+    todoistTask({ id: "late", content: "late", due: { date: "2026-09-01" } }),
+    todoistTask({ id: "today", content: "today", due: { date: "2026-09-05" } })
+  ]), TODOIST_NOW)
+
+  assert.deepEqual(parsed.tasks.map((t) => t.id), ["late", "today", "later", "none"])
+  assert.equal(parsed.total, 4)
+  assert.equal(parsed.overdue, 1)
+  assert.equal(parsed.tasks[3].due, null)
+  assert.equal(parsed.tasks[3].group, "none")
+})
+
+test("two tasks due at once are ordered by priority, then by name", () => {
+  const parsed = Model.parseTodoist(todoistBody([
+    todoistTask({ id: "beta", content: "beta", priority: 1 }),
+    todoistTask({ id: "alpha", content: "alpha", priority: 1 }),
+    todoistTask({ id: "urgent", content: "zeta", priority: 4 })
+  ]), TODOIST_NOW)
+  assert.deepEqual(parsed.tasks.map((t) => t.id), ["urgent", "alpha", "beta"])
+})
+
+test("a response is bounded before it reaches the card", () => {
+  const many = []
+  for (let i = 0; i < 200; i++) many.push(todoistTask({ id: "id" + i, content: "task " + i }))
+  assert.equal(Model.parseTodoist(todoistBody(many), TODOIST_NOW).tasks.length,
+    Model.TODOIST_MAX_TASKS)
+
+  // One field of one task, too. This is text arriving from outside and going
+  // straight into a Text on the desktop.
+  const long = Model.parseTodoist(todoistBody([todoistTask({ content: "x".repeat(10000) })]),
+    TODOIST_NOW)
+  assert.equal(long.tasks[0].content.length, Model.MAX_STRING)
+
+  // An id that could not be a path segment is dropped rather than drawn: a
+  // row with a tick that cannot fire is worse than no row.
+  const bad = Model.parseTodoist(todoistBody([
+    todoistTask({ id: "../../projects/1" }),
+    todoistTask({ id: "keep" })
+  ]), TODOIST_NOW)
+  assert.deepEqual(bad.tasks.map((t) => t.id), ["keep"])
+
+  // A priority outside Todoist's own range is clamped, not trusted.
+  const wild = Model.parseTodoist(todoistBody([todoistTask({ priority: 99 })]), TODOIST_NOW)
+  assert.equal(wild.tasks[0].priority, 4)
+})
+
+test("a ticked task leaves the card before the next fetch does", () => {
+  const parsed = Model.parseTodoist(todoistBody([
+    todoistTask({ id: "one", content: "one" }),
+    todoistTask({ id: "two", content: "two" })
+  ]), TODOIST_NOW)
+  assert.deepEqual(Model.visibleTodoistTasks(parsed, { one: true }).map((t) => t.id), ["two"])
+  // Nothing in flight, and nothing to draw, both behave.
+  assert.equal(Model.visibleTodoistTasks(parsed, null).length, 2)
+  assert.equal(Model.visibleTodoistTasks(null, { one: true }).length, 0)
+})
+
+test("cards asking for one filter are one request, with one token file", () => {
+  const home = "/home/dev"
+  let config = Model.addWidget(Model.addWidget(Model.defaultConfig(), "todoist"), "todoist")
+  config = Model.addWidget(config, "todoist")
+  config = Model.setSetting(config, "todoist-3", "filter", "7 days")
+
+  const requests = Model.todoistRequestsInUse(config, home)
+  assert.deepEqual(requests.map((r) => r.query), ["today | overdue", "7 days"])
+  assert.deepEqual(requests.map((r) => r.tokenPath),
+    ["/home/dev/.config/omarchy/todoist.token", "/home/dev/.config/omarchy/todoist.token"])
+
+  // One watch per file, however many cards read it.
+  assert.deepEqual(Model.todoistTokenPathsInUse(config, home),
+    ["/home/dev/.config/omarchy/todoist.token"])
+
+  // A second account is a second file, and a second watch.
+  config = Model.setSetting(config, "todoist-3", "tokenFile", "~/.config/work.token")
+  assert.deepEqual(Model.todoistTokenPathsInUse(config, home),
+    ["/home/dev/.config/omarchy/todoist.token", "/home/dev/.config/work.token"])
+
+  // A card that is switched off asks for nothing at all.
+  config = Model.setEnabled(config, "todoist", false)
+  config = Model.setEnabled(config, "todoist-2", false)
+  config = Model.setEnabled(config, "todoist-3", false)
+  assert.deepEqual(Model.todoistRequestsInUse(config, home), [])
+  assert.deepEqual(Model.todoistTokenPathsInUse(config, home), [])
+})
+
+test("a card names itself after the filter it is showing", () => {
+  assert.equal(Model.todoistFilter(""), "today | overdue")
+  assert.equal(Model.todoistFilter("  7 days  "), "7 days")
+  assert.equal(Model.todoistTitle("", ""), "today | overdue")
+  assert.equal(Model.todoistTitle("", "7 days"), "7 days")
+  // Your own word beats it.
+  assert.equal(Model.todoistTitle("Work", "7 days"), "Work")
+})
+
+test("no todoist token can become the name of a widget", () => {
+  // `tokenFile` is a text setting, and the tray names a widget after `label`
+  // or `title` only -- so the one setting here that points at a secret is
+  // never displayed.
+  let config = Model.addWidget(Model.defaultConfig(), "todoist")
+  config = Model.setSetting(config, "todoist", "tokenFile", "~/.config/very-secret.token")
+  const shown = Model.displayName(config, Model.findInstance(config, "todoist"))
+  assert.equal(shown.indexOf("very-secret"), -1, shown)
+  assert.equal(shown, "Todoist")
 })

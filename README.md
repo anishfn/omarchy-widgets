@@ -52,6 +52,7 @@ on your desktop.
 | **Calendar** | What is next in your Google Calendar, and when | `calendar.google.com` |
 | **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
 | **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
+| **Omate** | The desktop pet: show and hide it, pick its skin, size it, set the cursor chase | local (Omate plugin) |
 
 ```
    ┌─────────┬─────────┐        side: left | right
@@ -97,6 +98,7 @@ says which.
   - [Ticking things off](#ticking-things-off)
   - [Scrolling, and opening the file](#scrolling-and-opening-the-file)
 - [Music](#music)
+- [Omate](#omate)
 - [Config file](#config-file)
   - [The layout block](#the-layout-block)
   - [Each widget](#each-widget)
@@ -577,8 +579,8 @@ Spotify or a browser tab or mpv, rather than any one application. Album art,
 title, artist, a progress bar, and the transport: back, play or pause,
 forward.
 
-**This is one of the two widgets you can click** — the other is
-[Repo pulse](#repo-pulse). Every other card here is click-through: the desktop surface has no input region, so a click lands on
+**This is one of the widgets you can click** — the others are
+[Repo pulse](#repo-pulse), [Todos](#todos) and [Omate](#omate). Every other card here is click-through: the desktop surface has no input region, so a click lands on
 whatever is underneath it. A type that needs a control declares `interactive`
 in the catalogue and gets *its own rectangle* back, and nothing else changes.
 A play/pause you have to go somewhere else to reach is not a play/pause; that
@@ -621,6 +623,34 @@ If you always have two players running and the card keeps choosing the wrong
 one, the **Player** setting names the one to follow — `spotify`, `firefox`,
 `mpv`. It is matched against the player's own name and its bus name, and a
 blank value goes back to following whatever is playing.
+
+## Omate
+
+The desktop pet, if you run Omate — its power
+switch, its skins, and its two dials, on one card instead of in a panel.
+
+The card does not own anything about the pet. Every control writes through to
+the Omate plugin's own settings, reached in-process, so the card and the pet's
+own panel are two views of one state: flip the switch here and the panel's
+status line changes with it. If Omate is not loaded the card says so and goes
+inert rather than drawing controls that answer to nothing.
+
+- **The switch** shows and hides the pet — the same toggle as the power button
+  in Omate's own panel, not the plugin's enable/disable.
+- **The skin row** is every character pack Omate can see, each chip playing
+  that pack's idle animation with the pet's own sprite component; a tap makes
+  it the pet. The row flicks sideways when the packs do not fit, the second
+  widget here to scroll (the todo list was the first).
+- **Size** is the pet's scale, one to six.
+- **Cursor** turns the cursor chase on and off, and **Speed** sets how often
+  it re-chases, from five seconds to an hour on a curve — the interesting
+  half of that range is all below a minute. Sliders commit when you let go,
+  not per pixel; a drag is not six writes to disk.
+
+The pet's name is not set here — pets have names of their own, in their packs.
+The **Owner name** field in the editor is yours, and it is what the pet calls
+you. Nothing here leaves your machine, and nothing here talks to anything but
+the Omate plugin.
 
 ## Config file
 

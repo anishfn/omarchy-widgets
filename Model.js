@@ -369,6 +369,34 @@ function catalog() {
           defaultValue: ""
         }
       ]
+    },
+    {
+      type: "omate",
+      name: "Omate",
+      description: "The desktop pet: show and hide it, pick its skin, size it, set how fast it chases the cursor.",
+      source: "widgets/Omate.qml",
+      sizes: [[2, 2]],
+      // Every control on the card writes through to the omate plugin's own
+      // settings, which are global -- two cards would fight each other's
+      // slider mid-drag. One card, speaking for the one pet.
+      multiple: false,
+      // The widest interactivity in the set: a power switch, a selectable
+      // skin row, and two sliders, all about the pet the card exists to
+      // show. See DESIGN.md, which records this as an exception.
+      interactive: true,
+      settings: [
+        {
+          // The owner's name, not the pet's -- the pet already has one in
+          // its pack. Pushed through to omate's own userName, so the pet's
+          // speech uses whatever is written here no matter which side it
+          // was edited from.
+          key: "label",
+          type: "text",
+          label: "Owner name",
+          help: "What the pet calls you",
+          defaultValue: ""
+        }
+      ]
     }
   ]
 }

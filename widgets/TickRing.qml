@@ -19,8 +19,8 @@ Canvas {
   // How far a minor tick reaches, and its width.
   property real tickLength: 10
   property real tickWidth: 1
-  // Kept for compatibility with the existing clock widget, which still binds
-  // it; the ring is a fixed 48-position face now, so it spaces nothing.
+  // Held onto for backward compatibility even though nothing binds it now;
+  // the ring is a fixed 48-position face, so it spaces nothing.
   property real spacing: 12
   // The card's corner radius; the ring follows it, pulled in by `inset`.
   property real cardRadius: 20

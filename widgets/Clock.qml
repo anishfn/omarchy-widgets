@@ -88,11 +88,10 @@ Item {
     visible: root.ticks
     cardRadius: root.card ? root.card.radius : 20
     inset: Math.round(root.unit * 0.06)
-    // Longer than the reference's ~0.025, so the normal ticks read clearly
-    // against the card edge; the majors stay a clear step above them.
+    // Long enough to read against the card edge; the majors stay a clear
+    // step above them.
     tickLength: Math.max(3, Math.round(root.unit * 0.04))
     majorTickLength: Math.max(6, Math.round(root.unit * 0.08))
-    spacing: Math.max(4, Math.round(root.unit * 0.045))
     tickColor: Util.alpha(root.foreground, 0.3)
   }
 

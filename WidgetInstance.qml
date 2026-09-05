@@ -22,7 +22,7 @@ Item {
   readonly property real cardOpacity: {
     if (service && service.config && service.config.layout)
       return Model.effectiveOpacity(service.config, instance)
-    return instance && typeof instance.opacity === "number" ? instance.opacity : 0.72
+    return instance && typeof instance.opacity === "number" ? instance.opacity : Model.DEFAULT_OPACITY
   }
   readonly property int radius: instance && instance.radius !== undefined
     ? instance.radius : 20

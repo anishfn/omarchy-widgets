@@ -111,7 +111,8 @@ Item {
 
   function setScale(scale) { apply(Model.setScale(config, scale)) }
 
-  // The layout's global opacity; a card with its own `opacity` keeps its own.
+  // The layout's global opacity, applied to every card: moving it writes over
+  // any card that had its own.
   function setLayoutOpacity(opacity) { apply(Model.setLayoutOpacity(config, opacity)) }
 
   function setOpacity(id, opacity) { apply(Model.setOpacity(config, id, opacity)) }
@@ -119,14 +120,7 @@ Item {
   // Put a card back on the layout's global opacity after it had its own.
   function clearOpacity(id) { apply(Model.clearOpacity(config, id)) }
 
-  // One card's scale on its own; the layout's `setScale` still governs the rest.
-  function setWidgetScale(id, scale) { apply(Model.setWidgetScale(config, id, scale)) }
-
-  // Put a card back on the layout's global scale after it had its own.
-  function clearScale(id) { apply(Model.clearScale(config, id)) }
-
-  // Restore the grid's default scale and opacity, and drop every per-card
-  // override of either.
+  // Restore the grid's default scale and opacity, and drop any per-card opacity.
   function resetAppearance() { apply(Model.resetAppearance(config)) }
 
   function openEditor() { service.editing = true }
@@ -177,8 +171,7 @@ Item {
     // readers to wonder whether the plugin lost a value. Absent is the honest
     // form, so drop the key rather than write `null`.
     return JSON.stringify(config, function (key, value) {
-      return (key === "opacity" && value === null) || (key === "scale" && value === null)
-        ? undefined : value
+      return (key === "opacity" && value === null) ? undefined : value
     }, 2) + "\n"
   }
 
@@ -714,7 +707,8 @@ Item {
       return String(service.layout.scale)
     }
 
-    // The layout's global opacity; cards with their own keep their own.
+    // The layout's global opacity, applied to every card; cards that had
+    // their own join it.
     function opacityAll(value: string): string {
       service.setLayoutOpacity(Number(value))
       return String(service.layout.opacity)
@@ -729,18 +723,6 @@ Item {
     function opacityClear(id: string): string {
       if (!Model.findInstance(service.config, id)) return "no widget with id " + id
       service.clearOpacity(id)
-      return "ok"
-    }
-
-    function scaleEach(id: string, value: string): string {
-      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
-      service.setWidgetScale(id, Number(value))
-      return String(Model.findInstance(service.config, id).scale)
-    }
-
-    function scaleClear(id: string): string {
-      if (!Model.findInstance(service.config, id)) return "no widget with id " + id
-      service.clearScale(id)
       return "ok"
     }
 

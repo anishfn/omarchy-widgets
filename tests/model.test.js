@@ -507,56 +507,32 @@ test("every catalogue type starts following the grid's opacity", () => {
   }
 })
 
-test("per-widget scale follows the grid until a card overrides it", () => {
+test("per-widget scale is gone: only the layout's scale exists", () => {
   const base = Model.normalizeConfig({
     widgets: [
       { id: "clock", type: "clock", col: 0, row: 0 },
       { id: "weather", type: "weather", col: 1, row: 0 }
     ]
   })
+  // Instances carry no scale of their own.
+  for (const w of base.widgets) assert.equal(w.scale, undefined)
+  // A stale per-widget scale in the file is dropped, not honoured.
+  const withStale = Model.normalizeConfig({
+    widgets: [{ id: "clock", type: "clock", col: 0, row: 0, scale: 2 }]
+  })
+  assert.equal(Model.findInstance(withStale, "clock").scale, undefined)
+
+  // Every card is drawn at exactly the cell the grid gives it.
   const clock = Model.findInstance(base, "clock")
-  assert.equal(clock.scale, null)
-  assert.equal(Model.effectiveScale(base.layout, clock), 1)
+  assert.deepEqual(Model.widgetRect(base.layout, clock, 2560),
+    Model.cellRect(base.layout, 2560, 0, 0, 1, 1))
 
-  // A widget that breaks the grid sizes itself at its own scale...
-  const big = Model.setWidgetScale(base, "clock", 2)
-  const bigClock = Model.findInstance(big, "clock")
-  assert.equal(bigClock.scale, 2)
-  assert.equal(Model.effectiveScale(big.layout, bigClock), 2)
-  // ...and the rest of the layout is untouched.
-  assert.equal(big.layout.scale, 1)
-  assert.equal(Model.widgetRect(big.layout, bigClock, 2560).width,
-    Model.blockWidth(big.layout, 1) * 2)
-  // The default-size neighbour still uses the grid.
-  const weather = Model.findInstance(big, "weather")
-  assert.equal(weather.scale, null)
-  assert.equal(Model.widgetRect(big.layout, weather, 2560).width, Model.blockWidth(big.layout, 1))
-
-  // The global scale reaches EVERY card: a stale override is swept away.
-  const glob = Model.setScale(big, 0.8)
-  assert.equal(glob.layout.scale, 0.8)
-  assert.equal(Model.findInstance(glob, "clock").scale, null)
-  assert.equal(Model.effectiveScale(glob.layout, Model.findInstance(glob, "clock")), 0.8)
-  const globWeather = Model.findInstance(glob, "weather")
-  assert.equal(globWeather.scale, null)
-  assert.equal(Model.effectiveScale(glob.layout, globWeather), 0.8)
-
-  // A junk global is ignored, so an override set just before survives.
-  assert.equal(Model.setScale(big, "x").layout.scale, 1)
-  assert.equal(Model.findInstance(Model.setScale(big, "x"), "clock").scale, 2)
-
-  // Clearing the override sends the card back to whatever the grid is.
-  const own = Model.setWidgetScale(base, "clock", 2)
-  const cleared = Model.clearScale(own, "clock")
-  const clearedClock = Model.findInstance(cleared, "clock")
-  assert.equal(clearedClock.scale, null)
-  assert.equal(Model.effectiveScale(cleared.layout, clearedClock), 1)
-
-  // Clamping and junk handling mirror the per-widget setter.
-  assert.equal(Model.findInstance(Model.setWidgetScale(base, "clock", 99), "clock").scale, Model.MAX_SCALE)
-  assert.equal(Model.findInstance(Model.setWidgetScale(base, "clock", -1), "clock").scale, Model.MIN_SCALE)
-  assert.deepEqual(Model.findInstance(Model.setWidgetScale(base, "clock", "x"), "clock"),
-    Model.findInstance(base, "clock"))
+  // The one scale knob is the layout's, and junk is ignored.
+  assert.equal(Model.setScale(base, 0.8).layout.scale, 0.8)
+  assert.equal(Model.setScale(base, "junk").layout.scale, 1)
+  assert.equal(Model.setScale(base, 0.8).layout.opacity, base.layout.opacity)
+  assert.equal(Model.widgetRect(Model.setScale(base, 0.8).layout, clock, 2560).width,
+    Model.blockWidth({ ...base.layout, scale: 0.8 }, 1))
 })
 
 test("resetAppearance puts scale and opacity back to their defaults", () => {
@@ -572,10 +548,10 @@ test("resetAppearance puts scale and opacity back to their defaults", () => {
   const reset = Model.resetAppearance(messed)
   assert.equal(reset.layout.scale, Model.DEFAULT_LAYOUT.scale)
   assert.equal(reset.layout.opacity, Model.DEFAULT_LAYOUT.opacity)
-  // No card carries an override either way.
+  // No card keeps its own opacity; scale lives only on the layout.
   for (const w of reset.widgets) {
-    assert.equal(w.scale, null)
     assert.equal(w.opacity, null)
+    assert.equal(w.scale, undefined)
   }
   // Everything else about the config is untouched.
   assert.equal(reset.widgets.length, 2)

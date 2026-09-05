@@ -499,8 +499,8 @@ Item {
                 font.pixelSize: Style.font.bodySmall
               }
 
-              // The whole grid's opacity, in percent. A card that has its own
-              // opacity set keeps it; the rest follow this one.
+              // The whole grid's opacity, in percent. Moving it writes over any card's
+              // own opacity, so the whole grid matches again.
               NumberField {
                 anchors.verticalCenter: parent.verticalCenter
                 label: ""
@@ -633,47 +633,6 @@ Item {
                 accent: root.accent
                 fontFamily: root.fontFamily
                 onClicked: if (root.service && root.selectedId) root.service.clearOpacity(root.selectedId)
-              }
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Scale"
-                textFormat: Text.PlainText
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              // Same idea as the grid's Scale field, but this one belongs to
-              // the selected card alone: it overrides the grid for this card.
-              NumberField {
-                anchors.verticalCenter: parent.verticalCenter
-                label: ""
-                value: root.selected
-                  ? Math.round(Model.effectiveScale(root.layout, root.selected) * 100) : 100
-                from: 0
-                to: 200
-                stepSize: 10
-                fieldWidth: Style.space(64)
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onModified: function(v) {
-                  if (root.service && root.selectedId) root.service.setWidgetScale(root.selectedId, Number(v) / 100)
-                }
-              }
-
-              // Give a card that set its own scale back to the grid's.
-              Button {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.selected !== null && root.selected.scale !== null
-                text: "↺"
-                tooltipText: "Follow the grid's scale instead of this one"
-                bordered: true
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onClicked: if (root.service && root.selectedId) root.service.clearScale(root.selectedId)
               }
 
               Repeater {

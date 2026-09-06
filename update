@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# Update the Widgets plugin and the plugins its cards talk to, then restart
+# the shell so the update is one you can see.
+#
+# `omarchy plugin update <id>` already does the careful part: it fetches,
+# shows you the diff, fast-forwards only, validates the result and rolls back
+# if validation fails. This wraps it for the two things it leaves out.
+#
+#   - It updates one plugin. The Omate card is only as current as the Omate
+#     plugin underneath it, and a card and a service that disagree about an
+#     API is the failure this repo has already had once.
+#   - It rescans, which is not the same as reloading. `keepLoaded` panels are
+#     mounted once and outlive the file they came from, so an update lands on
+#     disk and changes nothing on screen until the shell restarts. Restarting
+#     is skipped when nothing actually moved -- a restart for no reason costs
+#     you every panel you had open.
+#
+# Usage: update [--yes] [--this-only] [--help]
+#
+#   --yes         take every prompt as answered, and skip the diffs
+#   --this-only   the Widgets plugin, not its companions
+
+set -uo pipefail
+
+ID="io.github.anishfn.widgets"
+PLUGINS_DIR="$HOME/.config/omarchy/plugins"
+
+COMPANIONS=(palccod.omate)
+
+ASSUME_YES=0
+THIS_ONLY=0
+
+say()  { printf '%s\n' "$*"; }
+step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+warn() { printf '  ! %s\n' "$*" >&2; }
+fail() { printf 'update: %s\n' "$*" >&2; exit 1; }
+
+while (( $# > 0 )); do
+  case "$1" in
+    --yes|-y)     ASSUME_YES=1; shift ;;
+    --this-only)  THIS_ONLY=1; shift ;;
+    -h|--help)    sed -n '3,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)            fail "unknown option: $1 (try --help)" ;;
+  esac
+done
+
+command -v omarchy >/dev/null 2>&1 || fail "omarchy not found."
+[[ -d "$PLUGINS_DIR/$ID" ]] ||
+  fail "$ID is not installed. Install it with: omarchy plugin add https://github.com/anishfn/omarchy-widgets.git"
+
+head_of() { git -C "$PLUGINS_DIR/$1" rev-parse --short HEAD 2>/dev/null; }
+
+# What moved, rather than what was attempted: `omarchy plugin update` reports
+# success for a plugin that was already current, and a restart is only earned
+# by a commit that actually changed.
+MOVED=()
+
+update_one() {
+  local id=$1 before after
+  [[ -d "$PLUGINS_DIR/$id" ]] || { say "  $id is not installed — skipped"; return 0; }
+  [[ -d "$PLUGINS_DIR/$id/.git" ]] && before=$(head_of "$id") || before=""
+
+  if (( ASSUME_YES )); then
+    omarchy plugin update "$id" --yes || { warn "$id did not update"; return 0; }
+  else
+    omarchy plugin update "$id" || { warn "$id did not update"; return 0; }
+  fi
+
+  after=$(head_of "$id")
+  if [[ -n $before && -n $after && $before != "$after" ]]; then
+    MOVED+=("$id $before → $after")
+  fi
+}
+
+step "Widgets"
+update_one "$ID"
+
+if (( ! THIS_ONLY )); then
+  step "Companions"
+  for cid in "${COMPANIONS[@]}"; do update_one "$cid"; done
+fi
+
+if (( ${#MOVED[@]} == 0 )); then
+  say ""
+  say "Nothing moved. Leaving the shell alone."
+  exit 0
+fi
+
+step "Updated"
+for line in "${MOVED[@]}"; do say "  $line"; done
+
+step "Restarting the shell"
+if omarchy-restart-shell; then
+  say "  done — the new code is what is on your desktop"
+else
+  warn "the shell did not restart. The update is on disk; run 'omarchy restart shell' to see it."
+  exit 1
+fi

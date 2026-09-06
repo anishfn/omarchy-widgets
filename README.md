@@ -29,15 +29,27 @@ That is the whole install. Plugins land disabled so you can read the code
 before it runs; `enable` puts the **Widgets** button in your bar and the clock
 on your desktop.
 
+Or let the script do it, which also offers the companion plugin the Omate card
+needs and restarts the shell at the end:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/install | bash -s -- --yes
+```
+
 | | |
 |---|---|
 | **Clone URL** | `https://github.com/anishfn/omarchy-widgets.git` |
 | **Plugin id** | `io.github.anishfn.widgets` |
 | **Requires** | Omarchy 4 (the Quickshell shell) |
-| **Update** | `omarchy plugin update io.github.anishfn.widgets` |
+| **Update** | `~/.config/omarchy/plugins/io.github.anishfn.widgets/update` |
 | **Remove** | `omarchy plugin remove io.github.anishfn.widgets` |
 
 <sub>Removing the plugin leaves `~/.config/omarchy/widgets.json` alone.</sub>
+
+> **`omarchy plugin add` does not upgrade.** It refuses when the plugin is
+> already installed, so running the install line a second time reports an
+> error rather than pulling anything. Use `update` — either the script above
+> or `omarchy plugin update io.github.anishfn.widgets`.
 
 ---
 
@@ -79,6 +91,9 @@ says which.
 
 - [What it does](#what-it-does)
 - [Install](#install)
+  - [The scripts](#the-scripts)
+  - [Updating](#updating)
+  - [From a local copy](#from-a-local-copy)
 - [Turning widgets on and off](#turning-widgets-on-and-off)
   - [More than one of the same widget](#more-than-one-of-the-same-widget)
 - [Arranging them](#arranging-them)
@@ -130,10 +145,66 @@ editor of its own, so the widgets themselves never have to take input.
 
 ## Install
 
-Everything you need is at the [top of this page](#get-it). Two extra notes:
+The two lines at the [top of this page](#get-it) are the whole install. The
+rest of this section is for when they are not enough.
 
-To install from a **local copy** instead of git, put the folder at
-`~/.config/omarchy/plugins/io.github.anishfn.widgets/` and enable the same id.
+### The scripts
+
+Two scripts ship with the plugin. Neither replaces `omarchy plugin` — both
+call it — and both are safe to run twice.
+
+```bash
+./install            # add or update, offer companions, restart the shell
+./update             # update this and its companions, restart if anything moved
+```
+
+`install` does four things a bare `omarchy plugin add` does not:
+
+- **Picks `add` or `update` for you.** `add` *refuses* when the plugin is
+  already installed — a second clone over a checkout is not an upgrade — so
+  re-running the install line to upgrade reports an error and pulls nothing.
+- **Offers the companion plugin.** The Omate card is inert without
+  [`palccod.omate`](https://github.com/Palccod/Omate), and nothing in `add`
+  knows that, so a fresh install draws a card that says "not loaded" without
+  saying what would load it.
+- **Restarts the shell.** A rescan tells the registry about new files; it does
+  not re-instantiate a panel that is already mounted, and this plugin is
+  `keepLoaded`. Without a restart the install appears to have done nothing.
+- **Checks what the cards shell out to** — `curl` for weather, the
+  contribution graph, repo pulse and the calendar; `timedatectl` for timezone
+  offsets. A missing one is not an install failure, it is a card that never
+  stops saying "fetching", which is a much worse way to find out.
+
+| Flag | |
+|---|---|
+| `--yes` | answer every prompt; required when piping to `bash` |
+| `--no-companions` | this plugin only, leave the Omate card inert |
+| `--this-only` | (`update`) skip the companions |
+
+Both skip the restart when nothing actually changed — a restart you did not
+need costs you every panel you had open.
+
+### Updating
+
+```bash
+~/.config/omarchy/plugins/io.github.anishfn.widgets/update
+```
+
+Or by hand, which is the same thing without the companions or the restart:
+
+```bash
+omarchy plugin update io.github.anishfn.widgets
+omarchy restart shell
+```
+
+`omarchy plugin update` shows you the diff before it applies it, fast-forwards
+only, and rolls back if the result fails validation.
+
+### From a local copy
+
+Put the folder at `~/.config/omarchy/plugins/io.github.anishfn.widgets/` and
+enable the same id. A folder that is not a git checkout has nothing to pull
+from, so `update` will say so rather than pretending.
 
 ```bash
 omarchy plugin disable io.github.anishfn.widgets   # off, config kept

@@ -1,0 +1,246 @@
+#!/bin/bash
+
+# Install the Widgets plugin, and the plugins its cards can talk to.
+#
+# `omarchy plugin add` is still the whole install, and this script does not
+# replace it -- it calls it. What it adds is the four things a bare `add`
+# leaves you to find out on your own:
+#
+#   - `add` refuses outright when the plugin is already installed, because a
+#     second clone over the top of a checkout is not an upgrade. Running the
+#     install line again is the obvious way to try to upgrade and the least
+#     obvious way to be told that nothing happened; this picks `add` or
+#     `update` for you.
+#   - The Omate card is inert unless a *second* plugin is installed. Nothing
+#     in `add` knows that, so a fresh install draws a card that says "not
+#     loaded" without saying what would load it.
+#   - A plugin the shell already has mounted is not re-instantiated by a
+#     rescan -- `keepLoaded` means the panel outlives the file it came from --
+#     so what you just installed is not what you can see until a restart.
+#   - Nothing checks that the machine has what the widgets shell out to.
+#     Missing curl is not an install failure; it is four cards that never
+#     stop saying "fetching".
+#
+# Usage: install [--yes] [--no-companions] [--help]
+#
+#   --yes             take every prompt as answered, for scripts and pipes
+#   --no-companions   this plugin only; leave the Omate card inert
+#
+# From a terminal:
+#
+#   curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/install | bash -s -- --yes
+#
+# Piping to bash gives the confirmations no terminal to appear on, which is
+# why that line carries --yes. Read the script first if you would rather not.
+
+set -uo pipefail
+
+ID="io.github.anishfn.widgets"
+URL="https://github.com/anishfn/omarchy-widgets.git"
+PLUGINS_DIR="$HOME/.config/omarchy/plugins"
+
+# Plugins this one talks to, and what you lose without each. Nothing here is
+# required: every companion is one card degrading to a line of text, never the
+# plugin failing to load.
+#
+#   id | clone url | the card it powers | what that card is
+COMPANIONS=(
+  "palccod.omate|https://github.com/Palccod/Omate.git|the Omate card|the desktop pet's switch, its skins, and its dials"
+)
+
+ASSUME_YES=0
+COMPANIONS_WANTED=1
+
+# A restart is earned, not routine: it costs you every panel you had open. Set
+# when something actually lands on disk, which on a first install is always and
+# on a re-run is usually not.
+CHANGED=0
+
+say()  { printf '%s\n' "$*"; }
+step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+warn() { printf '  ! %s\n' "$*" >&2; }
+fail() { printf 'install: %s\n' "$*" >&2; exit 1; }
+
+while (( $# > 0 )); do
+  case "$1" in
+    --yes|-y)         ASSUME_YES=1; shift ;;
+    --no-companions)  COMPANIONS_WANTED=0; shift ;;
+    -h|--help)        sed -n '3,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)                fail "unknown option: $1 (try --help)" ;;
+  esac
+done
+
+interactive() { [[ -t 0 && -t 1 ]]; }
+
+# Consent is the one thing this script will not answer on your behalf. A
+# plugin runs unsandboxed inside a long-lived shell process, so the decision
+# to add one is yours whether or not there is a terminal to ask on.
+if (( ! ASSUME_YES )) && ! interactive; then
+  fail "no terminal to ask on. Re-run it from a shell, or pass --yes if you have read what it does."
+fi
+
+ask() {
+  (( ASSUME_YES )) && return 0
+  local reply
+  read -r -p "  $1 [Y/n] " reply </dev/tty || return 1
+  [[ -z $reply || $reply == [Yy]* ]]
+}
+
+installed() { [[ -d "$PLUGINS_DIR/$1" ]]; }
+
+# Three answers, not two. `omarchy plugin list` goes over IPC to the running
+# shell, so it can fail to answer at all -- and a script that reads silence as
+# "disabled" turns around and enables an already-enabled plugin, which earns a
+# restart nobody needed. 0 enabled, 1 disabled, 2 could not tell.
+plugin_state() {
+  local listing
+  listing=$(omarchy plugin list --json 2>/dev/null) || return 2
+  jq -e 'type == "array" and length > 0' >/dev/null 2>&1 <<<"$listing" || return 2
+  jq -e --arg id "$1" 'any(.[]; .id == $id and .enabled == true)' \
+    >/dev/null 2>&1 <<<"$listing" && return 0
+  return 1
+}
+
+enabled() { plugin_state "$1"; [[ $? -eq 0 ]]; }
+
+# ------------------------------------------------------------------ preflight
+
+step "Checking what this machine has"
+
+command -v omarchy >/dev/null 2>&1 ||
+  fail "omarchy not found. This is a plugin for Omarchy 4's Quickshell shell."
+[[ -f /usr/share/omarchy/shell/shell.qml ]] ||
+  fail "the Omarchy shell is not installed. This plugin has nothing to load into."
+
+for tool in git jq; do
+  command -v "$tool" >/dev/null 2>&1 || fail "$tool is required and is not installed."
+done
+say "  ok  omarchy, its shell, git, jq"
+
+# Soft checks. These are what the cards shell out to at runtime, so a missing
+# one is a card that never finishes loading rather than an install that fails.
+# Said now, where it is a sentence, rather than later, where it is a bug report.
+for probe in \
+  "/usr/bin/curl|weather, the contribution graph, repo pulse and the calendar fetch with it" \
+  "/usr/bin/timedatectl|the clock reads timezone offsets from it, for any zone but your own"
+do
+  bin=${probe%%|*}; why=${probe#*|}
+  [[ -x $bin ]] || warn "$bin is missing — $why"
+done
+
+# ------------------------------------------------------------- this plugin
+
+step "Widgets"
+
+head_of() { git -C "$PLUGINS_DIR/$1" rev-parse --short HEAD 2>/dev/null; }
+
+if installed "$ID"; then
+  # The trap this script exists for. `add` fails here rather than upgrading,
+  # and its error is easy to scroll past when you were expecting an install.
+  say "  already installed — updating instead of re-adding"
+  before=$(head_of "$ID")
+  if (( ASSUME_YES )); then
+    omarchy plugin update "$ID" --yes || fail "update failed"
+  else
+    omarchy plugin update "$ID" || fail "update failed"
+  fi
+  [[ $(head_of "$ID") != "$before" ]] && CHANGED=1
+else
+  if (( ASSUME_YES )); then
+    omarchy plugin add "$URL" --enable --yes || fail "add failed"
+  else
+    omarchy plugin add "$URL" --enable || fail "add failed"
+  fi
+  CHANGED=1
+fi
+
+plugin_state "$ID"
+case $? in
+  0) say "  enabled" ;;
+  2) warn "could not ask the shell whether it is enabled — leaving it alone" ;;
+  *)
+    # `add --enable` can be declined, and `update` never enables anything.
+    if ask "Enable Widgets now (puts the button in your bar)?"; then
+      omarchy plugin enable "$ID" && CHANGED=1 ||
+        warn "could not enable; run: omarchy plugin enable $ID"
+    else
+      say "  left disabled — turn it on later with: omarchy plugin enable $ID"
+    fi
+    ;;
+esac
+
+# --------------------------------------------------------------- companions
+
+if (( COMPANIONS_WANTED )); then
+  step "Companion plugins"
+
+  for entry in "${COMPANIONS[@]}"; do
+    IFS='|' read -r cid clone_url card what <<<"$entry"
+
+    if installed "$cid"; then
+      say "  $cid is already installed — it powers $card"
+      continue
+    fi
+
+    say "  $cid is not installed, so $card stays inert."
+    say "  It is $what."
+    if ask "Install $cid?"; then
+      if (( ASSUME_YES )); then
+        omarchy plugin add "$clone_url" --enable --yes && CHANGED=1 || warn "could not add $cid"
+      else
+        omarchy plugin add "$clone_url" --enable && CHANGED=1 || warn "could not add $cid"
+      fi
+    else
+      say "  skipped — the card stays inert and says so on the desktop"
+    fi
+  done
+fi
+
+# ------------------------------------------------------------------- restart
+
+# A rescan tells the registry about new files; it does not re-instantiate a
+# panel that is already mounted, and this plugin is `keepLoaded`. Without a
+# restart an install looks like it did nothing at all -- and with one, when
+# nothing was installed, it costs you every panel you had open for no reason.
+if (( CHANGED )); then
+  step "Restarting the shell"
+  if omarchy-restart-shell; then
+    say "  done"
+  else
+    warn "the shell did not restart — run 'omarchy restart shell' yourself when you can"
+  fi
+else
+  step "Nothing moved"
+  say "  everything was already in place; leaving the shell alone"
+fi
+
+# ------------------------------------------------------------------- summary
+
+step "Where that leaves you"
+
+version_of() { jq -r '.version // "?"' "$PLUGINS_DIR/$1/manifest.json" 2>/dev/null || echo "?"; }
+head_at()    { git -C "$PLUGINS_DIR/$1" rev-parse --short HEAD 2>/dev/null || echo "not a git checkout"; }
+
+plugin_state "$ID"
+case $? in
+  0) state="on" ;;
+  2) state="installed (could not reach the shell to ask)" ;;
+  *) state="installed, not enabled" ;;
+esac
+printf '  %-26s %-9s %-10s %s\n' "$ID" "$(version_of "$ID")" "$(head_at "$ID")" "$state"
+
+for entry in "${COMPANIONS[@]}"; do
+  IFS='|' read -r cid clone_url card what <<<"$entry"
+  if installed "$cid"; then
+    printf '  %-26s %-9s %-10s %s\n' \
+      "$cid" "$(version_of "$cid")" "$(head_at "$cid")" "powers $card"
+  else
+    printf '  %-26s %-9s %-10s %s\n' "$cid" "—" "—" "not installed, $card stays inert"
+  fi
+done
+
+cat <<'NEXT'
+
+  Click Widgets in the bar to choose what is on screen.
+  Update later with:  ~/.config/omarchy/plugins/io.github.anishfn.widgets/update
+NEXT

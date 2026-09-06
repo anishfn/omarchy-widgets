@@ -139,7 +139,20 @@ that size, not the same one stretched.
   widget that genuinely has more to say than a row can hold.
 
 If your `[2, 1]` is your `[1, 1]` with more whitespace, do not offer it. The
-size button should feel like a choice, not a stretch.
+size list should read as a set of choices, not a set of stretches.
+
+**`photo` is the one type that offers seven, and it is the rule being met
+rather than waived.** A card of a different shape is a different *crop* of the
+photograph — a portrait in a `1 × 2` and the same portrait in a `2 × 1` are
+two pictures, not one picture at two sizes. Nothing else in the set has that
+property, and a widget offering five sizes for a number and a label has not
+decided what it is for. If you find yourself wanting the photo card's licence,
+the question to answer first is whether your content really changes shape or
+whether you are only offering more room.
+
+A `sizes` list may hold a footprint wider than the two-column grid most people
+have; the editor only offers what the user's grid can actually hold, and a
+config asking for one too wide is brought back to the widest that fits.
 
 **A size taller than one row sizes its type from a cell, not from the card.**
 `Math.min(width, height)` is the right unit while every size you offer is one
@@ -180,11 +193,18 @@ you are working is a distraction you cannot turn off without deleting it.
 - The only motion worth having is in the editor, where you are looking at it
   on purpose.
 
-The editor is where that last line is spent. Dropping a widget onto an
-occupied cell moves the occupant, and the occupant *slides* — 130ms, and only
-while the editor is open. A card that teleported out from under the one you
-were holding would read as a glitch; the same card sliding down reads as the
-grid making room, which is the one thing the gesture has to communicate.
+The editor is where that last line is spent, and it is spent once. Dropping a
+widget onto an occupied cell moves the occupant, and the occupant *slides* —
+130ms, and only while the editor is open. A card that teleported out from
+under the one you were holding would read as a glitch; the same card sliding
+down reads as the grid making room, which is the one thing the gesture has to
+communicate.
+
+A slideshow is not motion in this sense. A photo card changing picture is a
+value becoming the new value, and it is a cut with nothing animated across it
+— what it must not do is blink through an empty card while the next file
+loads, which is why the settled picture stays underneath until the new one is
+ready.
 
 ## What a widget is not
 
@@ -212,10 +232,23 @@ grid making room, which is the one thing the gesture has to communicate.
   eleventh item into a card that cannot reach it is worse than letting it be
   reached.
 
-  Do not read that as the rule loosening. A scrolling list is still the wrong
-  shape for almost everything: it is content you read a line at a time, and a
-  wallpaper is read at a glance. If your widget wants one, the question to
-  answer first is whether it wants to be a panel.
+  **`omate` is the second exception, and it is the widest one.** It is a
+  power switch, a scrolling row of skins, a roaming toggle, two steppers, a
+  size slider and a row of cadence chips — a panel's worth of controls on a
+  card, against a rule that asks for one. What earns it: the pet is *already
+  on the desktop*, so its controls are the one case where the card and the
+  thing it controls are looking at each other, and every one of them writes
+  through to the omate plugin's own settings rather than owning any state of
+  its own. It is not a settings button opening more interface; it is the
+  interface, in place.
+
+  It is also the limit. A third card of this shape is a panel, and the answer
+  to the next one is no.
+
+  Do not read either of those as the rule loosening. A scrolling list is still
+  the wrong shape for almost everything: it is content you read a line at a
+  time, and a wallpaper is read at a glance. If your widget wants one, the
+  question to answer first is whether it wants to be a panel.
 
   Three things follow, and all three are on you:
 

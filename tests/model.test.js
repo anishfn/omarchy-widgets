@@ -189,10 +189,170 @@ test("a size the type does not offer is not allowed", () => {
   assert.equal(Model.isAllowedSize("nope", 1, 1), false)
 })
 
+test("every type wears a glyph, so a long list can be scanned", () => {
+  for (const entry of Model.catalog()) {
+    assert.equal(typeof entry.icon, "string", `${entry.type}: needs an icon`)
+    assert.equal([...entry.icon].length, 1, `${entry.type}: an icon is one glyph`)
+    assert.equal(Model.iconFor(entry.type), entry.icon)
+  }
+  assert.equal(Model.iconFor("nope"), "", "an unknown type draws no glyph rather than throwing")
+})
+
+test("only sizes the grid can hold are offered", () => {
+  // The photo card lists footprints three columns wide on purpose. On a
+  // narrower grid they are not choices, they are a card drawn off the edge.
+  const wide = Model.sizesWithin("photo", 3).map(String)
+  assert.ok(wide.includes("3,3"), "a three-column grid can hold a three-column card")
+  const narrow = Model.sizesWithin("photo", 2).map(String)
+  assert.equal(narrow.includes("3,3"), false)
+  assert.equal(narrow.includes("3,2"), false)
+  assert.ok(narrow.includes("2,2"))
+  for (const [cols] of Model.sizesWithin("photo", 1)) assert.ok(cols <= 1)
+})
+
+test("a type whose sizes are all too wide still answers with one of its own", () => {
+  // github's narrowest is 1x1, calendar's is 1x1; a type that offered only
+  // wide sizes would still have to answer something isAllowedSize accepts.
+  for (const type of Model.catalogTypes()) {
+    for (let columns = 1; columns <= Model.MAX_COLUMNS; columns++) {
+      const [cols, rows] = Model.fitSize(type, columns)
+      assert.equal(Model.isAllowedSize(type, cols, rows), true,
+        `${type} at ${columns} columns answered a size it does not offer`)
+    }
+  }
+})
+
+test("fitSize keeps a widget as large as the grid allows", () => {
+  assert.deepEqual(Model.fitSize("photo", 6), [3, 3])
+  assert.deepEqual(Model.fitSize("clock", 1), [1, 1])
+})
+
+test("a footprint wider than the grid is brought back inside it", () => {
+  // A hand-written config, or one carried over from a wider grid. Left as it
+  // was, the card would hang off the right of the grid and no free cell would
+  // ever be found for it, because there is no column it fits in.
+  const config = Model.normalizeConfig({
+    layout: { columns: 2 },
+    widgets: [{ id: "photo", type: "photo", col: 0, row: 0, cols: 3, rows: 3 }]
+  })
+  const photo = Model.findInstance(config, "photo")
+  assert.ok(photo.cols <= 2, "the card fits the grid")
+  assert.equal(Model.isAllowedSize("photo", photo.cols, photo.rows), true)
+})
+
+test("a size is written the way the editor says it", () => {
+  assert.equal(Model.sizeLabel(2, 1), "2 × 1")
+})
+
+// ------------------------------------------------------------------ photos
+
+test("a path pointing at an image is a picture, and anything else a folder", () => {
+  const home = "/home/someone"
+  assert.deepEqual(Model.photoTarget("~/Pictures/dog.JPG", home),
+    { path: "/home/someone/Pictures/dog.JPG", kind: "image" })
+  assert.deepEqual(Model.photoTarget("/srv/wallpapers", home),
+    { path: "/srv/wallpapers", kind: "folder" })
+  assert.deepEqual(Model.photoTarget("", home), { path: "", kind: "none" })
+  // A dot in a directory name is not an extension.
+  assert.equal(Model.photoTarget("/srv/my.photos", home).kind, "folder")
+})
+
+test("a photo path cannot walk out of anywhere or carry a newline", () => {
+  const home = "/home/someone"
+  assert.equal(Model.photoTarget("../../etc", home).path, "")
+  assert.equal(Model.photoTarget("~/Pictures/../../../etc/shadow", home).path, "")
+  // A newline is what turns one line of the folder listing into two.
+  assert.equal(Model.clampPath("/srv/a\nb"), "/srv/ab")
+  assert.equal(Model.coerceSetting({ type: "path", defaultValue: "" }, "/srv/a\nb"), "/srv/ab")
+})
+
+test("a path setting holds a path longer than a label may be", () => {
+  const long = "/" + "a".repeat(Model.MAX_STRING + 40)
+  assert.equal(Model.coerceSetting({ type: "path", defaultValue: "" }, long).length, long.length)
+  assert.equal(Model.clampPath("/" + "a".repeat(Model.MAX_PATH * 2)).length, Model.MAX_PATH)
+})
+
+test("only the folders photo cards point at are scanned, once each", () => {
+  const home = "/home/someone"
+  const config = Model.normalizeConfig({
+    widgets: [
+      { id: "a", type: "photo", settings: { path: "~/Pictures" } },
+      { id: "b", type: "photo", settings: { path: "~/Pictures" } },
+      { id: "c", type: "photo", settings: { path: "~/Pictures/one.png" } },
+      { id: "d", type: "photo", settings: { path: "/srv/art" } },
+      { id: "clock", type: "clock" }
+    ]
+  })
+  assert.deepEqual(Model.photoFoldersInUse(config, home),
+    ["/home/someone/Pictures", "/srv/art"])
+})
+
+test("a folder listing keeps the images, in a stable order", () => {
+  const listing = "/p/b.JPG\n/p/a.png\n/p/notes.txt\n/p/c.webp\nrelative.png\n\n"
+  assert.deepEqual(Model.parsePhotoList(listing), ["/p/a.png", "/p/b.JPG", "/p/c.webp"])
+  assert.deepEqual(Model.parsePhotoList(""), [])
+  assert.deepEqual(Model.parsePhotoList(null), [])
+})
+
+test("a folder listing is capped, however many photographs are in it", () => {
+  const many = Array.from({ length: Model.MAX_PHOTOS + 50 },
+    (_, i) => `/p/${String(i).padStart(6, "0")}.jpg`).join("\n")
+  assert.equal(Model.parsePhotoList(many).length, Model.MAX_PHOTOS)
+})
+
+test("a slideshow walks in order, and shuffled never stands still", () => {
+  assert.equal(Model.nextPhotoIndex(3, 0, false), 1)
+  assert.equal(Model.nextPhotoIndex(3, 2, false), 0, "it wraps")
+  assert.equal(Model.nextPhotoIndex(1, 0, false), 0, "one picture has nowhere to go")
+  assert.equal(Model.nextPhotoIndex(0, 0, false), 0)
+
+  // Every roll picks something, and never the picture already up: a change
+  // that changes nothing reads as a broken slideshow.
+  for (const count of [2, 3, 7]) {
+    for (let index = 0; index < count; index++) {
+      for (const roll of [0, 0.1, 0.5, 0.9, 0.999999]) {
+        const next = Model.nextPhotoIndex(count, index, true, roll)
+        assert.notEqual(next, index, `${count}/${index}/${roll}`)
+        assert.ok(next >= 0 && next < count)
+      }
+    }
+  }
+})
+
+test("a shuffle reaches every other picture", () => {
+  const seen = new Set()
+  for (let r = 0; r < 1; r += 0.001) seen.add(Model.nextPhotoIndex(4, 1, true, r))
+  assert.deepEqual([...seen].sort(), [0, 2, 3])
+})
+
+test("never means no timer at all, not a timer that fires at once", () => {
+  assert.equal(Model.photoIntervalMs("0"), 0)
+  assert.equal(Model.photoIntervalMs(""), 0)
+  assert.equal(Model.photoIntervalMs("nonsense"), 0)
+  assert.equal(Model.photoIntervalMs("300"), 300000)
+  assert.equal(Model.photoIntervalMs("99999999"), 86400000, "clamped to a day")
+})
+
+test("a list that shrank under a card shows its last picture, not its first", () => {
+  const files = ["/p/a.jpg", "/p/b.jpg"]
+  assert.equal(Model.photoAt(files, 0), "/p/a.jpg")
+  assert.equal(Model.photoAt(files, 5), "/p/b.jpg")
+  assert.equal(Model.photoAt(files, -1), "/p/a.jpg")
+  assert.equal(Model.photoAt([], 0), "")
+  assert.equal(Model.photoAt(null, 0), "")
+})
+
+test("a picture names itself by its file, without the directory or the type", () => {
+  assert.equal(Model.photoName("/p/holiday 2019.jpeg"), "holiday 2019")
+  assert.equal(Model.photoName("/p/noext"), "noext")
+  assert.equal(Model.photoName(""), "")
+})
+
 // ---------------------------------------------------------------- settings
 
 test("every setting a type declares is usable by the editor", () => {
-  const kinds = ["text", "boolean", "choice", "timezone", "number"]
+  const kinds = ["text", "boolean", "choice", "timezone", "number", "path"]
+  const pathKinds = ["file", "image", "folder"]
   for (const entry of Model.catalog()) {
     assert.ok(Array.isArray(entry.settings), `${entry.type}: settings must be a schema`)
     const keys = new Set()
@@ -203,6 +363,14 @@ test("every setting a type declares is usable by the editor", () => {
       assert.ok(kinds.includes(spec.type), `${entry.type}.${spec.key}: unknown type ${spec.type}`)
       assert.ok(spec.label, `${entry.type}.${spec.key}: needs a label to render`)
       assert.notEqual(spec.defaultValue, undefined, `${entry.type}.${spec.key}: needs a default`)
+      if (spec.type === "path") {
+        assert.ok(Array.isArray(spec.pathKinds) && spec.pathKinds.length > 0,
+          `${entry.type}.${spec.key}: a path needs the kinds its chooser may return`)
+        for (const kind of spec.pathKinds) {
+          assert.ok(pathKinds.includes(kind),
+            `${entry.type}.${spec.key}: unknown path kind ${kind}`)
+        }
+      }
       if (spec.type === "choice") {
         assert.ok(Array.isArray(spec.options) && spec.options.length > 0,
           `${entry.type}.${spec.key}: a choice needs options`)
@@ -2731,7 +2899,7 @@ test("the types that take clicks are exactly the ones that say so", () => {
   // turns its own rectangle into an input region on the desktop, so one added
   // by accident is a card silently swallowing clicks meant for a window.
   const interactive = Model.catalogTypes().filter((t) => Model.isInteractiveType(t))
-  assert.deepEqual(interactive.sort(), ["music", "repo-pulse", "todos"])
+  assert.deepEqual(interactive.sort(), ["music", "omate", "repo-pulse", "todos"])
   for (const quiet of ["clock", "weather", "github", "calendar"]) {
     assert.equal(Model.isInteractiveType(quiet), false, `${quiet} should stay click-through`)
   }
@@ -2749,10 +2917,12 @@ test("ticking can be switched off without switching the widget off", () => {
 test("a type says for itself whether a second one makes sense", () => {
   // Several clocks is the point of a clock widget; several music cards would
   // be the same player twice, and several weather cards the same location.
+  // One omate card: every control on it writes through to the one pet's
+  // global settings, so a second card would fight the first mid-drag.
   for (const many of ["clock", "github", "repo-pulse", "calendar", "todos"]) {
     assert.equal(Model.allowsMultiple(many), true, `${many} should allow several`)
   }
-  for (const one of ["weather", "music"]) {
+  for (const one of ["weather", "music", "omate"]) {
     assert.equal(Model.allowsMultiple(one), false, `${one} reads one source`)
   }
   assert.equal(Model.allowsMultiple("nope"), false)
@@ -2905,4 +3075,66 @@ test("a secret never becomes the name of a widget", () => {
   assert.equal(shown.indexOf("private-secret"), -1, shown)
   assert.equal(shown, "Calendar · calendar")
   assert.equal(Model.instanceLabel(Model.findInstance(config, "calendar")), "")
+})
+
+test("a path from another plugin becomes a URL a Loader can take", () => {
+  // omate hands its paths back percent-decoded, so a plugin installed under a
+  // directory with a space in it has to be encoded again -- an unencoded space
+  // is a url that resolves to nothing, silently, and a skin row of empty boxes.
+  assert.equal(Model.pluginFileUrl("/home/a/plugins/palccod.omate/PetSprite.qml"),
+    "file:///home/a/plugins/palccod.omate/PetSprite.qml")
+  assert.equal(Model.pluginFileUrl("/home/a b/omate/PetSprite.qml"),
+    "file:///home/a%20b/omate/PetSprite.qml")
+  assert.equal(Model.pluginFileUrl("/home/a#b?c/PetSprite.qml"),
+    "file:///home/a%23b%3Fc/PetSprite.qml")
+
+  // Already a URL: passed through rather than prefixed twice.
+  assert.equal(Model.pluginFileUrl("file:///home/a/PetSprite.qml"),
+    "file:///home/a/PetSprite.qml")
+
+  // Anything that is neither is refused rather than guessed at. The caller
+  // reads the empty string as "do not draw a preview" and shows the name.
+  for (const nothing of ["", "relative/PetSprite.qml", undefined, null, "qrc:/x"]) {
+    assert.equal(Model.pluginFileUrl(nothing), "", String(nothing))
+  }
+})
+
+test("the chase row says what it is doing, including cadences it has no chip for", () => {
+  assert.equal(Model.chaseLabel(true, 10), "Playful")
+  assert.equal(Model.chaseLabel(true, 60), "Now and then")
+  assert.equal(Model.chaseLabel(true, 300), "Occasional")
+  assert.equal(Model.chaseLabel(true, 1800), "Rare")
+
+  // A cooldown set over omate's IPC is a legitimate value with no chip of its
+  // own. Spelled out, so the row reads as a setting rather than as unset.
+  assert.equal(Model.chaseLabel(true, 42), "Every 42s")
+  assert.equal(Model.chaseLabel(true, 41.6), "Every 42s")
+
+  // Off is off whatever the cooldown says, and a cooldown nobody has written
+  // yet is not a number to put in a sentence.
+  assert.equal(Model.chaseLabel(false, 10), "Off")
+  assert.equal(Model.chaseLabel(true, undefined), "Off")
+  assert.equal(Model.chaseLabel(true, "nonsense"), "Off")
+})
+
+test("a number read from another plugin never reaches a control as NaN", () => {
+  // Math.round(undefined) is NaN, and NaN assigned to an `int` property is a
+  // type error and a silent zero -- a nap cadence of zero minutes, from a key
+  // omate simply had not written yet.
+  assert.equal(Model.settingNumber(undefined, 10, 0, 120), 10)
+  assert.equal(Model.settingNumber(null, 10, 0, 120), 10)
+  assert.equal(Model.settingNumber("nonsense", 4, 1, 60), 4)
+  assert.equal(Model.settingNumber("", 4, 1, 60), 4)
+
+  assert.equal(Model.settingNumber(30, 10, 0, 120), 30)
+  assert.equal(Model.settingNumber("30", 10, 0, 120), 30)
+  assert.equal(Model.settingNumber(29.6, 10, 0, 120), 30)
+
+  // Clamped to what the control actually offers, both ends.
+  assert.equal(Model.settingNumber(9000, 10, 0, 120), 120)
+  assert.equal(Model.settingNumber(-5, 4, 1, 60), 1)
+
+  // A fallback outside the range is still clamped: the floor wins over a
+  // default that no longer makes sense.
+  assert.equal(Model.settingNumber(undefined, undefined, 1, 6), 1)
 })

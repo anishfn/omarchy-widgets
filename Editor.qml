@@ -130,6 +130,12 @@ Item {
         property var hoverCell: null
         property bool dropValid: false
         property bool overTray: false
+        // Over the toolbar or the inspector, which are not drop targets. The
+        // cell underneath them is a real cell, and a card dropped into it
+        // would be left under a panel — visible only once the editor closes,
+        // and unreachable until it opens again. So a drop there is refused,
+        // and the card stays where it was.
+        property bool overChrome: false
 
         // The grid as it *would* be if the pointer let go now, worked out by
         // the same function that will perform the drop. Everything the drag
@@ -164,12 +170,12 @@ Item {
 
         function updateTarget() {
           if (!win.dragging) return
-          var trayRect = trayPanel.mapToItem(win.contentItem, 0, 0)
-          win.overTray = trayPanel.visible
-            && win.pointerX >= trayRect.x && win.pointerX <= trayRect.x + trayPanel.width
-            && win.pointerY >= trayRect.y && win.pointerY <= trayRect.y + trayPanel.height
+          win.overTray = win.overItem(trayPanel, win.pointerX, win.pointerY)
+          win.overChrome = !win.overTray
+            && (win.overItem(toolbar, win.pointerX, win.pointerY)
+              || win.overItem(inspector, win.pointerX, win.pointerY))
 
-          if (win.overTray) {
+          if (win.overTray || win.overChrome) {
             win.hoverCell = null
             win.dropValid = false
             win.dropPreview = null
@@ -213,6 +219,7 @@ Item {
           win.dropValid = false
           win.dropPreview = null
           win.overTray = false
+          win.overChrome = false
         }
 
         // ----------------------------------------------------------- keys
@@ -354,6 +361,7 @@ Item {
             WidgetInstance {
               anchors.fill: parent
               service: root.service
+              shell: root.shell
               instance: slot.modelData
               widgetSource: root.sourceFor(slot.modelData.type)
             }
@@ -405,420 +413,128 @@ Item {
           }
         }
 
-        // -------------------------------------------------- tray + controls
+        // ------------------------------------------------------- the chrome
+        //
+        // Three surfaces, where there used to be one. The old panel put the
+        // grid's settings, the selected card's settings, the tray and the
+        // hint in a single stack at the bottom of the screen, and every one
+        // of them grew: a row that started as four controls became fourteen
+        // the moment a card was selected, and the whole thing was also the
+        // target you dropped a widget onto to take it off the desktop.
+        //
+        // Split by what they are about, and stacked. The bar is about the grid
+        // and never changes size. The tray is about what is off, and is the
+        // one thing here you can drop onto. The inspector is about the one
+        // card you have selected, and is only up while one is.
 
-        BorderSurface {
-          id: trayPanel
+        // Is a screen point inside one of the chrome surfaces? Used to keep a
+        // drag from trying to drop a card into a cell that is underneath the
+        // toolbar, which would leave it somewhere the pointer cannot reach it
+        // again.
+        function overItem(item, px, py) {
+          if (!item || !item.visible) return false
+          var at = item.mapToItem(win.contentItem, 0, 0)
+          return px >= at.x && px <= at.x + item.width
+            && py >= at.y && py <= at.y + item.height
+        }
+
+        // The three of them are one column, bottom-centred: a Column skips a
+        // child that is not there, so the bar does not move when the tray
+        // empties or the inspector closes.
+
+        Column {
+          id: chrome
           anchors.horizontalCenter: parent.horizontalCenter
           anchors.bottom: parent.bottom
           anchors.bottomMargin: Style.gapsOut + Style.space(12)
-          width: Math.min(win.width - Style.space(40), controls.implicitWidth + Style.space(36))
-          height: controls.implicitHeight + Style.space(28)
-          radius: Style.cornerRadius > 0 ? Style.cornerRadius : 0
-          color: Color.popups.background
-          borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
+          spacing: Style.space(10)
 
-          // While a card is over the tray, the tray says so.
-          Rectangle {
-            anchors.fill: parent
-            anchors.margins: 2
-            visible: win.overTray
-            radius: parent.radius
-            color: Util.alpha(root.urgent, 0.16)
-            border.width: 2
-            border.color: Util.alpha(root.urgent, 0.8)
+          // ------------------------------------------------------- inspector
+          //
+          // Over the bar and the tray and the same width as them, so the whole
+          // of the editor's chrome is one column down the middle of the screen
+          // and none of it is somewhere you have to go looking. It appears when
+          // you click a widget and goes when you click empty grid, which is why
+          // it is at the top of the stack: the two panels under it never move
+          // when it comes and goes.
+
+          Inspector {
+            id: inspector
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: root.selected !== null
+            width: toolbar.width
+            service: root.service
+            config: root.config
+            selected: root.selected
+            selectedId: root.selectedId
+            layout: root.layout
+            timezoneOptions: root.timezoneOptions
+            windowHeight: win.height
+            // Whatever is left above the two panels under it. Past that the
+            // settings scroll rather than the panel growing up the screen.
+            maxHeight: Math.max(Style.space(160),
+              win.height - toolbar.height
+                - (trayPanel.visible ? trayPanel.height + chrome.spacing : 0)
+                - Style.space(72))
+            foreground: root.foreground
+            accent: root.accent
+            urgent: root.urgent
+            fontFamily: root.fontFamily
           }
 
-          // Swallow clicks so a press on the toolbar is not also a press on
-          // the dismissal field behind it.
-          MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.AllButtons
-            onClicked: {}
-          }
+          // ------------------------------------------------------------ tray
+          //
+          // Widgets that are off live here; drag one onto the grid to put it
+          // up, and drag one back to take it down. It is its own surface rather
+          // than a row inside the toolbar because it is the only part of the
+          // chrome a drag may end on, and a drop target has to look like one.
 
-          Column {
-            id: controls
-            anchors.centerIn: parent
-            spacing: Style.space(10)
+          BorderSurface {
+            id: trayPanel
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: win.tray.length > 0
+            width: Math.min(win.width - Style.space(40),
+              trayRow.implicitWidth + Style.space(28))
+            height: trayRow.implicitHeight + Style.space(16)
+            radius: Style.cornerRadius > 0 ? Style.cornerRadius : 0
+            color: Color.popups.background
+            borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border,
+              Math.max(1, Style.space(2)))
 
-            Row {
-              anchors.horizontalCenter: parent.horizontalCenter
-              spacing: Style.space(14)
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Side"
-                textFormat: Text.PlainText
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              ButtonGroup {
-                anchors.verticalCenter: parent.verticalCenter
-                options: [{ value: "left", label: "Left" }, { value: "right", label: "Right" }]
-                value: root.layout.side
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                focusable: false
-                onChanged: function(v) { if (root.service) root.service.setSide(v) }
-              }
-
-              PanelSeparator {
-                anchors.verticalCenter: parent.verticalCenter
-                width: 1
-                height: Style.space(20)
-                foreground: root.foreground
-                strength: 0.25
-              }
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Columns"
-                textFormat: Text.PlainText
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              // Only the counts that actually fit this screen are offered. A
-              // grid wider than the display would put widgets somewhere you
-              // cannot look at them, and the count is measured against this
-              // window, which is already the usable area minus the bar.
-              ButtonGroup {
-                anchors.verticalCenter: parent.verticalCenter
-                options: {
-                  var counts = Model.columnOptions(root.layout, win.width)
-                  var out = []
-                  for (var i = 0; i < counts.length; i++)
-                    out.push({ value: String(counts[i]), label: String(counts[i]) })
-                  return out
-                }
-                value: String(root.layout.columns)
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                focusable: false
-                onChanged: function(v) { if (root.service) root.service.setColumns(Number(v)) }
-              }
-
-              PanelSeparator {
-                anchors.verticalCenter: parent.verticalCenter
-                width: 1
-                height: Style.space(20)
-                foreground: root.foreground
-                strength: 0.25
-              }
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Scale"
-                textFormat: Text.PlainText
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              // One field, in percent, set at 100: any whole number from 25
-              // to 200, typecast by the spinbox and written back as the
-              // factor. The floor is Model.MIN_SCALE, because a grid scaled
-              // to nothing cannot be clicked back.
-              NumberField {
-                anchors.verticalCenter: parent.verticalCenter
-                label: ""
-                value: Math.round(root.layout.scale * 100)
-                from: Math.round(Model.MIN_SCALE * 100)
-                to: Math.round(Model.MAX_SCALE * 100)
-                stepSize: 10
-                fieldWidth: Style.space(64)
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onModified: function(v) { if (root.service) root.service.setScale(Number(v) / 100) }
-              }
-
-              PanelSeparator {
-                anchors.verticalCenter: parent.verticalCenter
-                width: 1
-                height: Style.space(20)
-                foreground: root.foreground
-                strength: 0.25
-              }
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Opacity"
-                textFormat: Text.PlainText
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              // The whole grid's opacity, in percent. Moving it writes over any card's
-              // own opacity, so the whole grid matches again.
-              NumberField {
-                anchors.verticalCenter: parent.verticalCenter
-                label: ""
-                value: Math.round(root.layout.opacity * 100)
-                from: 0
-                to: 100
-                stepSize: 5
-                fieldWidth: Style.space(64)
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onModified: function(v) { if (root.service) root.service.setLayoutOpacity(Number(v) / 100) }
-              }
-
-              PanelSeparator {
-                anchors.verticalCenter: parent.verticalCenter
-                width: 1
-                height: Style.space(20)
-                foreground: root.foreground
-                strength: 0.25
-              }
-
-              // A small escape hatch from both the knobs above: scale and
-              // opacity (grid-wide and every card's) go back to their
-              // defaults.
-              Button {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Reset"
-                tooltipText: "Restore the default scale and opacity"
-                bordered: true
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                fontSize: Style.font.bodySmall
-                horizontalPadding: Style.space(10)
-                verticalPadding: Style.space(6)
-                onClicked: if (root.service) root.service.resetAppearance()
-              }
-
-              PanelSeparator {
-                anchors.verticalCenter: parent.verticalCenter
-                width: 1
-                height: Style.space(20)
-                foreground: root.foreground
-                strength: 0.25
-              }
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.selected !== null
-                text: root.nameFor(root.selected)
-                textFormat: Text.PlainText
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                font.bold: true
-              }
-
-              Button {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.selected !== null
-                  && Model.sizesFor(root.selected ? root.selected.type : "").length > 1
-                text: root.selected ? (root.selected.cols + "×" + root.selected.rows) : ""
-                tooltipText: "Change the size of " + root.nameFor(root.selected)
-                bordered: true
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onClicked: if (root.service) root.service.cycleSize(root.selectedId)
-              }
-
-              // Another one of these. Only for a type that says a second one
-              // means something -- a duplicate weather card would be the same
-              // reading twice.
-              Button {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.selected !== null
-                  && Model.allowsMultiple(root.selected ? root.selected.type : "")
-                text: "Duplicate"
-                tooltipText: "Add another " + (root.selected
-                  ? Model.catalogEntry(root.selected.type).name.toLowerCase() : "widget")
-                  + ", with these settings"
-                bordered: true
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onClicked: if (root.service) root.service.duplicateWidget(root.selectedId)
-              }
-
-              // ...and away again. Only ever offered for a spare: the last of
-              // a type is switched off rather than deleted, because deleting
-              // it would only mean the next config read put a fresh one back.
-              Button {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.selected !== null && root.config !== null
-                  && Model.canRemove(root.config, root.selectedId)
-                text: "Remove"
-                tooltipText: "Delete " + root.nameFor(root.selected) + " and its settings"
-                bordered: true
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onClicked: if (root.service) root.service.removeWidget(root.selectedId)
-              }
-
-              Button {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Done"
-                bordered: true
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onClicked: root.close()
-              }
+            // While a card is over the tray, the tray says so — in the urgent
+            // colour, because what happens next is the widget leaving the
+            // desktop.
+            Rectangle {
+              anchors.fill: parent
+              anchors.margins: 2
+              visible: win.overTray
+              radius: parent.radius
+              color: Util.alpha(root.urgent, 0.16)
+              border.width: 2
+              border.color: Util.alpha(root.urgent, 0.8)
             }
 
-            // What the selected widget can be told. Every control here is
-            // built from the type's own settings schema, so a widget added
-            // later gets this panel by describing itself — nothing in the
-            // editor knows what a clock is. Opacity is ahead of all of them
-            // because it is true of every card, not just the ones with
-            // settings.
-            Row {
-              anchors.horizontalCenter: parent.horizontalCenter
-              spacing: Style.space(12)
-              visible: root.selected !== null
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Opacity"
-                textFormat: Text.PlainText
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              // Whole percent, from see-through to solid. Reads the card's
-              // own value when it has one, the layout's global otherwise;
-              // editing always sets the card's own.
-              NumberField {
-                anchors.verticalCenter: parent.verticalCenter
-                label: ""
-                value: root.selected ? Math.round(Model.effectiveOpacity(root.config, root.selected) * 100) : 100
-                from: 0
-                to: 100
-                stepSize: 5
-                fieldWidth: Style.space(64)
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onModified: function(v) {
-                  if (root.service && root.selectedId) root.service.setOpacity(root.selectedId, Number(v) / 100)
-                }
-              }
-
-              // Give a card that set its own opacity back to the grid's.
-              Button {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.selected !== null && root.selected.opacity !== null
-                text: "↺"
-                tooltipText: "Follow the grid's opacity instead of this one"
-                bordered: true
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                onClicked: if (root.service && root.selectedId) root.service.clearOpacity(root.selectedId)
-              }
-
-              Repeater {
-                id: schemaRepeater
-                model: root.selected ? Model.settingsSchema(root.selected.type) : []
-
-                delegate: Row {
-                  id: setting
-                  required property var modelData
-                  readonly property var value: root.selected && root.selected.settings
-                    ? root.selected.settings[modelData.key] : undefined
-
-                  spacing: Style.space(6)
-
-                  function commit(v) {
-                    if (root.service && root.selectedId)
-                      root.service.setSetting(root.selectedId, modelData.key, v)
-                  }
-
-                  Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: setting.modelData.label
-                    textFormat: Text.PlainText
-                    color: root.dim
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                  }
-
-                  // Enough zones that scanning is friction, so this one
-                  // carries a filter.
-                  PickerField {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: setting.modelData.type === "timezone"
-                    width: visible ? Style.space(210) : 0
-                    height: Style.spacing.controlHeight
-                    windowHeight: win.height
-                    searchable: true
-                    searchPlaceholder: "Search cities…"
-                    emptyText: "No city by that name"
-                    emptyLabel: "Your own clock"
-                    options: root.timezoneOptions
-                    value: String(setting.value || "")
-                    foreground: root.foreground
-                    accent: root.accent
-                    fontFamily: root.fontFamily
-                    onChanged: function(v) { setting.commit(v) }
-                  }
-
-                  PickerField {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: setting.modelData.type === "choice"
-                    width: visible ? Style.space(120) : 0
-                    height: Style.spacing.controlHeight
-                    windowHeight: win.height
-                    options: setting.modelData.options || []
-                    value: String(setting.value || "")
-                    foreground: root.foreground
-                    accent: root.accent
-                    fontFamily: root.fontFamily
-                    onChanged: function(v) { setting.commit(v) }
-                  }
-
-                  TextField {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: setting.modelData.type === "text"
-                    width: visible ? Style.space(110) : 0
-                    text: String(setting.value || "")
-                    placeholderText: setting.modelData.help || ""
-                    foreground: root.foreground
-                    accent: root.accent
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    // Committed as you type, so an edit cannot be lost by
-                    // closing the editor without pressing Enter.
-                    onTextEdited: setting.commit(text)
-                  }
-
-                  ToggleSwitch {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: setting.modelData.type === "boolean"
-                    checked: setting.value === true
-                    foreground: root.foreground
-                    accent: root.accent
-                    onToggled: setting.commit(!(setting.value === true))
-                  }
-                }
-              }
+            MouseArea {
+              anchors.fill: parent
+              acceptedButtons: Qt.AllButtons
+              onClicked: {}
             }
 
-            // The tray. Widgets that are off live here; drag one onto the
-            // grid to put it up, drag one back to take it down.
             Row {
-              anchors.horizontalCenter: parent.horizontalCenter
+              id: trayRow
+              anchors.centerIn: parent
               spacing: Style.space(8)
-              visible: win.tray.length > 0
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Off"
+                textFormat: Text.PlainText
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                rightPadding: Style.space(4)
+              }
 
               Repeater {
                 model: win.tray
@@ -827,19 +543,35 @@ Item {
                   id: chip
                   required property var modelData
 
-                  width: Style.space(96)
-                  height: Style.space(34)
+                  width: chipRow.implicitWidth + Style.space(20)
+                  height: Style.space(30)
                   radius: Style.cornerRadius > 0 ? Style.cornerRadius : 0
                   color: Util.alpha(root.foreground, chipDrag.containsMouse ? 0.12 : 0.05)
                   borderSpec: Border.flat(Util.alpha(root.foreground, 0.3), 1)
 
-                  Text {
+                  Row {
+                    id: chipRow
                     anchors.centerIn: parent
-                    text: root.nameFor(chip.modelData)
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
+                    spacing: Style.space(6)
+
+                    Text {
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: Model.iconFor(chip.modelData.type)
+                      textFormat: Text.PlainText
+                      color: root.dim
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      renderType: Text.NativeRendering
+                    }
+
+                    Text {
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: root.nameFor(chip.modelData)
+                      textFormat: Text.PlainText
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                    }
                   }
 
                   MouseArea {
@@ -882,19 +614,212 @@ Item {
                 }
               }
             }
+          }
 
-            Text {
-              anchors.horizontalCenter: parent.horizontalCenter
-              width: Math.min(implicitWidth, trayPanel.width - Style.space(24))
-              horizontalAlignment: Text.AlignHCenter
-              wrapMode: Text.Wrap
-              textFormat: Text.PlainText
-              text: root.selected !== null
-                ? "Drag it anywhere — either side of the screen, or onto another widget to swap. Into the bar below takes it off."
-                : "Drag a widget to either side of the screen. Click one to change its settings, or to duplicate it."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
+          // --------------------------------------------------------- the bar
+          //
+          // The grid, and nothing else: which side it hugs, how wide it is, how
+          // big and how solid its cards are. Four controls, each with its name
+          // above it rather than beside it, so the names read as one row and
+          // the controls as another.
+
+          BorderSurface {
+            id: toolbar
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(win.width - Style.space(40),
+              barColumn.implicitWidth + Style.space(36))
+            height: barColumn.implicitHeight + Style.space(24)
+            radius: Style.cornerRadius > 0 ? Style.cornerRadius : 0
+            color: Color.popups.background
+            borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border,
+              Math.max(1, Style.space(2)))
+
+            // Swallow clicks so a press on the toolbar is not also a press on
+            // the dismissal field behind it.
+            MouseArea {
+              anchors.fill: parent
+              acceptedButtons: Qt.AllButtons
+              onClicked: {}
+            }
+
+            Column {
+              id: barColumn
+              anchors.centerIn: parent
+              spacing: Style.space(10)
+
+              Row {
+                id: barRow
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: Style.space(16)
+
+                Field {
+                  anchors.bottom: parent.bottom
+                  label: "Side"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+
+                  ButtonGroup {
+                    options: [{ value: "left", label: "Left" }, { value: "right", label: "Right" }]
+                    value: root.layout.side
+                    foreground: root.foreground
+                    accent: root.accent
+                    fontFamily: root.fontFamily
+                    focusable: false
+                    onChanged: function(v) { if (root.service) root.service.setSide(v) }
+                  }
+                }
+
+                PanelSeparator {
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(4)
+                  width: 1
+                  height: Style.space(24)
+                  foreground: root.foreground
+                  strength: 0.25
+                }
+
+                // Only the counts that actually fit this screen are offered. A
+                // grid wider than the display would put widgets somewhere you
+                // cannot look at them, and the count is measured against this
+                // window, which is already the usable area minus the bar.
+                Field {
+                  anchors.bottom: parent.bottom
+                  label: "Columns"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+
+                  ButtonGroup {
+                    options: {
+                      var counts = Model.columnOptions(root.layout, win.width)
+                      var out = []
+                      for (var i = 0; i < counts.length; i++)
+                        out.push({ value: String(counts[i]), label: String(counts[i]) })
+                      return out
+                    }
+                    value: String(root.layout.columns)
+                    foreground: root.foreground
+                    accent: root.accent
+                    fontFamily: root.fontFamily
+                    focusable: false
+                    onChanged: function(v) { if (root.service) root.service.setColumns(Number(v)) }
+                  }
+                }
+
+                PanelSeparator {
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(4)
+                  width: 1
+                  height: Style.space(24)
+                  foreground: root.foreground
+                  strength: 0.25
+                }
+
+                // One field, in percent, set at 100: any whole number from 25
+                // to 200, typecast by the spinbox and written back as the
+                // factor. The floor is Model.MIN_SCALE, because a grid scaled
+                // to nothing cannot be clicked back.
+                Field {
+                  anchors.bottom: parent.bottom
+                  label: "Scale"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+
+                  NumberField {
+                    label: ""
+                    value: Math.round(root.layout.scale * 100)
+                    from: Math.round(Model.MIN_SCALE * 100)
+                    to: Math.round(Model.MAX_SCALE * 100)
+                    stepSize: 10
+                    fieldWidth: Style.space(76)
+                    foreground: root.foreground
+                    accent: root.accent
+                    fontFamily: root.fontFamily
+                    onModified: function(v) { if (root.service) root.service.setScale(Number(v) / 100) }
+                  }
+                }
+
+                // The whole grid's opacity, in percent. Moving it writes over
+                // any card's own opacity, so the whole grid matches again.
+                Field {
+                  anchors.bottom: parent.bottom
+                  label: "Opacity"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+
+                  NumberField {
+                    label: ""
+                    value: Math.round(root.layout.opacity * 100)
+                    from: 0
+                    to: 100
+                    stepSize: 5
+                    fieldWidth: Style.space(76)
+                    foreground: root.foreground
+                    accent: root.accent
+                    fontFamily: root.fontFamily
+                    onModified: function(v) { if (root.service) root.service.setLayoutOpacity(Number(v) / 100) }
+                  }
+                }
+
+                PanelSeparator {
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(4)
+                  width: 1
+                  height: Style.space(24)
+                  foreground: root.foreground
+                  strength: 0.25
+                }
+
+                // A small escape hatch from both the knobs above: scale and
+                // opacity (grid-wide and every card's) go back to their
+                // defaults.
+                Button {
+                  anchors.bottom: parent.bottom
+                  text: "Reset"
+                  tooltipText: "Restore the default scale and opacity"
+                  bordered: true
+                  foreground: root.foreground
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.bodySmall
+                  horizontalPadding: Style.space(12)
+                  verticalPadding: Style.space(7)
+                  onClicked: if (root.service) root.service.resetAppearance()
+                }
+
+                Button {
+                  anchors.bottom: parent.bottom
+                  text: "Done"
+                  tooltipText: "Leave the editor. Nothing here needs saving."
+                  bordered: true
+                  selected: true
+                  foreground: root.foreground
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.bodySmall
+                  horizontalPadding: Style.space(12)
+                  verticalPadding: Style.space(7)
+                  onClicked: root.close()
+                }
+              }
+
+              Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: Math.min(implicitWidth, toolbar.width - Style.space(24))
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                // The tray is only mentioned while there is one. With every
+                // widget on the desktop there is nothing above the bar, and a
+                // line naming a panel that is not there is a line that has to
+                // be ignored rather than read.
+                text: root.selected !== null
+                  ? "Drag it anywhere — either side of the screen, or onto another widget to swap."
+                    + (trayPanel.visible ? " Onto the tray takes it off." : "")
+                  : "Drag a widget to either side of the screen. Click one to open its settings."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
             }
           }
         }
@@ -917,6 +842,7 @@ Item {
           WidgetInstance {
             anchors.fill: parent
             service: root.service
+            shell: root.shell
             instance: win.dragging && root.config ? Model.findInstance(root.config, win.dragId) : null
             widgetSource: {
               var inst = win.dragging && root.config ? Model.findInstance(root.config, win.dragId) : null

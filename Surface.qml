@@ -168,6 +168,7 @@ Item {
             height: rect.height
 
             service: root.svc
+            shell: root.shell
             instance: modelData
             widgetSource: root.sourceFor(modelData.type)
           }

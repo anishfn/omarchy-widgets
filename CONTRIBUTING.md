@@ -11,6 +11,7 @@ what keeps a hundred contributed widgets looking like one set.
 - [Adding a widget](#adding-a-widget)
 - [A complete example](#a-complete-example)
 - [The catalogue entry](#the-catalogue-entry)
+- [The icon](#the-icon)
 - [What your widget is handed](#what-your-widget-is-handed)
 - [Sizes](#sizes)
 - [More than one of your widget](#more-than-one-of-your-widget)
@@ -105,7 +106,8 @@ Item {
 {
   type: "yourwidget",
   name: "Your widget",
-  description: "One line, in the popup and the editor tray.",
+  description: "One line, as the row's tooltip in the popup.",
+  icon: "\uf0eb",
   source: "widgets/YourWidget.qml",
   sizes: [[1, 1], [2, 1]],
   settings: [
@@ -217,13 +219,29 @@ this shape; read it alongside.
 |---|---|
 | `type` | Stable id, lowercase, no spaces. Config files refer to it forever, so pick once |
 | `name` | What the popup and the editor call it |
-| `description` | One line. Shown under the name in the popup |
+| `description` | One line. The tooltip on the row in the popup |
+| `icon` | One glyph, from the theme's Nerd Font, written as a `\u` escape. See [The icon](#the-icon) |
 | `source` | Path to your QML, relative to the plugin root. Must stay inside it |
 | `sizes` | Footprints you allow, `[cols, rows]` in cells. First is the default |
 | `settings` | Your whole tunable surface, as a schema. See [Settings](#settings) |
 | `network` | The host you talk to, if you talk to one. Omit it if you do not |
 | `interactive` | `true` if the widget needs clicks. Omit it unless it does |
 | `multiple` | `true` if a second one of your widget could say something different. Omit it if it reads a single source |
+
+## The icon
+
+One glyph, and it is not decoration: the bar popup is one line per widget and
+gets a row longer every time somebody adds one, so the glyph is what makes a
+list of thirty scannable. Pick the obvious one for the subject — a clock for a
+clock — from the theme's Nerd Font, and write it as a `\u` escape rather than
+pasting the character, because a private-use codepoint renders as nothing if
+any tool between your editor and the screen drops it. A test enforces both:
+every type needs an icon, and it has to be exactly one glyph.
+
+It is drawn in the foreground colour at two strengths — lit for a widget that
+is on the desktop, quiet for one that is not — never in the accent. A column
+of accented glyphs is a column of highlights, which is a list with nothing
+highlighted.
 
 ## What your widget is handed
 
@@ -243,8 +261,14 @@ the set look related.
 
 Cells are square. A `[2, 1]` widget is two cells wide and one tall, gap
 included. Offer a size only if the widget genuinely reads better at it: the
-editor's size button steps through exactly what you list, and a size that is
-just "the same thing but stretched" is a worse option, not an extra one.
+editor's **Size** list offers exactly what you list, and a size that is just
+"the same thing but stretched" is a worse option, not an extra one.
+
+You may list a footprint wider than the default two-column grid. Only the ones
+the user's grid can actually hold are offered, and a config asking for a size
+too wide for its grid is brought back to the widest one that fits, so nothing
+you list can strand a card off the edge. `photo` is the type that uses this:
+it lists three-column sizes that nobody with a two-column grid ever sees.
 
 Your QML is given the pixel rectangle for the footprint in use. Read `width`
 and `height` and lay out from them; do not assume square.
@@ -287,6 +311,14 @@ the editor automatically.
 | `choice` | Dropdown | Needs `options: [{ value, label }]`; `defaultValue` must be one of them |
 | `timezone` | Searchable city list | Value is an IANA name, or `""` for local |
 | `number` | Text field | Clamped to a sane range |
+| `path` | Text field plus chooser buttons | Needs `pathKinds`, some of `"file"`, `"image"`, `"folder"`; `extensions` is the space-separated filter a file chooser applies |
+
+A `path` is typed *or* picked: the buttons open the desktop's own file chooser
+through `omarchy-file-select`, which is the same dialog every other
+application on the machine opens. Your QML is handed the string; resolving it
+(`~`, a bare name, a path walking upwards) is yours to do, and `Model.js`
+has `photoPath` and `todoPath` as the two worked examples — both refuse a path
+containing `..` outright, because the string becomes an argument to a process.
 
 Every value the user or the config file supplies is coerced to the kind you
 declared before your QML sees it, so `settings.ticks` is always a boolean and
@@ -294,8 +326,8 @@ declared before your QML sees it, so `settings.ticks` is always a boolean and
 against a config file. A key you do not declare cannot be set.
 
 Adding a setting type means teaching `coerceSetting()` in `Model.js` and
-adding a control to the editor's schema `Repeater`. Both are short; say so in
-the PR.
+adding a control to [`SettingField.qml`](SettingField.qml), which is the one
+file that knows how a setting kind is drawn. Both are short; say so in the PR.
 
 ## Names are a promise
 
@@ -452,6 +484,7 @@ Behaviour:
 Code:
 
 - [ ] `type` and every `settings` key are names you are happy to keep forever
+- [ ] `icon` is one glyph, written as a `\u` escape
 - [ ] Logic with a right answer lives in `Model.js` and has a test
 - [ ] `settings` is a complete schema — every key your QML reads is declared
 - [ ] No `if (type === "…")` anywhere outside `widgets/`

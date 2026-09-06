@@ -105,8 +105,11 @@ Item {
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
       // Same fit-to-card guard as the time: a label is user-written and can
-      // be any length.
+      // be any length. A Text given a width aligns left unless told
+      // otherwise, so the centring has to be said out loud once the line
+      // stops being exactly as wide as its glyphs.
       width: Math.round(root.width * 0.86)
+      horizontalAlignment: Text.AlignHCenter
       visible: root.label.length > 0
       text: root.label
       textFormat: Text.PlainText
@@ -122,7 +125,10 @@ Item {
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
       // Stay inside the tick ring: a fraction of the card, not all of it.
+      // Centred explicitly: the anchor centres the item, and the item is now
+      // wider than the text inside it.
       width: Math.round(root.width * 0.86)
+      horizontalAlignment: Text.AlignHCenter
       text: root.timeText
       textFormat: Text.PlainText
       color: root.foreground

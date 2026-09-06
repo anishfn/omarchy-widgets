@@ -182,7 +182,18 @@ call it — and both are safe to run twice.
 | `--this-only` | (`update`) skip the companions |
 
 Both skip the restart when nothing actually changed — a restart you did not
-need costs you every panel you had open.
+need costs you every panel you had open. Both end by printing the manifest
+version and the commit each plugin is on:
+
+```
+Updated
+  io.github.anishfn.widgets    0.1.0 → 0.2.0         3374b22 → 5b634fe
+  palccod.omate                0.4.0 (unchanged)     742a67b → 9c1d004
+```
+
+A version that stayed put while the commits moved is shown as `(unchanged)`
+rather than hidden — it means the author shipped without bumping the
+manifest, which is a thing worth knowing about a plugin you just pulled.
 
 ### Updating
 

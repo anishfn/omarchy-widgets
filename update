@@ -49,17 +49,22 @@ command -v omarchy >/dev/null 2>&1 || fail "omarchy not found."
 [[ -d "$PLUGINS_DIR/$ID" ]] ||
   fail "$ID is not installed. Install it with: omarchy plugin add https://github.com/anishfn/omarchy-widgets.git"
 
-head_of() { git -C "$PLUGINS_DIR/$1" rev-parse --short HEAD 2>/dev/null; }
+head_of()    { git -C "$PLUGINS_DIR/$1" rev-parse --short HEAD 2>/dev/null; }
+version_of() { jq -r '.version // "?"' "$PLUGINS_DIR/$1/manifest.json" 2>/dev/null || echo "?"; }
 
 # What moved, rather than what was attempted: `omarchy plugin update` reports
 # success for a plugin that was already current, and a restart is only earned
 # by a commit that actually changed.
 MOVED=()
+# Everything looked at, moved or not, so the run ends by telling you what you
+# are actually on rather than only what changed.
+SEEN=()
 
 update_one() {
-  local id=$1 before after
+  local id=$1 before after vbefore vafter shown
   [[ -d "$PLUGINS_DIR/$id" ]] || { say "  $id is not installed — skipped"; return 0; }
   [[ -d "$PLUGINS_DIR/$id/.git" ]] && before=$(head_of "$id") || before=""
+  vbefore=$(version_of "$id")
 
   if (( ASSUME_YES )); then
     omarchy plugin update "$id" --yes || { warn "$id did not update"; return 0; }
@@ -68,8 +73,19 @@ update_one() {
   fi
 
   after=$(head_of "$id")
+  vafter=$(version_of "$id")
+  SEEN+=("$id|$vafter|${after:-?}")
+
   if [[ -n $before && -n $after && $before != "$after" ]]; then
-    MOVED+=("$id $before → $after")
+    # A version that did not move while the code did is worth seeing rather
+    # than hiding: it means the author shipped without bumping the manifest,
+    # and "0.1.0" on two different checkouts is a thing you want to know.
+    if [[ $vbefore != "$vafter" ]]; then
+      shown="$vbefore → $vafter"
+    else
+      shown="$vafter (unchanged)"
+    fi
+    MOVED+=("$id|$shown|$before → $after")
   fi
 }
 
@@ -81,14 +97,23 @@ if (( ! THIS_ONLY )); then
   for cid in "${COMPANIONS[@]}"; do update_one "$cid"; done
 fi
 
+report() {
+  local line id ver where
+  for line in "$@"; do
+    IFS='|' read -r id ver where <<<"$line"
+    printf '  %-28s %-22s %s\n' "$id" "$ver" "$where"
+  done
+}
+
 if (( ${#MOVED[@]} == 0 )); then
-  say ""
-  say "Nothing moved. Leaving the shell alone."
+  step "Nothing moved"
+  say "  already on the newest of each; leaving the shell alone"
+  (( ${#SEEN[@]} )) && report "${SEEN[@]}"
   exit 0
 fi
 
 step "Updated"
-for line in "${MOVED[@]}"; do say "  $line"; done
+report "${MOVED[@]}"
 
 step "Restarting the shell"
 if omarchy-restart-shell; then

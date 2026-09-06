@@ -16,6 +16,15 @@
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-8a9a9a?style=for-the-badge"></a>
 </p>
 
+<p align="center">
+  <img src="assets/desktop.jpg" alt="Widgets on the desktop: a clock, the weather, a todo list and the music card down the left, contributions and two repositories on the right, and the Omate card" width="880">
+</p>
+
+<p align="center">
+  <sub>Everything here takes its colours from the Omarchy theme. Nothing draws
+  a background of its own — the cards are the wallpaper, dimmed.</sub>
+</p>
+
 ---
 
 ## Get it
@@ -66,6 +75,19 @@ curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/instal
 | **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
 | **Omate** | The desktop pet: show and hide it, pick its skin, size it, set the cursor chase | local (Omate plugin) |
 | **Photos** | A picture of your own, or a folder of them shown one at a time | local (your files) |
+
+<table>
+<tr>
+<td width="50%" valign="top" align="center">
+  <img src="assets/cards.png" alt="The clock, weather, todo and music cards" width="380"><br>
+  <sub>Type sizes are fractions of the card, so a widget scaled up is the same drawing at a different size — never a small drawing in a big box.</sub>
+</td>
+<td width="50%" valign="top" align="center">
+  <img src="assets/omate.png" alt="The Omate card: a power switch, a scrolling row of skins, and the pet's dials" width="380"><br>
+  <sub>The Omate card, with each skin chip playing that pack's own idle animation. It owns nothing: every control writes through to the pet's plugin.</sub>
+</td>
+</tr>
+</table>
 
 ```
    ┌─────────┬─────────┐        side: left | right
@@ -282,6 +304,15 @@ including on the command line.
 **Arrange…** in the same popup opens the layout editor: the desktop dims, the
 grid appears under your widgets, and you can drag them around. Escape or
 **Done** closes it.
+
+<p align="center">
+  <img src="assets/editor.jpg" alt="The layout editor: the grid under the widgets, the tray of switched-off widgets along the bottom, the bar of layout controls beneath it, and the inspector docked to the right showing the selected widget's settings" width="880">
+</p>
+
+<p align="center">
+  <sub>The grid under the cards, the tray of switched-off widgets, the layout
+  bar, and the inspector — docked to the side its widget is not on.</sub>
+</p>
 
 ### The bar, the tray and the inspector
 

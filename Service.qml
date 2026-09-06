@@ -843,6 +843,176 @@ Item {
     }
   }
 
+  // -------------------------------------------------------------- photos
+  //
+  // One listing per directory a photo card points at, shared by every card
+  // pointing at the same one. It is done here rather than in the widget
+  // because the widget is built once per output and once again inside the
+  // editor: three copies of the same card would otherwise be three scans of
+  // the same folder to draw one photograph.
+  //
+  // `find`, run without a shell, with the extensions as arguments rather than
+  // a filter applied afterwards -- a Pictures folder can hold fifty thousand
+  // files and only a few hundred of them are ever going on the wallpaper.
+
+  // absolute directory -> the image paths in it, sorted
+  property var photoFiles: ({})
+  property var photoQueue: []
+
+  readonly property var photoFolders: Model.photoFoldersInUse(config, home)
+  readonly property bool photosWanted: photoFolders.length > 0
+
+  onPhotoFoldersChanged: refreshPhotos(false)
+
+  // `force` re-reads every folder, which is what the timer wants -- pictures
+  // are added to a directory by something other than this shell. Without it
+  // only folders with nothing listed yet are queued, which is what a config
+  // change wants: every drag across the grid replaces the config object, and
+  // none of them has anything to do with what is in somebody's Pictures.
+  function refreshPhotos(force) {
+    var folders = service.photoFolders
+
+    // Drop listings for folders nothing points at any more. Assigned back
+    // only when something actually went, because reassigning this property is
+    // what makes every photo card re-evaluate which file it is showing.
+    var kept = ({})
+    var dropped = false
+    for (var key in service.photoFiles) {
+      if (folders.indexOf(key) === -1) { dropped = true; continue }
+      kept[key] = service.photoFiles[key]
+    }
+    if (dropped) service.photoFiles = kept
+
+    var queue = []
+    for (var i = 0; i < folders.length; i++) {
+      if (force === true || service.photoFiles[folders[i]] === undefined) queue.push(folders[i])
+    }
+    if (queue.length === 0) return
+    service.photoQueue = queue
+    startNextPhotoScan()
+  }
+
+  function startNextPhotoScan() {
+    if (photoScanProc.running) return
+    var queue = service.photoQueue
+    if (!queue || queue.length === 0) return
+    var folder = String(queue[0])
+    service.photoQueue = queue.slice(1)
+    // Checked again here rather than trusted from the queue: this string is
+    // about to be an argument to a process.
+    if (!folder || folder.charAt(0) !== "/") { startNextPhotoScan(); return }
+
+    var argv = ["/usr/bin/find", "-L", folder, "-maxdepth", "1", "-type", "f", "("]
+    for (var i = 0; i < Model.PHOTO_EXTENSIONS.length; i++) {
+      if (i > 0) argv.push("-o")
+      argv.push("-iname")
+      argv.push("*." + Model.PHOTO_EXTENSIONS[i])
+    }
+    argv.push(")")
+
+    photoScanProc.folder = folder
+    photoScanProc.command = argv
+    photoScanProc.running = true
+  }
+
+  Process {
+    id: photoScanProc
+    running: false
+    property string folder: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        // Reassign whole, never mutate: a card reading one folder's listing
+        // only re-evaluates when the property itself changes.
+        var next = ({})
+        for (var key in service.photoFiles) next[key] = service.photoFiles[key]
+        next[photoScanProc.folder] = Model.parsePhotoList(text)
+        service.photoFiles = next
+      }
+    }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextPhotoScan)
+  }
+
+  Timer {
+    // A folder gains pictures by something that is not this shell, so there
+    // is nothing to be notified by. Ten minutes is often enough that a photo
+    // dropped in during a session turns up, and rare enough that the disk
+    // never hears about the widget.
+    interval: 600000
+    repeat: true
+    running: service.photosWanted
+    onTriggered: service.refreshPhotos(true)
+  }
+
+  // ------------------------------------------------------- choosing a file
+  //
+  // The desktop's own file chooser, through `omarchy-file-select` and the
+  // portal behind it, so picking a picture is the same dialog every other
+  // application on the machine opens -- with the places, the thumbnails and
+  // the recent folders already in it. Writing our own browser inside the
+  // editor would be a worse one that nobody had used before.
+  //
+  // The editor closes while the chooser is up and opens again when it is
+  // answered. That is not politeness: the editor is a layer-shell overlay and
+  // every ordinary window is below it, so a dialog opened underneath is one
+  // nobody can see or click. What comes back is the widget still selected and
+  // the panel where it was, because both of those live here rather than in
+  // the window that closed.
+
+  property string pickId: ""
+  property string pickKey: ""
+  property bool picking: false
+
+  function choosePath(id, key, kind, title, extensions) {
+    if (pickProc.running) return
+    var target = Model.findInstance(config, id)
+    if (!target || !Model.settingSpec(target.type, key)) return
+    // Without this the command is "/bin/omarchy-file-select", which does not
+    // exist, and the only visible effect would be the editor blinking closed
+    // and open again for no reason.
+    if (!service.omarchyPath) return
+
+    var argv = [service.omarchyPath + "/bin/omarchy-file-select",
+      "--title", String(title || "Choose a file")]
+    if (String(kind) === "folder") argv.push("--directory")
+    else if (extensions) { argv.push("--extensions"); argv.push(String(extensions)) }
+
+    service.pickId = String(id)
+    service.pickKey = String(key)
+    service.picking = true
+    service.editing = false
+    pickProc.command = argv
+    pickProc.running = true
+  }
+
+  Process {
+    id: pickProc
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        // One path per line; the chooser is opened without --multiple, so
+        // there is one. Nothing picked is a decision rather than a failure --
+        // the setting simply keeps what it had.
+        var picked = String(text).split("\n")[0].replace(/\s+$/, "")
+        if (picked.charAt(0) === "/") service.setSetting(service.pickId, service.pickKey, picked)
+      }
+    }
+    onRunningChanged: {
+      if (running) return
+      service.picking = false
+      // `pickId` and `pickKey` are deliberately left standing. The collector's
+      // `streamFinished` can arrive after this, and clearing them here would
+      // mean the path the chooser just handed back was written to nothing.
+      // The next `choosePath` overwrites them anyway.
+      //
+      // Back to the editor, however it ended. A chooser dismissed with Escape
+      // has to put the editor back too, or the gesture reads as having closed
+      // it on purpose.
+      service.editing = true
+    }
+  }
+
   // ----------------------------------------------------------------- IPC
 
   IpcHandler {

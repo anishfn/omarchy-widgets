@@ -451,8 +451,11 @@ Column {
         Text {
           id: countdown
 
-          anchors.right:
-            topRow.right
+          anchors.left:
+            timeText.right
+
+          anchors.leftMargin:
+            root.gap * 2
 
           anchors.baseline:
             timeText.baseline
@@ -460,7 +463,9 @@ Column {
           width:
             Math.min(
               implicitWidth,
-              topRow.width * 0.5
+              topRow.width
+                - timeText.width
+                - root.gap * 2
             )
 
           text:
@@ -472,16 +477,18 @@ Column {
               : ""
 
           color:
-            root.dim
+            root.accent
 
           font.family:
             root.fontFamily
 
           font.pixelSize:
-            root.smallSize
+            Math.round(
+              root.smallSize * 1.5
+            )
 
           horizontalAlignment:
-            Text.AlignRight
+            Text.AlignLeft
 
           elide:
             Text.ElideRight
@@ -495,12 +502,6 @@ Column {
 
           anchors.left:
             topRow.left
-
-          anchors.right:
-            countdown.left
-
-          anchors.rightMargin:
-            root.gap
 
           text: {
             var ev = root.nextEvent

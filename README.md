@@ -85,6 +85,7 @@ curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/instal
 | **Weather** | Now, today's range, and the condition | `wttr.in` |
 | **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
 | **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
+| **Crypto** | A wallet's balance and what it is worth, or just the coin's price | four chains, `api.coingecko.com` |
 | **Calendar** | What is next in your Google Calendar, and when | `calendar.google.com` |
 | **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
 | **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
@@ -144,6 +145,9 @@ says which.
 - [The weather](#the-weather)
 - [The contribution graph](#the-contribution-graph)
 - [Repo pulse](#repo-pulse)
+- [Crypto](#crypto)
+  - [What it fetches, and from where](#what-it-fetches-and-from-where)
+  - [Who can see it](#who-can-see-it)
 - [The calendar](#the-calendar)
   - [Connecting your Google Calendar](#connecting-your-google-calendar)
   - [Three sizes](#three-sizes)
@@ -179,7 +183,7 @@ Draws widget cards on the desktop:
 | **Input** | None, unless a widget asks for it — [Music](#music), [Repo pulse](#repo-pulse), [Todos](#todos) |
 | **Space** | Reserves none, and stays inside the area the bar has already claimed |
 | **Screens** | Every output by default, or one you name |
-| **Network** | Only the weather, GitHub and calendar widgets, only while they are on |
+| **Network** | Only the weather, GitHub, calendar and crypto widgets, only while they are on |
 
 Nothing here is a window. You cannot focus a widget or click it — it is
 something you see when you clear the screen. Arranging them happens in an
@@ -587,6 +591,78 @@ anywhere on it are caught — only the name does anything with them.
 
 Data comes from the public REST API, unauthenticated: sixty requests an hour
 per address, two per repository every half hour.
+
+## Crypto
+
+What a wallet holds, and what that is worth.
+
+Click it in the editor and pick a **Chain** — Bitcoin, Ethereum, Solana or
+Litecoin — then paste an **Address**. **Currency** picks the money it is
+valued in, and **Label** overrides the ticker symbol above the number.
+
+```
+   ┌──────────┐            ┌──────────┬──────────┐
+   │   LTC    │            │  LTC     │   $54.52 │
+   │  7.963   │            │  7.963   │   +2.0%  │
+   │  $434    │            │  $434    │          │
+   └──────────┘            └──────────┴──────────┘
+     [1 × 1]                      [2 × 1]
+```
+
+**Leave the address empty and the card is a ticker instead** — the same three
+lines with the coin's price where the balance was. That is not a second
+widget; it is the one setting nobody has filled in yet, and it is what most
+people actually want.
+
+The wide size is not the small one stretched. The square card spends its last
+line on what your holding is worth, so the coin's own price is the one thing
+it cannot show; the second column is where that goes.
+
+**The day's change is never coloured.** Every other crypto readout paints a
+rise green and a fall red, and [DESIGN.md](DESIGN.md) rules that out — a
+theme's palette is not a semantic scale, and a widget that invents one fights
+every theme it did not anticipate. The sign carries it, the way the timezone
+offset on [the clock](#the-clock) carries its own.
+
+### What it fetches, and from where
+
+Two requests, to different places, for different reasons.
+
+| | Where | How often |
+|---|---|---|
+| Price and 24h change | `api.coingecko.com` | every 5 minutes |
+| Bitcoin balance | `mempool.space` | every 10 minutes |
+| Litecoin balance | `litecoinspace.org` | every 10 minutes |
+| Ethereum balance | `ethereum-rpc.publicnode.com` | every 10 minutes |
+| Solana balance | `api.mainnet-beta.solana.com` | every 10 minutes |
+
+**Prices are one request for the whole desktop.** Six crypto cards in four
+currencies is a single call, not six — the service asks for every coin anyone
+has on screen at once. Balances cannot be batched that way, so they go one at
+a time through a queue, and a balance moves when you move it, which is why it
+is asked for half as often.
+
+**Nothing here holds an API key**, because there is nowhere in a plugin like
+this to keep one. Every host is a public courtesy endpoint, which also means
+any of them can stop answering: a balance that fails to arrive leaves the last
+one it knew on the card rather than blanking it, and a card that has never
+seen a balance says so rather than showing a zero.
+
+### Who can see it
+
+Worth reading before you paste an address.
+
+- **The chain node learns that your IP watches that address.** That is the
+  price of reading a balance without running your own node. An address is only
+  ever sent to its own chain's host — the price host never sees one.
+- **The card shows your money to whoever can see your screen.** Turn
+  **Value in money** off and the card keeps the holding and drops what it is
+  worth.
+- **A label you did not type is never your address.** The fallback is the
+  ticker symbol, so a card you have not named says `BTC`, not the first six
+  characters of your wallet.
+- **The plugin never sees a private key**, and there is nothing here that
+  could spend anything. It reads public chain data about a public address.
 
 ## The calendar
 
@@ -1098,6 +1174,8 @@ omarchy-shell widgets weather       # the current reading
 omarchy-shell widgets github        # the fetched graphs
 omarchy-shell widgets repos         # the fetched repositories
 omarchy-shell widgets calendar      # the next few events, per calendar
+omarchy-shell widgets crypto        # prices, and each wallet's balance
+omarchy-shell widgets refreshCrypto # fetch prices and balances now
 omarchy-shell widgets todos         # the list, as it was parsed
 omarchy-shell widgets todo '' 3 true # tick line 3 of the only list off
 omarchy-shell widgets reload        # re-read the file now

@@ -224,7 +224,7 @@ this shape; read it alongside.
 | `source` | Path to your QML, relative to the plugin root. Must stay inside it |
 | `sizes` | Footprints you allow, `[cols, rows]` in cells. First is the default |
 | `settings` | Your whole tunable surface, as a schema. See [Settings](#settings) |
-| `network` | The host you talk to, if you talk to one. Omit it if you do not |
+| `network` | The host you talk to, if you talk to one, or a list of them if it is more than one. Omit it if you talk to none |
 | `interactive` | `true` if the widget needs clicks. Omit it unless it does |
 | `multiple` | `true` if a second one of your widget could say something different. Omit it if it reads a single source |
 

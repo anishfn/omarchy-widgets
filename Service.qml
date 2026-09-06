@@ -634,6 +634,152 @@ Item {
     onTriggered: service.refreshRepos(true)
   }
 
+  // ------------------------------------------------------------- crypto
+  //
+  // Two fetches with different shapes and different reasons to repeat.
+  //
+  // Prices go to CoinGecko in a single call for every coin and every currency
+  // anybody has on screen, which is what keeps a desktop of six of these
+  // cards down to one request. Balances go to each chain's own node, one
+  // wallet at a time through a queue, the way the repositories do -- there is
+  // no batch endpoint for "these four addresses on three chains", and firing
+  // them together would be four processes at once for a wallpaper.
+  //
+  // Nothing here holds a key, because there is nowhere in a plugin like this
+  // to keep one. That is also why every host is a public courtesy endpoint
+  // and any of them can stop answering: a balance that fails to parse leaves
+  // the last one it knew on the card rather than blanking it.
+
+  // coingecko coin id -> currency -> { price, change }
+  property var cryptoPrices: ({})
+  // "chain:address" -> the balance in whole coins
+  property var cryptoBalances: ({})
+  property string cryptoError: ""
+  property var cryptoQueue: []
+
+  readonly property bool cryptoWanted: {
+    for (var i = 0; i < widgets.length; i++)
+      if (widgets[i].enabled && widgets[i].type === "crypto") return true
+    return false
+  }
+
+  // The coins and currencies actually wanted, as one string so this only
+  // changes when the set does -- an array would compare by reference and
+  // refetch on every unrelated edit to the config.
+  readonly property string cryptoPriceKey: Model.cryptoCoinsInUse(config).join(",")
+    + "|" + Model.cryptoCurrenciesInUse(config).join(",")
+
+  readonly property var cryptoWallets: Model.cryptoWalletsInUse(config)
+
+  // Typing an address should show a balance now, not at the next tick of a
+  // ten-minute timer.
+  onCryptoPriceKeyChanged: refreshCryptoPrices()
+  onCryptoWalletsChanged: refreshCryptoBalances(false)
+
+  function refreshCryptoPrices() {
+    if (!service.cryptoWanted || cryptoPriceProc.running) return
+    var command = Model.cryptoPriceCommand(Model.cryptoCoinsInUse(config),
+      Model.cryptoCurrenciesInUse(config))
+    if (!command) return
+    cryptoPriceProc.command = command
+    cryptoPriceProc.running = true
+  }
+
+  function refreshCryptoBalances(force) {
+    if (!service.cryptoWanted) return
+    var wallets = service.cryptoWallets
+    var queue = []
+    for (var i = 0; i < wallets.length; i++) {
+      var have = service.cryptoBalances[wallets[i].key]
+      if (force === true || have === undefined || have === null) queue.push(wallets[i])
+    }
+    if (queue.length === 0) return
+    service.cryptoQueue = queue
+    startNextCryptoBalance()
+  }
+
+  function startNextCryptoBalance() {
+    if (cryptoBalanceProc.running) return
+    var queue = service.cryptoQueue
+    if (!queue || queue.length === 0) return
+    var wallet = queue[0]
+    service.cryptoQueue = queue.slice(1)
+    // Built again here rather than trusted from the queue: the address
+    // becomes a path segment or the body of a POST, and cryptoBalanceCommand
+    // refuses one that does not match its chain's own shape.
+    var command = Model.cryptoBalanceCommand(wallet.chain, wallet.address)
+    if (!command) { Qt.callLater(service.startNextCryptoBalance); return }
+    cryptoBalanceProc.chain = wallet.chain
+    cryptoBalanceProc.key = wallet.key
+    cryptoBalanceProc.command = command
+    cryptoBalanceProc.running = true
+  }
+
+  function storeCryptoBalance(key, amount) {
+    var next = ({})
+    for (var k in service.cryptoBalances) next[k] = service.cryptoBalances[k]
+    next[key] = amount
+    service.cryptoBalances = next
+  }
+
+  Process {
+    id: cryptoPriceProc
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var parsed = Model.parseCryptoPrices(text)
+        if (parsed) {
+          service.cryptoPrices = parsed
+          service.cryptoError = ""
+        } else {
+          service.cryptoError = "unavailable"
+        }
+      }
+    }
+  }
+
+  Process {
+    id: cryptoBalanceProc
+    running: false
+    property string chain: ""
+    property string key: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var amount = Model.parseCryptoBalance(cryptoBalanceProc.chain, text)
+        if (amount !== null) {
+          service.storeCryptoBalance(cryptoBalanceProc.key, amount)
+          service.cryptoError = ""
+        } else if (service.cryptoBalances[cryptoBalanceProc.key] === undefined) {
+          // Only says so when there is nothing to show. A node that hiccups
+          // under a balance already on screen leaves that balance alone.
+          service.cryptoError = "unavailable"
+        }
+      }
+    }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextCryptoBalance)
+  }
+
+  // A price moves in minutes. A wallpaper does not need it in seconds, and
+  // CoinGecko's free tier is a courtesy worth not straining.
+  Timer {
+    interval: 300000
+    repeat: true
+    running: service.cryptoWanted
+    triggeredOnStart: true
+    onTriggered: service.refreshCryptoPrices()
+  }
+
+  // A balance moves when you move it, which is rarely.
+  Timer {
+    interval: 600000
+    repeat: true
+    running: service.cryptoWanted
+    triggeredOnStart: true
+    onTriggered: service.refreshCryptoBalances(true)
+  }
+
   // ------------------------------------------------------------- calendar
   //
   // Google publishes every calendar as an iCalendar file at a private
@@ -1223,6 +1369,41 @@ Item {
 
     function refreshRepos(): string {
       service.refreshRepos(true)
+      return "ok"
+    }
+
+    function crypto(): string {
+      if (!service.cryptoWanted) return "no crypto widget is on"
+      var out = []
+      var coins = Model.cryptoCoinsInUse(service.config)
+      var currencies = Model.cryptoCurrenciesInUse(service.config)
+      for (var i = 0; i < coins.length; i++) {
+        for (var c = 0; c < currencies.length; c++) {
+          var quote = Model.cryptoQuote(service.cryptoPrices, coins[i], currencies[c])
+          out.push(coins[i] + " " + currencies[c] + ": " + (quote
+            ? Model.cryptoMoneyLabel(quote.price, currencies[c])
+              + "  " + Model.cryptoChangeLabel(quote.change)
+            : (service.cryptoError || "not fetched yet")))
+        }
+      }
+      var wallets = service.cryptoWallets
+      for (var w = 0; w < wallets.length; w++) {
+        var held = service.cryptoBalances[wallets[w].key]
+        // Shortened, the way the calendar withholds its address: this answer
+        // goes wherever the caller sends it, and a wallet is not a thing to
+        // print in full for the convenience of a debug command.
+        out.push(Model.cryptoSymbol(wallets[w].chain) + " "
+          + Model.cryptoAddressShort(wallets[w].address) + ": "
+          + (held === undefined || held === null
+            ? (service.cryptoError || "not fetched yet")
+            : Model.cryptoAmountLabel(held)))
+      }
+      return out.join("\n")
+    }
+
+    function refreshCrypto(): string {
+      service.refreshCryptoPrices()
+      service.refreshCryptoBalances(true)
       return "ok"
     }
 

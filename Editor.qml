@@ -361,6 +361,7 @@ Item {
             WidgetInstance {
               anchors.fill: parent
               service: root.service
+              shell: root.shell
               instance: slot.modelData
               widgetSource: root.sourceFor(slot.modelData.type)
             }
@@ -839,6 +840,7 @@ Item {
           WidgetInstance {
             anchors.fill: parent
             service: root.service
+            shell: root.shell
             instance: win.dragging && root.config ? Model.findInstance(root.config, win.dragId) : null
             widgetSource: {
               var inst = win.dragging && root.config ? Model.findInstance(root.config, win.dragId) : null

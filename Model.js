@@ -243,6 +243,73 @@ function catalog() {
       ]
     },
     {
+      type: "crypto",
+      icon: "\uf0d6",
+      name: "Crypto",
+      description: "What a wallet holds and what it is worth, or just the coin's price.",
+      source: "widgets/Crypto.qml",
+      sizes: [[1, 1], [2, 1]],
+      // One per holding. A person with one coin is not who this is for.
+      multiple: true,
+      // Two things are fetched and they go to different places: the price to
+      // CoinGecko, which answers for every coin at once, and the balance to
+      // the chain itself. An address is only ever sent to its own chain's
+      // node, and never to the price host.
+      network: ["api.coingecko.com", "mempool.space", "litecoinspace.org",
+        "ethereum-rpc.publicnode.com", "api.mainnet-beta.solana.com"],
+      settings: [
+        {
+          key: "chain",
+          type: "choice",
+          label: "Chain",
+          defaultValue: "bitcoin",
+          options: [
+            { value: "bitcoin", label: "Bitcoin" },
+            { value: "ethereum", label: "Ethereum" },
+            { value: "solana", label: "Solana" },
+            { value: "litecoin", label: "Litecoin" }
+          ]
+        },
+        {
+          key: "address",
+          type: "text",
+          label: "Address",
+          help: "Empty shows the price alone",
+          defaultValue: ""
+        },
+        {
+          key: "label",
+          type: "text",
+          label: "Label",
+          help: "Empty follows the coin",
+          defaultValue: ""
+        },
+        {
+          key: "currency",
+          type: "choice",
+          label: "Currency",
+          defaultValue: "usd",
+          options: [
+            { value: "usd", label: "USD" },
+            { value: "eur", label: "EUR" },
+            { value: "gbp", label: "GBP" },
+            { value: "inr", label: "INR" },
+            { value: "jpy", label: "JPY" },
+            { value: "aud", label: "AUD" },
+            { value: "cad", label: "CAD" }
+          ]
+        },
+        {
+          // The one dial that matters on a wallpaper somebody else can see.
+          // Off leaves the holding and hides what it is worth.
+          key: "showFiat",
+          type: "boolean",
+          label: "Value in money",
+          defaultValue: true
+        }
+      ]
+    },
+    {
       type: "calendar",
       icon: "\uf073",
       name: "Calendar",

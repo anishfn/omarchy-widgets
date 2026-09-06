@@ -28,8 +28,12 @@ Item {
       return Model.effectiveOpacity(service.config, instance)
     return instance && typeof instance.opacity === "number" ? instance.opacity : Model.DEFAULT_OPACITY
   }
-  readonly property int radius: instance && instance.radius !== undefined
-    ? instance.radius : 20
+  readonly property int radius: {
+    if (service && service.config)
+      return Model.effectiveRadius(service.config, instance)
+    return instance && typeof instance.radius === "number"
+      ? instance.radius : Model.DEFAULT_RADIUS
+  }
 
   readonly property alias card: card
 

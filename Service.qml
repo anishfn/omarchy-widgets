@@ -140,12 +140,16 @@ Item {
   // any card that had its own.
   function setLayoutOpacity(opacity) { apply(Model.setLayoutOpacity(config, opacity)) }
 
+  // The layout's global corner radius, applied to every card, the same deal.
+  function setLayoutRadius(radius) { apply(Model.setLayoutRadius(config, radius)) }
+
   function setOpacity(id, opacity) { apply(Model.setOpacity(config, id, opacity)) }
 
   // Put a card back on the layout's global opacity after it had its own.
   function clearOpacity(id) { apply(Model.clearOpacity(config, id)) }
 
-  // Restore the grid's default scale and opacity, and drop any per-card opacity.
+  // Restore the grid's default scale, opacity and corner radius, and drop any
+  // per-card override of either.
   function resetAppearance() { apply(Model.resetAppearance(config)) }
 
   function openEditor() { service.editing = true }
@@ -1156,6 +1160,12 @@ Item {
     function opacityAll(value: string): string {
       service.setLayoutOpacity(Number(value))
       return String(service.layout.opacity)
+    }
+
+    // The layout's global corner radius, applied to every card, same outline.
+    function radiusAll(value: string): string {
+      service.setLayoutRadius(Number(value))
+      return String(service.layout.radius)
     }
 
     function opacity(id: string, value: string): string {

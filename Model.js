@@ -35,6 +35,16 @@ var MAX_SCALE = 2
 // The opacity every card starts at; a widget can override it on its own.
 var DEFAULT_OPACITY = 0.72
 
+// Corner roundness in pixels, per card. Any value from 0 (square) to 60 is
+// offered; -1 means "follow the shell theme's own corner radius". Past 60 the
+// rounding would crowd out the card's own face, so the knob stops there.
+var MIN_RADIUS = 0
+var MAX_RADIUS = 60
+// The radius every card comes up as; a widget can override it on its own. This
+// is 20 because that is the size a card first looks "deliberately round"
+// without lousing up the corner art — 40 is an important-looking bulge.
+var DEFAULT_RADIUS = 20
+
 // Which edge of the screen the grid hugs.
 var SIDES = ["left", "right"]
 
@@ -59,7 +69,8 @@ var DEFAULT_LAYOUT = {
   marginX: 40,
   marginY: 40,
   scale: 1,
-  opacity: DEFAULT_OPACITY
+  opacity: DEFAULT_OPACITY,
+  radius: DEFAULT_RADIUS
 }
 
 // ---------------------------------------------------------------- catalogue
@@ -676,7 +687,8 @@ function normalizeLayout(raw) {
     marginX: Math.round(clampNumber(source.marginX, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginX)),
     marginY: Math.round(clampNumber(source.marginY, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginY)),
     scale: Math.round(clampNumber(source.scale, MIN_SCALE, MAX_SCALE, DEFAULT_LAYOUT.scale) * 100) / 100,
-    opacity: Math.round(clampNumber(source.opacity, 0, 1, DEFAULT_LAYOUT.opacity) * 100) / 100
+    opacity: Math.round(clampNumber(source.opacity, 0, 1, DEFAULT_LAYOUT.opacity) * 100) / 100,
+    radius: Math.round(clampNumber(source.radius, MIN_RADIUS, MAX_RADIUS, DEFAULT_LAYOUT.radius))
   }
 }
 
@@ -1112,7 +1124,9 @@ function normalizeInstance(raw, index, layout) {
   out.opacity = (raw.opacity === undefined || raw.opacity === null)
     ? null
     : Math.round(clampNumber(raw.opacity, 0, 1, DEFAULT_OPACITY) * 100) / 100
-  out.radius = Math.round(clampNumber(raw.radius, -1, 400, out.radius))
+  out.radius = (raw.radius === undefined || raw.radius === null)
+    ? null
+    : Math.round(clampNumber(raw.radius, -1, 400, DEFAULT_RADIUS))
   out.settings = normalizeSettings(entry, raw.settings)
   return out
 }
@@ -1601,14 +1615,33 @@ function dropOpacityOverrides(config) {
   for (var i = 0; i < config.widgets.length; i++) config.widgets[i].opacity = null
 }
 
-// Back to what the plugin ships with: the grid's default scale and opacity,
-// with no card keeping its own opacity. What was edited is lost — this is the
-// "I moved too many knobs" button.
+// The layout's global corner radius, same outline as `setLayoutOpacity`: it
+// writes over any per-card radius so the whole grid rounds together again.
+function setLayoutRadius(config, radius) {
+  var n = Number(radius)
+  if (!isFinite(n)) return normalizeConfig(config)
+  var next = normalizeConfig(config)
+  next.layout.radius = Math.round(clampNumber(n, MIN_RADIUS, MAX_RADIUS, DEFAULT_LAYOUT.radius))
+  dropRadiusOverrides(next)
+  return next
+}
+
+// With the global radius changed, a card that had its own keeps it no longer,
+// for the same reason the opacity overrides go.
+function dropRadiusOverrides(config) {
+  for (var i = 0; i < config.widgets.length; i++) config.widgets[i].radius = null
+}
+
+// Back to what the plugin ships with: the grid's default scale, opacity and
+// corner radius, with no card keeping its own of either. What was edited is
+// lost — this is the "I moved too many knobs" button.
 function resetAppearance(config) {
   var next = normalizeConfig(config)
   next.layout.scale = DEFAULT_LAYOUT.scale
   next.layout.opacity = DEFAULT_LAYOUT.opacity
   dropOpacityOverrides(next)
+  next.layout.radius = DEFAULT_LAYOUT.radius
+  dropRadiusOverrides(next)
   return next
 }
 
@@ -1639,6 +1672,14 @@ function effectiveOpacity(config, instance) {
   if (instance && typeof instance.opacity === "number") return instance.opacity
   var global = config && config.layout ? config.layout.opacity : undefined
   return typeof global === "number" ? global : DEFAULT_LAYOUT.opacity
+}
+
+// What the card actually rounds: its own override when it set one, otherwise
+// the layout's global radius, else the built-in default.
+function effectiveRadius(config, instance) {
+  if (instance && typeof instance.radius === "number") return instance.radius
+  var global = config && config.layout ? config.layout.radius : undefined
+  return typeof global === "number" ? global : DEFAULT_LAYOUT.radius
 }
 
 // Instances that should be drawn on the output named `screenName`. An empty
@@ -2952,6 +2993,47 @@ function upcomingEvents(events, nowMs, limit, includeAllDay) {
   return out
 }
 
+// Everything that still has to end today, earliest first. The card used to
+// be an agenda for the whole week; a day's limit is not a filter bolted on
+// to that, because the shape is different -- an event that began yesterday
+// and is running now is still today's business, and an event that starts at
+// 1am is not. So the test is the day an event falls in, not the amount of
+// day left in it.
+function todayEvents(events, nowMs, limit, includeAllDay) {
+  var list = Array.isArray(events) ? events : []
+  var now = Number(nowMs)
+  var max = limit > 0 ? limit : 8
+  var out = []
+  if (!isFinite(now)) return out
+  var today = startOfDay(now)
+  for (var i = 0; i < list.length && out.length < max; i++) {
+    var ev = list[i]
+    if (!ev) continue
+    if (ev.allDay && includeAllDay === false) continue
+    var end = ev.end > ev.start ? ev.end : ev.start + 60000
+    if (end <= now) continue
+    if (startOfDay(ev.start) !== today && !(ev.start <= now && end > now)) continue
+    out.push(ev)
+  }
+  return out
+}
+
+// The earliest thing on a day that is not this one, for the small line the
+// card keeps under today's list. One event only: the rest of tomorrow can
+// wait until it is today.
+function nextDayEvent(events, nowMs, daysAhead, includeAllDay) {
+  var list = Array.isArray(events) ? events : []
+  var now = Number(nowMs)
+  if (!isFinite(now)) return null
+  for (var i = 0; i < list.length; i++) {
+    var ev = list[i]
+    if (!ev) continue
+    if (ev.allDay && includeAllDay === false) continue
+    if (daysApart(ev.start, now) === daysAhead) return ev
+  }
+  return null
+}
+
 function padTwo(n) { return n < 10 ? "0" + n : String(n) }
 
 // "14:30", or "2:30 PM" on a twelve-hour clock.
@@ -3501,6 +3583,9 @@ if (typeof module !== "undefined" && module.exports) {
     MAX_ROWS: MAX_ROWS,
     MIN_SCALE: MIN_SCALE,
     MAX_SCALE: MAX_SCALE,
+    MIN_RADIUS: MIN_RADIUS,
+    MAX_RADIUS: MAX_RADIUS,
+    DEFAULT_RADIUS: DEFAULT_RADIUS,
     SIDES: SIDES,
     DEFAULT_LAYOUT: DEFAULT_LAYOUT,
     catalog: catalog,
@@ -3613,9 +3698,11 @@ if (typeof module !== "undefined" && module.exports) {
     setColumns: setColumns,
     setScale: setScale,
     setLayoutOpacity: setLayoutOpacity,
+    setLayoutRadius: setLayoutRadius,
     setOpacity: setOpacity,
     clearOpacity: clearOpacity,
     effectiveOpacity: effectiveOpacity,
+    effectiveRadius: effectiveRadius,
     resetAppearance: resetAppearance,
     widgetsForScreen: widgetsForScreen,
     offWidgets: offWidgets,
@@ -3650,6 +3737,8 @@ if (typeof module !== "undefined" && module.exports) {
     icsExceptions: icsExceptions,
     parseCalendar: parseCalendar,
     upcomingEvents: upcomingEvents,
+    todayEvents: todayEvents,
+    nextDayEvent: nextDayEvent,
     clockLabel: clockLabel,
     eventTimeLabel: eventTimeLabel,
     untilLabel: untilLabel,

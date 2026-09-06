@@ -135,7 +135,6 @@ Item {
         color: root.live ? root.foreground : root.dim
         font.family: root.fontFamily
         font.pixelSize: root.titleSize
-        font.letterSpacing: root.titleSize * 0.14
         renderType: Text.NativeRendering
       }
 
@@ -154,27 +153,27 @@ Item {
       }
     }
 
-    // The power switch. A pill button in the music card's idiom, with the
-    // glyph escaped rather than literal -- a private-use character renders
-    // as nothing if any tool along the way drops it.
-    MusicButton {
+    // The power switch: the very button the omate panel uses in its own
+    // header -- PanelActionButton, same glyph, same colors, same write --
+    // so the card reads as the panel's control, not a lookalike.
+    PanelActionButton {
       id: power
 
-      // nf-md-power. The one glyph on the card, and the one action that
-      // needs no label: the status line beside it says what it did.
-      readonly property int size: Math.round(root.unit * 0.15)
-
-      width: size
-      height: size
       anchors.verticalCenter: parent.verticalCenter
-      prominent: root.petVisible
-      icon: "\uF0425"
-      // Gone rather than greyed when there is no pet: MusicButton draws its
-      // glyph in the accent whether or not it is enabled, and an accent on a
+      // nf-md-power. \u in a QML string takes exactly four hex digits, so
+      // the five-digit codepoint goes through fromCodePoint -- the escape
+      // form parses as U+F042 followed by a literal "5".
+      iconText: String.fromCodePoint(0xF0425)
+      tooltipText: root.petVisible ? "Disable the mate" : "Enable the mate"
+      fontFamily: root.fontFamily
+      foreground: root.petVisible ? root.accent : Qt.alpha(root.foreground, 0.55)
+      bordered: true
+      size: Math.round(root.unit * 0.13)
+      // Gone rather than greyed when there is no pet: an accent on a
       // click-through desktop is a promise that something happens.
       visible: root.live
       enabled: root.live
-      onPressed: {
+      onClicked: {
         if (!root.live) return
         if (typeof root.omate.toggleMateVisible === "function")
           root.omate.toggleMateVisible()
@@ -207,6 +206,16 @@ Item {
     // press from the chip underneath it, which is what keeps a flick that
     // started on a skin from switching to it.
     pressDelay: 0
+
+    // A grab beats an animation: if the row is gliding from an arrow click
+    // and a finger lands on it, the glide has lost the argument.
+    onMovementStarted: skinScroll.stop()
+
+    onContentWidthChanged: clampX()
+    onWidthChanged: clampX()
+    function clampX() {
+      contentX = Math.max(0, Math.min(contentX, Math.max(0, contentWidth - width)))
+    }
 
     Row {
       id: skinRow
@@ -305,20 +314,102 @@ Item {
     }
   }
 
-  // The row's position, drawn only while it is moving -- the Todos rule,
-  // which here also means the indicator is the only sign that more skins
-  // exist, since the row starts at its first chip.
+  // ------------------------------------------------------- the row's arrows
+  //
+  // The flick stays, but a row that scrolls only by flicking keeps its
+  // second half a secret from anyone who never thought to drag a wallpaper.
+  // The arrows sit in the space under the row, one at each end, and step
+  // one chip per click. Each is present only while its direction has
+  // somewhere to go, so the ends of the row are the affordance and the
+  // arrows never pose as decoration.
+
+  // One chip plus its gap: what one click of an arrow is worth.
+  readonly property real chipStep: Math.round(root.unit * 0.36) + Math.round(root.unit * 0.055)
+
+  NumberAnimation {
+    id: skinScroll
+
+    target: skins
+    property: "contentX"
+    duration: 180
+    easing.type: Easing.OutCubic
+  }
+
+  component SkinArrow: Rectangle {
+    id: arrow
+
+    // -1 scrolls toward the first chip, +1 toward the last.
+    property int direction: 1
+
+    width: Math.round(root.unit * 0.12)
+    height: width
+    radius: width / 2
+    color: arrowMouse.containsMouse || arrowMouse.pressed
+      ? Util.alpha(root.foreground, 0.26) : Util.alpha(root.foreground, 0.16)
+    border.width: 1
+    border.color: root.dim
+
+    Behavior on color { ColorAnimation { duration: 90 } }
+
+    Text {
+      anchors.centerIn: parent
+      text: arrow.direction < 0 ? "\u276E" : "\u276F"
+      textFormat: Text.PlainText
+      color: arrowMouse.containsMouse || arrowMouse.pressed
+        ? root.foreground : root.dim
+      font.family: root.fontFamily
+      font.pixelSize: root.smallSize
+      renderType: Text.NativeRendering
+    }
+
+    MouseArea {
+      id: arrowMouse
+
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: {
+        var max = Math.max(0, skins.contentWidth - skins.width)
+        var target = Math.max(0, Math.min(max,
+          skins.contentX + arrow.direction * root.chipStep))
+        if (target === skins.contentX) return
+        skinScroll.to = target
+        skinScroll.start()
+      }
+    }
+  }
+
+  SkinArrow {
+    direction: -1
+    visible: root.live && skins.contentX > 1
+    x: skins.x
+    y: skins.y + skins.height + Math.round(root.unit * 0.02)
+  }
+
+  SkinArrow {
+    direction: 1
+    visible: root.live && skins.contentWidth > skins.width + 1
+      && skins.contentX < skins.contentWidth - skins.width - 1
+    x: skins.x + skins.width - width
+    y: skins.y + skins.height + Math.round(root.unit * 0.02)
+  }
+
+  // The row's position, drawn only while it is moving -- the Todos rule.
+  // It runs between the two arrow slots, the one place in the strip that
+  // belongs to neither arrow.
   Rectangle {
-    readonly property real track: skins.width
-    visible: skins.visible && skins.contentWidth > skins.width + 1
+    readonly property real slot: Math.round(root.unit * 0.12)
+    readonly property real track: skins.width - slot * 2 - Math.round(root.unit * 0.06)
+    visible: root.live && skins.contentWidth > skins.width + 1
       && (skins.movingHorizontally || skins.contentX > 1)
     height: Math.max(2, Math.round(root.unit * 0.012))
     radius: height / 2
     color: Util.alpha(root.foreground, skins.movingHorizontally ? 0.45 : 0.22)
-    y: skins.y + skins.height + Math.round(root.unit * 0.015)
-    width: Math.max(root.unit * 0.12, track * (skins.width / Math.max(1, skins.contentWidth)))
-    x: skins.x + Math.min(track - width,
-      Math.max(0, track * (skins.contentX / Math.max(1, skins.contentWidth))))
+    y: skins.y + skins.height + Math.round(root.unit * 0.02) + slot / 2 - height / 2
+    width: Math.max(root.unit * 0.08, track * (skins.width / Math.max(1, skins.contentWidth)))
+    x: skins.x + slot + Math.round(root.unit * 0.03)
+      + Math.min(track - width,
+        Math.max(0, track * (skins.contentX / Math.max(1, skins.contentWidth))))
   }
 
   // ------------------------------------------------------------ the dials

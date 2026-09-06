@@ -193,17 +193,12 @@ you are working is a distraction you cannot turn off without deleting it.
 - The only motion worth having is in the editor, where you are looking at it
   on purpose.
 
-The editor is where that last line is spent, and only twice. Dropping a widget
-onto an occupied cell moves the occupant, and the occupant *slides* — 130ms,
-and only while the editor is open. A card that teleported out from under the
-one you were holding would read as a glitch; the same card sliding down reads
-as the grid making room, which is the one thing the gesture has to
+The editor is where that last line is spent, and it is spent once. Dropping a
+widget onto an occupied cell moves the occupant, and the occupant *slides* —
+130ms, and only while the editor is open. A card that teleported out from
+under the one you were holding would read as a glitch; the same card sliding
+down reads as the grid making room, which is the one thing the gesture has to
 communicate.
-
-The inspector crossing the screen is the other: it docks to the side its
-widget is not on, so selecting a card on the other side moves it. Sliding says
-the panel followed your selection; appearing says a second panel exists. Same
-130ms, same reason.
 
 A slideshow is not motion in this sense. A photo card changing picture is a
 value becoming the new value, and it is a cut with nothing animated across it

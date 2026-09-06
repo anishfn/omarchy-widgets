@@ -619,9 +619,9 @@ Item {
           // --------------------------------------------------------- the bar
           //
           // The grid, and nothing else: which side it hugs, how wide it is, how
-          // big and how solid its cards are. Four controls, each with its name
-          // above it rather than beside it, so the names read as one row and
-          // the controls as another.
+          // big, how transparent and how rounded its cards are. Five controls,
+          // each with its name above it rather than beside it, so the names read
+          // as one row and the controls as another.
 
           BorderSurface {
             id: toolbar
@@ -769,13 +769,44 @@ Item {
                   strength: 0.25
                 }
 
+                // The whole grid's corner rounding, in pixels. Moving it writes
+                // over any card's own radius, so the whole grid rounds again.
+                Field {
+                  anchors.bottom: parent.bottom
+                  label: "Radius"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+
+                  NumberField {
+                    label: ""
+                    value: Math.round(root.layout.radius)
+                    from: Math.round(Model.MIN_RADIUS)
+                    to: Math.round(Model.MAX_RADIUS)
+                    stepSize: 2
+                    fieldWidth: Style.space(76)
+                    foreground: root.foreground
+                    accent: root.accent
+                    fontFamily: root.fontFamily
+                    onModified: function(v) { if (root.service) root.service.setLayoutRadius(Number(v)) }
+                  }
+                }
+
+                PanelSeparator {
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(4)
+                  width: 1
+                  height: Style.space(24)
+                  foreground: root.foreground
+                  strength: 0.25
+                }
+
                 // A small escape hatch from both the knobs above: scale and
                 // opacity (grid-wide and every card's) go back to their
                 // defaults.
                 Button {
                   anchors.bottom: parent.bottom
                   text: "Reset"
-                  tooltipText: "Restore the default scale and opacity"
+                  tooltipText: "Restore the default scale, opacity and corner radius"
                   bordered: true
                   foreground: root.foreground
                   accent: root.accent

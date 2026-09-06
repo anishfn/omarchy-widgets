@@ -31,7 +31,7 @@
 
 ```bash
 omarchy plugin add https://github.com/anishfn/omarchy-widgets.git
-omarchy plugin enable io.github.anishfn.widgets
+omarchy plugin enable anishfn.widgets
 ```
 
 That is the whole install. Plugins land disabled so you can read the code
@@ -48,17 +48,32 @@ curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/instal
 | | |
 |---|---|
 | **Clone URL** | `https://github.com/anishfn/omarchy-widgets.git` |
-| **Plugin id** | `io.github.anishfn.widgets` |
+| **Plugin id** | `anishfn.widgets` |
 | **Requires** | Omarchy 4 (the Quickshell shell) |
-| **Update** | `~/.config/omarchy/plugins/io.github.anishfn.widgets/update` |
-| **Remove** | `omarchy plugin remove io.github.anishfn.widgets` |
+| **Update** | `~/.config/omarchy/plugins/anishfn.widgets/update` |
+| **Remove** | `omarchy plugin remove anishfn.widgets` |
 
 <sub>Removing the plugin leaves `~/.config/omarchy/widgets.json` alone.</sub>
 
 > **`omarchy plugin add` does not upgrade.** It refuses when the plugin is
 > already installed, so running the install line a second time reports an
 > error rather than pulling anything. Use `update` — either the script above
-> or `omarchy plugin update io.github.anishfn.widgets`.
+> or `omarchy plugin update anishfn.widgets`.
+
+> **The id changed in 0.2.0.** It was `io.github.anishfn.widgets`. An id is
+> also a directory name, so an install made before the change sits under the
+> old one and none of the commands above will find it. Remove it and add it
+> again:
+>
+> ```bash
+> omarchy plugin remove io.github.anishfn.widgets
+> omarchy plugin add https://github.com/anishfn/omarchy-widgets.git
+> omarchy plugin enable anishfn.widgets
+> ```
+>
+> Your desktop survives the round trip — `remove` leaves
+> `~/.config/omarchy/widgets.json` where it is, and the new install reads it
+> back.
 
 ---
 
@@ -214,7 +229,7 @@ version and the commit each plugin is on:
 
 ```
 Updated
-  io.github.anishfn.widgets    0.1.0 → 0.2.0         3374b22 → 5b634fe
+  anishfn.widgets              0.1.0 → 0.2.0         3374b22 → 5b634fe
   palccod.omate                0.4.0 (unchanged)     742a67b → 9c1d004
 ```
 
@@ -225,13 +240,13 @@ manifest, which is a thing worth knowing about a plugin you just pulled.
 ### Updating
 
 ```bash
-~/.config/omarchy/plugins/io.github.anishfn.widgets/update
+~/.config/omarchy/plugins/anishfn.widgets/update
 ```
 
 Or by hand, which is the same thing without the companions or the restart:
 
 ```bash
-omarchy plugin update io.github.anishfn.widgets
+omarchy plugin update anishfn.widgets
 omarchy restart shell
 ```
 
@@ -240,13 +255,13 @@ only, and rolls back if the result fails validation.
 
 ### From a local copy
 
-Put the folder at `~/.config/omarchy/plugins/io.github.anishfn.widgets/` and
+Put the folder at `~/.config/omarchy/plugins/anishfn.widgets/` and
 enable the same id. A folder that is not a git checkout has nothing to pull
 from, so `update` will say so rather than pretending.
 
 ```bash
-omarchy plugin disable io.github.anishfn.widgets   # off, config kept
-omarchy plugin remove io.github.anishfn.widgets    # gone
+omarchy plugin disable anishfn.widgets   # off, config kept
+omarchy plugin remove anishfn.widgets    # gone
 ```
 
 ## Turning widgets on and off
@@ -1087,7 +1102,7 @@ omarchy-shell widgets todos         # the list, as it was parsed
 omarchy-shell widgets todo '' 3 true # tick line 3 of the only list off
 omarchy-shell widgets reload        # re-read the file now
 
-omarchy-shell shell toggle io.github.anishfn.widgets   # open the bar popup
+omarchy-shell shell toggle anishfn.widgets   # open the bar popup
 ```
 
 `add` and `duplicate` answer with the id of the widget they made, so a script

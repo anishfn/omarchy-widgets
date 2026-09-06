@@ -306,12 +306,13 @@ grid appears under your widgets, and you can drag them around. Escape or
 **Done** closes it.
 
 <p align="center">
-  <img src="assets/editor.jpg" alt="The layout editor: the grid under the widgets, the tray of switched-off widgets along the bottom, the bar of layout controls beneath it, and the inspector docked to the right showing the selected widget's settings" width="880">
+  <img src="assets/editor.jpg" alt="The layout editor: the grid under the widgets, and the chrome in one bottom-centred column — the inspector for the selected widget with its settings flowing four to a line, the tray of switched-off widgets, and the bar of layout controls" width="880">
 </p>
 
 <p align="center">
-  <sub>The grid under the cards, the tray of switched-off widgets, the layout
-  bar, and the inspector — docked to the side its widget is not on.</sub>
+  <sub>The grid under the cards, and the editor's chrome as one column: the
+  inspector for whatever is selected, the tray of widgets that are off, and
+  the layout bar.</sub>
 </p>
 
 ### The bar, the tray and the inspector

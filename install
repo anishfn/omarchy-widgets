@@ -35,7 +35,7 @@
 
 set -uo pipefail
 
-ID="io.github.anishfn.widgets"
+ID="anishfn.widgets"
 URL="https://github.com/anishfn/omarchy-widgets.git"
 PLUGINS_DIR="$HOME/.config/omarchy/plugins"
 
@@ -242,5 +242,5 @@ done
 cat <<'NEXT'
 
   Click Widgets in the bar to choose what is on screen.
-  Update later with:  ~/.config/omarchy/plugins/io.github.anishfn.widgets/update
+  Update later with:  ~/.config/omarchy/plugins/anishfn.widgets/update
 NEXT

@@ -16,7 +16,7 @@ import "Model.js" as Model
 // used to be a list you read is a list you scan.
 BarWidget {
   id: root
-  moduleName: "io.github.anishfn.widgets"
+  moduleName: "anishfn.widgets"
 
   readonly property var service: bar && bar.shell && typeof bar.shell.serviceFor === "function"
     ? bar.shell.serviceFor(moduleName) : null

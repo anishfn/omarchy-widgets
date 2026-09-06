@@ -23,7 +23,7 @@
 
 set -uo pipefail
 
-ID="io.github.anishfn.widgets"
+ID="anishfn.widgets"
 PLUGINS_DIR="$HOME/.config/omarchy/plugins"
 
 COMPANIONS=(palccod.omate)

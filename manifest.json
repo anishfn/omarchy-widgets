@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.anishfn.widgets",
+  "id": "anishfn.widgets",
   "name": "Widgets",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "anishfn",
   "license": "MIT",
   "description": "Desktop widgets that sit on your wallpaper and take their colors from your Omarchy theme. Choose which ones are on screen from the bar.",

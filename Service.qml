@@ -1372,6 +1372,41 @@ Item {
       return "ok"
     }
 
+    function crypto(): string {
+      if (!service.cryptoWanted) return "no crypto widget is on"
+      var out = []
+      var coins = Model.cryptoCoinsInUse(service.config)
+      var currencies = Model.cryptoCurrenciesInUse(service.config)
+      for (var i = 0; i < coins.length; i++) {
+        for (var c = 0; c < currencies.length; c++) {
+          var quote = Model.cryptoQuote(service.cryptoPrices, coins[i], currencies[c])
+          out.push(coins[i] + " " + currencies[c] + ": " + (quote
+            ? Model.cryptoMoneyLabel(quote.price, currencies[c])
+              + "  " + Model.cryptoChangeLabel(quote.change)
+            : (service.cryptoError || "not fetched yet")))
+        }
+      }
+      var wallets = service.cryptoWallets
+      for (var w = 0; w < wallets.length; w++) {
+        var held = service.cryptoBalances[wallets[w].key]
+        // Shortened, the way the calendar withholds its address: this answer
+        // goes wherever the caller sends it, and a wallet is not a thing to
+        // print in full for the convenience of a debug command.
+        out.push(Model.cryptoSymbol(wallets[w].chain) + " "
+          + Model.cryptoAddressShort(wallets[w].address) + ": "
+          + (held === undefined || held === null
+            ? (service.cryptoError || "not fetched yet")
+            : Model.cryptoAmountLabel(held)))
+      }
+      return out.join("\n")
+    }
+
+    function refreshCrypto(): string {
+      service.refreshCryptoPrices()
+      service.refreshCryptoBalances(true)
+      return "ok"
+    }
+
     function refreshGithub(): string {
       service.refreshContributions(true)
       return "ok"

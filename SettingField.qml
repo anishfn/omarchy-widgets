@@ -61,29 +61,42 @@ Column {
   Item {
     visible: root.kind === "boolean"
     width: root.width
-    height: visible ? Style.spacing.controlHeight : 0
+    // As tall as a named control, with the switch sitting on the line those
+    // controls sit on. The settings are laid out side by side, and a switch a
+    // third of a line higher than the field beside it reads as a mistake
+    // rather than as a different kind of control.
+    height: visible
+      ? Style.font.caption + Style.spacing.labelGap + Style.spacing.controlHeight
+      : 0
 
-    Text {
+    Item {
       anchors.left: parent.left
-      anchors.right: knob.left
-      anchors.rightMargin: Style.spacing.md
-      anchors.verticalCenter: parent.verticalCenter
-      elide: Text.ElideRight
-      textFormat: Text.PlainText
-      text: root.spec ? String(root.spec.label) : ""
-      color: root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.bodySmall
-    }
-
-    ToggleSwitch {
-      id: knob
       anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      checked: root.value === true
-      foreground: root.foreground
-      accent: root.accent
-      onToggled: root.committed(!(root.value === true))
+      anchors.bottom: parent.bottom
+      height: Style.spacing.controlHeight
+
+      Text {
+        anchors.left: parent.left
+        anchors.right: knob.left
+        anchors.rightMargin: Style.spacing.md
+        anchors.verticalCenter: parent.verticalCenter
+        elide: Text.ElideRight
+        textFormat: Text.PlainText
+        text: root.spec ? String(root.spec.label) : ""
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      ToggleSwitch {
+        id: knob
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        checked: root.value === true
+        foreground: root.foreground
+        accent: root.accent
+        onToggled: root.committed(!(root.value === true))
+      }
     }
   }
 

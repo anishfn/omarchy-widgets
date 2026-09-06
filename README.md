@@ -626,8 +626,8 @@ blank value goes back to following whatever is playing.
 
 ## Omate
 
-The desktop pet, if you run Omate — its power
-switch, its skins, and its two dials, on one card instead of in a panel.
+The desktop pet, if you run Omate — its power switch, its skins, and its
+dials, on one card instead of in a panel.
 
 The card does not own anything about the pet. Every control writes through to
 the Omate plugin's own settings, reached in-process, so the card and the pet's
@@ -641,11 +641,17 @@ inert rather than drawing controls that answer to nothing.
   that pack's idle animation with the pet's own sprite component; a tap makes
   it the pet. The row flicks sideways when the packs do not fit, the second
   widget here to scroll (the todo list was the first).
-- **Size** is the pet's scale, one to six.
-- **Cursor** turns the cursor chase on and off, and **Speed** sets how often
-  it re-chases, from five seconds to an hour on a curve — the interesting
-  half of that range is all below a minute. Sliders commit when you let go,
-  not per pixel; a drag is not six writes to disk.
+- **Roaming** is the same switch as the panel's: whether the pet wanders or
+  stays where you put it.
+- **Naps / chatter** are the two cadences in minutes, stepped with `−` and `+`
+  rather than typed — the desktop layer never takes the keyboard. Same ranges
+  the panel offers: 0–120 and 1–60.
+- **Size** is the pet's scale, one to six. The slider commits when you let go,
+  not per pixel; a drag across six sizes is not six writes to disk.
+- **Chase cursor** is off, or one of four cadences — 10s, 1 min, 5 min,
+  30 min — in the panel's own wording. A cooldown set over the IPC that has no
+  chip of its own is spelled out beside the row rather than leaving it looking
+  unset.
 
 The pet's name is not set here — pets have names of their own, in their packs.
 The **Owner name** field in the editor is yours, and it is what the pet calls

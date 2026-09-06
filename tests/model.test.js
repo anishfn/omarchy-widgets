@@ -2869,3 +2869,65 @@ test("a secret never becomes the name of a widget", () => {
   assert.equal(shown, "Calendar · calendar")
   assert.equal(Model.instanceLabel(Model.findInstance(config, "calendar")), "")
 })
+
+test("a path from another plugin becomes a URL a Loader can take", () => {
+  // omate hands its paths back percent-decoded, so a plugin installed under a
+  // directory with a space in it has to be encoded again -- an unencoded space
+  // is a url that resolves to nothing, silently, and a skin row of empty boxes.
+  assert.equal(Model.pluginFileUrl("/home/a/plugins/palccod.omate/PetSprite.qml"),
+    "file:///home/a/plugins/palccod.omate/PetSprite.qml")
+  assert.equal(Model.pluginFileUrl("/home/a b/omate/PetSprite.qml"),
+    "file:///home/a%20b/omate/PetSprite.qml")
+  assert.equal(Model.pluginFileUrl("/home/a#b?c/PetSprite.qml"),
+    "file:///home/a%23b%3Fc/PetSprite.qml")
+
+  // Already a URL: passed through rather than prefixed twice.
+  assert.equal(Model.pluginFileUrl("file:///home/a/PetSprite.qml"),
+    "file:///home/a/PetSprite.qml")
+
+  // Anything that is neither is refused rather than guessed at. The caller
+  // reads the empty string as "do not draw a preview" and shows the name.
+  for (const nothing of ["", "relative/PetSprite.qml", undefined, null, "qrc:/x"]) {
+    assert.equal(Model.pluginFileUrl(nothing), "", String(nothing))
+  }
+})
+
+test("the chase row says what it is doing, including cadences it has no chip for", () => {
+  assert.equal(Model.chaseLabel(true, 10), "Playful")
+  assert.equal(Model.chaseLabel(true, 60), "Now and then")
+  assert.equal(Model.chaseLabel(true, 300), "Occasional")
+  assert.equal(Model.chaseLabel(true, 1800), "Rare")
+
+  // A cooldown set over omate's IPC is a legitimate value with no chip of its
+  // own. Spelled out, so the row reads as a setting rather than as unset.
+  assert.equal(Model.chaseLabel(true, 42), "Every 42s")
+  assert.equal(Model.chaseLabel(true, 41.6), "Every 42s")
+
+  // Off is off whatever the cooldown says, and a cooldown nobody has written
+  // yet is not a number to put in a sentence.
+  assert.equal(Model.chaseLabel(false, 10), "Off")
+  assert.equal(Model.chaseLabel(true, undefined), "Off")
+  assert.equal(Model.chaseLabel(true, "nonsense"), "Off")
+})
+
+test("a number read from another plugin never reaches a control as NaN", () => {
+  // Math.round(undefined) is NaN, and NaN assigned to an `int` property is a
+  // type error and a silent zero -- a nap cadence of zero minutes, from a key
+  // omate simply had not written yet.
+  assert.equal(Model.settingNumber(undefined, 10, 0, 120), 10)
+  assert.equal(Model.settingNumber(null, 10, 0, 120), 10)
+  assert.equal(Model.settingNumber("nonsense", 4, 1, 60), 4)
+  assert.equal(Model.settingNumber("", 4, 1, 60), 4)
+
+  assert.equal(Model.settingNumber(30, 10, 0, 120), 30)
+  assert.equal(Model.settingNumber("30", 10, 0, 120), 30)
+  assert.equal(Model.settingNumber(29.6, 10, 0, 120), 30)
+
+  // Clamped to what the control actually offers, both ends.
+  assert.equal(Model.settingNumber(9000, 10, 0, 120), 120)
+  assert.equal(Model.settingNumber(-5, 4, 1, 60), 1)
+
+  // A fallback outside the range is still clamped: the floor wins over a
+  // default that no longer makes sense.
+  assert.equal(Model.settingNumber(undefined, undefined, 1, 6), 1)
+})

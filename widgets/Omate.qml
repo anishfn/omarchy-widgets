@@ -62,13 +62,29 @@ Item {
     && typeof omate.updateSettings === "function"
     && omate.initialized !== false
 
-  // What the power switch is showing right now. While a write is in flight
-  // the local flag leads and the service catches up; the rest of the time
-  // the service is the truth.
-  property bool powerDraft: false
+  // What the power switch is showing right now. omate's toggle is a plain
+  // in-process call that lands before the next frame, so there is no write in
+  // flight to draw over: the service is the truth, and a card with no service
+  // has nothing to show.
   readonly property bool petVisible: live
-    ? (omate.settings ? omate.settings.visible !== false : true)
-    : powerDraft
+    && (omate.settings ? omate.settings.visible !== false : true)
+
+  // Where omate keeps PetSprite.qml. `pluginFile` resolves a relative path
+  // against the service's own file, which is the plugin directory by
+  // definition -- the one way to find a sibling of a service you do not own.
+  // Empty when omate is not there or does not offer it, and the chips fall
+  // back to their names rather than to an empty box.
+  readonly property url spriteSource: live && typeof omate.pluginFile === "function"
+    ? Model.pluginFileUrl(omate.pluginFile("PetSprite.qml"))
+    : ""
+
+  // The one place this card writes to the pet. Guarded here rather than at
+  // each call site, because a control can be released after omate has gone --
+  // a slider drag outlives the plugin that was disabled halfway through it.
+  function writeSettings(patch) {
+    if (!live) return
+    omate.updateSettings(patch)
+  }
 
   // The owner's name. The card's own setting wins -- it is what the editor
   // edits -- and a blank falls through to whatever omate already has, so
@@ -84,13 +100,17 @@ Item {
   // Push the editor's owner name through to the pet. Only a non-empty name
   // is pushed: blank means "no opinion from this card", and omate sanitizes
   // on its side anyway, so this is a nudge, not an authority.
+  // Both directions matter: the name changing, and omate turning up to hear
+  // it. A card configured before the pet was installed would otherwise hold a
+  // name it never said.
   onSettingsChanged: pushOwnerName()
+  onLiveChanged: pushOwnerName()
   function pushOwnerName() {
     if (!live) return
     var name = String(settings.label || "").trim()
     if (name.length === 0) return
     if (omate.settings && omate.settings.userName === name) return
-    omate.updateSettings({ userName: name })
+    writeSettings({ userName: name })
   }
 
   // ------------------------------------------------------------- the paint
@@ -105,7 +125,8 @@ Item {
     spacing: Math.round(root.unit * 0.05)
 
     Column {
-      width: parent.width - power.width - parent.spacing
+      // Row leaves no gap for a hidden switch, so neither does this.
+      width: parent.width - (power.visible ? power.width + parent.spacing : 0)
       spacing: Math.round(root.unit * 0.02)
 
       Text {
@@ -148,9 +169,13 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       prominent: root.petVisible
       icon: "\uF0425"
+      // Gone rather than greyed when there is no pet: MusicButton draws its
+      // glyph in the accent whether or not it is enabled, and an accent on a
+      // click-through desktop is a promise that something happens.
+      visible: root.live
       enabled: root.live
       onPressed: {
-        root.powerDraft = !root.petVisible
+        if (!root.live) return
         if (typeof root.omate.toggleMateVisible === "function")
           root.omate.toggleMateVisible()
       }
@@ -227,11 +252,9 @@ Item {
             y: Math.round(root.unit * 0.025)
             width: parent.width - Math.round(root.unit * 0.05)
             height: parent.height - Math.round(root.unit * 0.12)
-            // Gate on presence rather than type: a url property comes back
-            // from JS as a value whose typeof is not reliably "string".
-            active: root.live && omate.pluginDir !== undefined
+            active: String(root.spriteSource).length > 0
 
-            source: active ? omatePluginUrl(root.omate.pluginDir) + "PetSprite.qml" : ""
+            source: root.spriteSource
 
             onLoaded: bindSprite()
             function bindSprite() {
@@ -280,13 +303,6 @@ Item {
         }
       }
     }
-  }
-
-  // omate's pluginDir may or may not carry its trailing slash depending on
-  // how the URL resolves; a loader source needs exactly one.
-  function omatePluginUrl(dir) {
-    var s = String(dir)
-    return s.endsWith("/") ? s : s + "/"
   }
 
   // The row's position, drawn only while it is moving -- the Todos rule,
@@ -395,19 +411,21 @@ Item {
         spacing: Math.round(root.unit * 0.06)
 
         DialStepper {
-          value: root.live && omate.settings ? Math.round(omate.settings.sleepMinutes) : 10
+          value: Model.settingNumber(
+            root.live && omate.settings ? omate.settings.sleepMinutes : undefined, 10, 0, 120)
           from: 0
           to: 120
           enabled: root.live
-          onChange: function (v) { omate.updateSettings({ sleepMinutes: v }) }
+          onChange: function (v) { root.writeSettings({ sleepMinutes: v }) }
         }
 
         DialStepper {
-          value: root.live && omate.settings ? Math.round(omate.settings.chatterMinutes) : 4
+          value: Model.settingNumber(
+            root.live && omate.settings ? omate.settings.chatterMinutes : undefined, 4, 1, 60)
           from: 1
           to: 60
           enabled: root.live
-          onChange: function (v) { omate.updateSettings({ chatterMinutes: v }) }
+          onChange: function (v) { root.writeSettings({ chatterMinutes: v }) }
         }
       }
     }
@@ -420,10 +438,10 @@ Item {
       from: 1
       to: 6
       step: 1
-      value: root.live && omate.settings ? omate.petScale : 1
+      value: Model.settingNumber(root.live ? omate.petScale : undefined, 1, 1, 6)
       format: function (v) { return String(Math.round(v)) }
       enabled: root.live
-      onCommit: function (v) { omate.updateSettings({ scale: Math.round(v) }) }
+      onCommit: function (v) { root.writeSettings({ scale: Math.round(v) }) }
     }
 
     Column {
@@ -444,19 +462,11 @@ Item {
       ]
       readonly property string chaseValue: root.live && root.omate.cursorChase
         ? String(root.omate.chaseCooldownSec) : "off"
-      // The panel's wording. A cooldown set from the IPC is a legitimate
-      // value with no chip of its own, so it is spelled out rather than
-      // leaving the row looking unset.
-      readonly property string chaseDescription: {
-        if (!root.live || !root.omate.cursorChase) return "Off"
-        switch (root.omate.chaseCooldownSec) {
-          case 10: return "Playful"
-          case 60: return "Now and then"
-          case 300: return "Occasional"
-          case 1800: return "Rare"
-        }
-        return "Every " + root.omate.chaseCooldownSec + "s"
-      }
+      // The panel's wording, spelled out in Model.js so the cadence a chip
+      // does not cover still reads as a setting rather than as nothing.
+      readonly property string chaseDescription: Model.chaseLabel(
+        root.live && root.omate.cursorChase === true,
+        root.live ? root.omate.chaseCooldownSec : 0)
 
       width: parent.width
       spacing: Math.round(root.unit * 0.025)

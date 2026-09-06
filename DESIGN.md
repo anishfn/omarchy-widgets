@@ -212,10 +212,23 @@ grid making room, which is the one thing the gesture has to communicate.
   eleventh item into a card that cannot reach it is worse than letting it be
   reached.
 
-  Do not read that as the rule loosening. A scrolling list is still the wrong
-  shape for almost everything: it is content you read a line at a time, and a
-  wallpaper is read at a glance. If your widget wants one, the question to
-  answer first is whether it wants to be a panel.
+  **`omate` is the second exception, and it is the widest one.** It is a
+  power switch, a scrolling row of skins, a roaming toggle, two steppers, a
+  size slider and a row of cadence chips — a panel's worth of controls on a
+  card, against a rule that asks for one. What earns it: the pet is *already
+  on the desktop*, so its controls are the one case where the card and the
+  thing it controls are looking at each other, and every one of them writes
+  through to the omate plugin's own settings rather than owning any state of
+  its own. It is not a settings button opening more interface; it is the
+  interface, in place.
+
+  It is also the limit. A third card of this shape is a panel, and the answer
+  to the next one is no.
+
+  Do not read either of those as the rule loosening. A scrolling list is still
+  the wrong shape for almost everything: it is content you read a line at a
+  time, and a wallpaper is read at a glance. If your widget wants one, the
+  question to answer first is whether it wants to be a panel.
 
   Three things follow, and all three are on you:
 

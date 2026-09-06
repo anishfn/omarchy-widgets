@@ -13,6 +13,11 @@ var SCHEMA_VERSION = 2
 // an unbounded one would exhaust the shell long before anyone could read it.
 var MAX_WIDGETS = 64
 var MAX_STRING = 256
+// Paths get their own ceiling. 256 characters is generous for a label and
+// mean for a file somebody actually has: a photograph three directories deep
+// with the camera's own name on it clears it easily, and a truncated path is
+// a setting that silently points at nothing.
+var MAX_PATH = 1024
 var MAX_COLUMNS = 6
 var MAX_ROWS = 24
 var MAX_MARGIN = 4000
@@ -63,10 +68,16 @@ var DEFAULT_LAYOUT = {
 // Everything else — the bar popup, the editor, the config file, the layout on
 // screen — is driven off this list, so nothing else has to learn the new name.
 //
+// `icon` is one glyph, from the theme's own Nerd Font, and it is what makes a
+// list of these scannable once there are more than a handful: the bar popup
+// and the editor's tray both lead with it, and a row you find by its shape is
+// found faster than one you have to read. One glyph, no colour of its own.
+//
 // `sizes` is every footprint the type is allowed to take, as [cols, rows] in
 // cells, first one being its default. The editor offers exactly these, which
 // is how a type says "I read well wide" without anything else having to know
-// why.
+// why. A size wider than the grid the user has is dropped rather than
+// offered, so a type may list one without every grid having to be that wide.
 //
 // `settings` is the type's whole tunable surface, and it is a schema rather
 // than a bag of defaults: each entry carries the key, how to edit it, and
@@ -82,12 +93,16 @@ var DEFAULT_LAYOUT = {
 // widget that can never say anything different from the one beside it.
 //
 // Supported setting types: "text", "boolean", "choice" (needs `options`),
-// and "timezone" (an IANA zone name, offered as a searchable list).
+// "timezone" (an IANA zone name, offered as a searchable list), and "path"
+// (a file or a directory, chosen through the desktop's own file chooser --
+// `pathKinds` lists which of "file", "image" and "folder" it may be, and
+// `extensions` is the space-separated list the chooser filters on).
 
 function catalog() {
   return [
     {
       type: "clock",
+      icon: "\uf017",
       name: "Clock",
       description: "The time, in any timezone, and how far that is from your own.",
       source: "widgets/Clock.qml",
@@ -132,6 +147,7 @@ function catalog() {
     },
     {
       type: "weather",
+      icon: "\uf0c2",
       name: "Weather",
       description: "Now, and today's range, for wherever Omarchy points.",
       source: "widgets/Weather.qml",
@@ -170,6 +186,7 @@ function catalog() {
     },
     {
       type: "github",
+      icon: "\uf09b",
       name: "GitHub",
       description: "A year of contributions, as many weeks as the card can hold.",
       source: "widgets/Github.qml",
@@ -197,6 +214,7 @@ function catalog() {
     },
     {
       type: "repo-pulse",
+      icon: "\uf005",
       name: "Repo pulse",
       description: "Stars, forks, issues and open pull requests for a repository.",
       source: "widgets/RepoPulse.qml",
@@ -226,6 +244,7 @@ function catalog() {
     },
     {
       type: "calendar",
+      icon: "\uf073",
       name: "Calendar",
       description: "What is next, from your Google Calendar's secret iCal address.",
       source: "widgets/Calendar.qml",
@@ -280,6 +299,7 @@ function catalog() {
     },
     {
       type: "todos",
+      icon: "\uf046",
       name: "Todos",
       description: "Today's list, from a text file. Tick things off; the title opens it.",
       source: "widgets/Todos.qml",
@@ -295,8 +315,12 @@ function catalog() {
       interactive: true,
       settings: [
         {
+          // A path rather than free text, so it comes with the chooser. The
+          // value is the same string it always was and an old config still
+          // reads: only the control changed.
           key: "file",
-          type: "text",
+          type: "path",
+          pathKinds: ["file"],
           label: "List file",
           help: "~/.config/omarchy/todos.txt",
           defaultValue: ""
@@ -330,6 +354,7 @@ function catalog() {
     },
     {
       type: "music",
+      icon: "\uf001",
       name: "Music",
       description: "What is playing, how far in, and the transport for it.",
       source: "widgets/Music.qml",
@@ -372,6 +397,7 @@ function catalog() {
     },
     {
       type: "omate",
+      icon: "\uf1b0",
       name: "Omate",
       description: "The desktop pet: show and hide it, pick its skin, size it, set how fast it chases the cursor.",
       source: "widgets/Omate.qml",
@@ -394,6 +420,80 @@ function catalog() {
           type: "text",
           label: "Owner name",
           help: "What the pet calls you",
+          defaultValue: ""
+        }
+      ]
+    },
+    {
+      type: "photo",
+      name: "Photos",
+      description: "A picture of your own, or a folder of them, one at a time.",
+      icon: "\uf03e",
+      source: "widgets/Photo.qml",
+      // The one type in the set where a bigger card is a different picture
+      // rather than the same one stretched: a photograph is a crop, and every
+      // footprint crops it differently. So it offers more sizes than anything
+      // else here, and the editor answers that with a list rather than a
+      // button you press until the right one comes round.
+      sizes: [[2, 2], [1, 1], [2, 1], [1, 2], [3, 2], [2, 3], [3, 3]],
+      // One per picture. Two photographs on a wall is the obvious thing to
+      // want, and each is a different file.
+      multiple: true,
+      settings: [
+        {
+          // One path, meaning two things, decided by what it points at: a
+          // file is that photograph, a directory is everything in it, shown
+          // one at a time. That is the same choice the chooser already asks
+          // ("pick a file" or "pick a folder"), so making it a second setting
+          // would be asking twice.
+          key: "path",
+          type: "path",
+          label: "Picture",
+          help: "An image, or a folder of them",
+          pathKinds: ["image", "folder"],
+          extensions: "jpg jpeg png webp gif bmp",
+          defaultValue: ""
+        },
+        {
+          // Seconds, as a choice rather than a number, because the useful
+          // ones are decades apart and nobody wants to type 1800. Only read
+          // when the path is a folder; a single picture has nothing to
+          // change to.
+          key: "interval",
+          type: "choice",
+          label: "Change every",
+          defaultValue: "300",
+          options: [
+            { value: "0", label: "Never" },
+            { value: "30", label: "30 seconds" },
+            { value: "300", label: "5 minutes" },
+            { value: "1800", label: "30 minutes" },
+            { value: "3600", label: "An hour" }
+          ]
+        },
+        {
+          key: "shuffle",
+          type: "boolean",
+          label: "Shuffle",
+          defaultValue: false
+        },
+        {
+          key: "fit",
+          type: "choice",
+          label: "Fit",
+          defaultValue: "fill",
+          options: [
+            { value: "fill", label: "Fill the card" },
+            { value: "contain", label: "Whole picture" }
+          ]
+        },
+        {
+          // Doubles as the name the popup and the tray use to tell two of
+          // these apart, which is the `label` convention every type shares.
+          key: "label",
+          type: "text",
+          label: "Caption",
+          help: "Empty shows none",
           defaultValue: ""
         }
       ]
@@ -475,6 +575,55 @@ function isAllowedSize(type, cols, rows) {
   return false
 }
 
+// The glyph a type wears in a list. Always a string -- empty when a type has
+// not chosen one -- so a caller can draw it without first asking whether it
+// is there.
+function iconFor(type) {
+  var entry = catalogEntry(type)
+  return entry && typeof entry.icon === "string" ? entry.icon : ""
+}
+
+// A footprint written the way the editor says it: "2 × 1".
+function sizeLabel(cols, rows) {
+  return String(Math.round(Number(cols) || 1)) + " \u00d7 " + String(Math.round(Number(rows) || 1))
+}
+
+// The footprints a type offers that a grid this wide can actually hold.
+//
+// The catalogue is free to list a size wider than anybody's grid -- the photo
+// card lists three of them -- because the alternative is a type whose widest
+// composition nobody with a six-column grid can ever reach. This is the one
+// place that is narrowed down, so the editor offers only sizes that will fit
+// and nothing downstream has to ask again.
+//
+// A type none of whose sizes fit still answers with its narrowest, because
+// every answer here has to be a size the type declared: a footprint invented
+// by clamping is one `isAllowedSize` would refuse a moment later.
+function sizesWithin(type, maxCols) {
+  var limit = Math.round(clampNumber(maxCols, 1, MAX_COLUMNS, MAX_COLUMNS))
+  var sizes = sizesFor(type)
+  var out = []
+  var narrowest = sizes[0]
+  for (var i = 0; i < sizes.length; i++) {
+    if (sizes[i][0] <= limit) out.push(sizes[i])
+    if (sizes[i][0] < narrowest[0]) narrowest = sizes[i]
+  }
+  return out.length ? out : [narrowest]
+}
+
+// The largest footprint a type offers that fits a grid this wide. Used when a
+// grid narrows under a widget, and when a config asks for a size the grid
+// cannot hold -- both cases want the widget to end up at a size the type
+// actually declared rather than at a clamped one.
+function fitSize(type, maxCols) {
+  var fits = sizesWithin(type, maxCols)
+  var best = fits[0]
+  for (var i = 1; i < fits.length; i++) {
+    if (fits[i][0] > best[0] || (fits[i][0] === best[0] && fits[i][1] > best[1])) best = fits[i]
+  }
+  return best
+}
+
 // The next footprint in the type's list, wrapping. This is what the editor's
 // size control steps through.
 function nextSize(type, cols, rows) {
@@ -494,6 +643,18 @@ function isPlainObject(value) {
 function clampString(value) {
   if (typeof value !== "string") return ""
   return value.length > MAX_STRING ? value.slice(0, MAX_STRING) : value
+}
+
+// A path as a setting can hold it. Longer than a string, and with the two
+// characters that would make it ambiguous taken out rather than escaped: a
+// newline in a path is what turns one line of `find` output into two, and a
+// null byte never reaches anything that would keep it. A file named with
+// either is a file this cannot address, which is a better answer than a
+// listing that quietly means something else.
+function clampPath(value) {
+  if (typeof value !== "string") return ""
+  var out = value.replace(/[\r\n\0]/g, "")
+  return out.length > MAX_PATH ? out.slice(0, MAX_PATH) : out
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -886,6 +1047,8 @@ function coerceSetting(spec, value) {
     return fallback
   }
 
+  if (spec.type === "path") return clampPath(value)
+
   if (spec.type === "timezone") {
     // A zone that is not a zone would reach a command line as one. Empty is
     // always allowed and means "my own clock".
@@ -927,6 +1090,16 @@ function normalizeInstance(raw, index, layout) {
   var cols = Math.round(clampNumber(raw.cols, 1, MAX_COLUMNS, out.cols))
   var rows = Math.round(clampNumber(raw.rows, 1, MAX_ROWS, out.rows))
   if (isAllowedSize(entry.type, cols, rows)) { out.cols = cols; out.rows = rows }
+
+  // A size the type offers but this grid is too narrow for is not a size this
+  // config can hold: left alone it would draw off the edge of the grid and no
+  // free cell would ever be found for it, because there is no column it fits
+  // in. Fall back to the widest footprint that does fit.
+  if (out.cols > layout.columns) {
+    var fitted = fitSize(entry.type, layout.columns)
+    out.cols = fitted[0]
+    out.rows = fitted[1]
+  }
 
   // Clamped so a widget can never begin off the right of the grid; overlaps
   // are resolved later, once every widget's footprint is known.
@@ -1391,11 +1564,9 @@ function setColumns(config, columns) {
   for (var i = 0; i < next.widgets.length; i++) {
     var w = next.widgets[i]
     if (w.cols > n) {
-      var sizes = sizesFor(w.type)
-      var best = sizes[0]
-      for (var s = 0; s < sizes.length; s++) if (sizes[s][0] <= n && sizes[s][0] >= best[0]) best = sizes[s]
-      w.cols = Math.min(n, best[0])
-      w.rows = best[1]
+      var fitted = fitSize(w.type, n)
+      w.cols = fitted[0]
+      w.rows = fitted[1]
     }
     if (w.col + w.cols > n) w.col = Math.max(0, n - w.cols)
   }
@@ -2922,7 +3093,7 @@ var DEFAULT_TODO_FILE = ".config/omarchy/todos.txt"
 // names something on disk.
 function todoPath(setting, home) {
   var base = String(home || "").replace(/\/+$/, "")
-  var raw = clampString(setting).replace(/^\s+|\s+$/g, "")
+  var raw = clampPath(setting).replace(/^\s+|\s+$/g, "")
   if (raw === "") return base ? base + "/" + DEFAULT_TODO_FILE : ""
   if (raw.indexOf("~/") === 0) raw = base + raw.slice(1)
   else if (raw.charAt(0) !== "/") raw = base + "/" + raw
@@ -3120,6 +3291,147 @@ function todoTitle(setting, parsed) {
   return "Todo"
 }
 
+// ------------------------------------------------------------------ photos
+//
+// The photo card is handed one path and works the rest out. A path naming an
+// image file is that photograph; anything else is taken for a directory and
+// shown one picture at a time. Deciding it by asking the filesystem would
+// mean the card could draw nothing until a process came back, so it is
+// decided by the name -- and when the guess is wrong the folder listing
+// simply comes back empty, which is the same thing an empty folder does.
+
+var PHOTO_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif", "bmp"]
+
+// Ceiling on one folder's listing. Pointing this at a directory of ten
+// thousand photographs is an ordinary thing to do; holding all ten thousand
+// paths in the shell to show one of them at a time is not.
+var MAX_PHOTOS = 400
+
+// An absolute path from what the user typed or the chooser handed back.
+// Relative to home, "~" expanded, and any path walking upwards refused
+// outright -- the same shape `todoPath` uses, for the same reason: this
+// string becomes an argument to a process.
+function photoPath(setting, home) {
+  var base = String(home || "").replace(/\/+$/, "")
+  var raw = clampPath(setting).replace(/^\s+|\s+$/g, "")
+  if (raw === "") return ""
+  if (raw.indexOf("~/") === 0) raw = base + raw.slice(1)
+  else if (raw.charAt(0) !== "/") raw = base ? base + "/" + raw : ""
+  if (raw === "" || raw.charAt(0) !== "/") return ""
+  var parts = raw.split("/")
+  for (var i = 0; i < parts.length; i++) if (parts[i] === "..") return ""
+  return raw.replace(/\/+$/, "") || "/"
+}
+
+// The extension, lowercased and without the dot, or "" for a path that has
+// none in its last segment. A dot in a directory name is not an extension.
+function pathExtension(path) {
+  var p = String(path || "")
+  var name = p.slice(p.lastIndexOf("/") + 1)
+  var dot = name.lastIndexOf(".")
+  if (dot <= 0) return ""
+  return name.slice(dot + 1).toLowerCase()
+}
+
+function isPhotoFile(path) {
+  return PHOTO_EXTENSIONS.indexOf(pathExtension(path)) !== -1
+}
+
+// What a photo card's `path` setting points at: one picture, a folder of
+// them, or nothing yet. One answer, asked for by the card, by the folder
+// scanner and by the editor, so none of them can disagree about which of the
+// two a path is.
+function photoTarget(setting, home) {
+  var path = photoPath(setting, home)
+  if (!path) return { path: "", kind: "none" }
+  return { path: path, kind: isPhotoFile(path) ? "image" : "folder" }
+}
+
+// Every directory a photo card is pointed at, once each. What the service
+// scans; a card pointed at a single file asks for nothing.
+function photoFoldersInUse(config, home) {
+  var list = config && Array.isArray(config.widgets) ? config.widgets : []
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].type !== "photo") continue
+    var target = photoTarget(list[i].settings ? list[i].settings.path : "", home)
+    if (target.kind !== "folder" || seen[target.path]) continue
+    seen[target.path] = true
+    out.push(target.path)
+  }
+  return out
+}
+
+// One path per line, as `find` prints them. Sorted so the order a slideshow
+// walks is the order the folder reads in a file manager, rather than whatever
+// order the directory happens to be stored in -- a slideshow that reshuffles
+// itself every rescan is one you cannot ever leave on a picture.
+function parsePhotoList(raw) {
+  var text = typeof raw === "string" ? raw : ""
+  var lines = text.split("\n")
+  var out = []
+  for (var i = 0; i < lines.length && out.length < MAX_PHOTOS; i++) {
+    var line = lines[i].replace(/\s+$/, "")
+    if (line.charAt(0) !== "/") continue
+    if (!isPhotoFile(line)) continue
+    out.push(line)
+  }
+  out.sort()
+  return out
+}
+
+// Which picture comes next. `roll` is a number in [0, 1) -- the caller's
+// random -- so the shuffle is a decision this can be tested on rather than
+// one buried in a timer.
+//
+// Shuffle never lands on the picture already up, because a slideshow that
+// sometimes does nothing when it changes reads as broken. With one picture
+// there is nowhere else to go and it stays.
+function nextPhotoIndex(count, index, shuffle, roll) {
+  var n = Math.round(Number(count) || 0)
+  if (n <= 1) return 0
+  var current = Math.round(Number(index) || 0)
+  if (current < 0 || current >= n) current = 0
+  if (shuffle !== true) return (current + 1) % n
+  var r = Number(roll)
+  if (!isFinite(r) || r < 0 || r >= 1) r = 0
+  // Drawn from the n-1 pictures that are not the one on screen, so every
+  // change is a change.
+  var pick = Math.floor(r * (n - 1))
+  if (pick >= n - 1) pick = n - 2
+  return pick >= current ? pick + 1 : pick
+}
+
+// How long a picture stays up, in milliseconds. "0" is the setting's way of
+// saying never, and answers 0 -- the caller runs no timer at all rather than
+// one that fires immediately.
+function photoIntervalMs(setting) {
+  var seconds = Math.round(Number(setting))
+  if (!isFinite(seconds) || seconds <= 0) return 0
+  return Math.max(5, Math.min(86400, seconds)) * 1000
+}
+
+// The picture at an index, clamped rather than wrapped: a list that shrank
+// under a card mid-slideshow should show its last picture, not jump to the
+// front.
+function photoAt(files, index) {
+  if (!Array.isArray(files) || files.length === 0) return ""
+  var i = Math.round(Number(index) || 0)
+  if (i < 0) i = 0
+  if (i >= files.length) i = files.length - 1
+  return String(files[i])
+}
+
+// The file's own name, without the directory or the extension. Only ever
+// shown when the user has asked for a caption and given none of their own.
+function photoName(path) {
+  var p = String(path || "")
+  var name = p.slice(p.lastIndexOf("/") + 1)
+  var dot = name.lastIndexOf(".")
+  return dot > 0 ? name.slice(0, dot) : name
+}
+
 // ------------------------------------------------------------------- omate
 //
 // The pet lives in another plugin, so everything here is about talking to a
@@ -3234,11 +3546,16 @@ if (typeof module !== "undefined" && module.exports) {
     tempLabel: tempLabel,
     rangeLabel: rangeLabel,
     sizesFor: sizesFor,
+    sizesWithin: sizesWithin,
+    fitSize: fitSize,
+    sizeLabel: sizeLabel,
+    iconFor: iconFor,
     defaultSize: defaultSize,
     isAllowedSize: isAllowedSize,
     nextSize: nextSize,
     isPlainObject: isPlainObject,
     clampString: clampString,
+    clampPath: clampPath,
     clampNumber: clampNumber,
     normalizeLayout: normalizeLayout,
     scaledCell: scaledCell,
@@ -3353,6 +3670,19 @@ if (typeof module !== "undefined" && module.exports) {
     visibleTodos: visibleTodos,
     todoProgress: todoProgress,
     todoTitle: todoTitle,
+    PHOTO_EXTENSIONS: PHOTO_EXTENSIONS,
+    MAX_PHOTOS: MAX_PHOTOS,
+    MAX_PATH: MAX_PATH,
+    photoPath: photoPath,
+    pathExtension: pathExtension,
+    isPhotoFile: isPhotoFile,
+    photoTarget: photoTarget,
+    photoFoldersInUse: photoFoldersInUse,
+    parsePhotoList: parsePhotoList,
+    nextPhotoIndex: nextPhotoIndex,
+    photoIntervalMs: photoIntervalMs,
+    photoAt: photoAt,
+    photoName: photoName,
     pluginFileUrl: pluginFileUrl,
     chaseLabel: chaseLabel,
     settingNumber: settingNumber

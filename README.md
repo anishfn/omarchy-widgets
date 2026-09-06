@@ -65,6 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/instal
 | **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
 | **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
 | **Omate** | The desktop pet: show and hide it, pick its skin, size it, set the cursor chase | local (Omate plugin) |
+| **Photos** | A picture of your own, or a folder of them shown one at a time | local (your files) |
 
 ```
    ┌─────────┬─────────┐        side: left | right
@@ -97,6 +98,7 @@ says which.
 - [Turning widgets on and off](#turning-widgets-on-and-off)
   - [More than one of the same widget](#more-than-one-of-the-same-widget)
 - [Arranging them](#arranging-them)
+  - [The bar, the tray and the inspector](#the-bar-the-tray-and-the-inspector)
   - [Two sides](#two-sides)
   - [The grid](#the-grid)
   - [Dragging](#dragging)
@@ -114,6 +116,9 @@ says which.
   - [Scrolling, and opening the file](#scrolling-and-opening-the-file)
 - [Music](#music)
 - [Omate](#omate)
+- [Photos](#photos)
+  - [One picture, or a folder of them](#one-picture-or-a-folder-of-them)
+  - [Every size there is](#every-size-there-is)
 - [Config file](#config-file)
   - [The layout block](#the-layout-block)
   - [Each widget](#each-widget)
@@ -229,8 +234,22 @@ row and a switch; flip one and the desktop follows immediately. The button
 dims when nothing is on, so the bar answers "are my widgets up?" without a
 click, and its tooltip counts what is showing.
 
+The list is grouped: what is **on the desktop** first, what is **off** below
+it, with a count at the top saying how many of how many. A row is one line —
+a glyph for the type, the widget's name, and the switch — and the sentence
+describing the type is the row's tooltip rather than a third line printed
+under every one of them. If there are more rows than fit, the list scrolls
+inside the panel instead of running off the bottom of the screen.
+
+That shape is deliberate and it is the reason for the glyphs: this list is as
+long as the catalogue, and the catalogue grows every time somebody contributes
+a widget. A list you scan by shape stays usable at thirty rows; a list of
+paragraphs does not.
+
 Arrow keys move down the rows, Enter flips the one under the cursor, Escape
-closes.
+closes. Switching a widget off moves its row to the second group, and the
+cursor goes with it rather than staying on a row number that now belongs to
+something else.
 
 A widget you switch off is off, not gone: its settings stay in the config
 file, and switching it back on brings them back — in its old cell if it is
@@ -263,6 +282,29 @@ including on the command line.
 **Arrange…** in the same popup opens the layout editor: the desktop dims, the
 grid appears under your widgets, and you can drag them around. Escape or
 **Done** closes it.
+
+### The bar, the tray and the inspector
+
+Three panels, each about one thing.
+
+- **The bar**, along the bottom: **Side**, **Columns**, **Scale**,
+  **Opacity**, **Reset** and **Done**. These are about the grid, not about any
+  one widget, so the bar is the same size whatever is selected.
+- **The tray**, just above it: every widget that is off. Drag one out onto a
+  cell to put it up, and drag one back down onto the tray to take it off. The
+  tray is the only part of the editor's chrome a drag may end on — a card
+  dropped on the bar or the inspector goes back where it came from rather than
+  landing in the cell hidden underneath.
+- **The inspector**, down the side: everything about the widget you have
+  selected. Its name and id, its **Size**, its own **Opacity**, every setting
+  its type declares, and **Duplicate** / **Remove**. It appears when you click
+  a widget and goes away when you click empty grid, and it docks to the side
+  the selected widget is *not* on, so it never covers the card it is about.
+
+**Size** is a list rather than a button that cycles. It offers exactly the
+footprints the widget's type declares and the current grid can hold — a card
+three columns wide is not offered on a two-column grid — so picking `2 × 2` is
+one click rather than four presses of the same button.
 
 ### Two sides
 
@@ -338,11 +380,12 @@ is repacked in reading order.
   over brightens as you cross, so you can see which board you are aiming at.
 - **Drop it on another widget** — the other one moves out of the way. See
   below.
-- **Take one off** — drag it down into the tray at the bottom.
+- **Take one off** — drag it down into the tray, the strip of chips above the
+  bar. Dropping on the bar or the inspector does nothing.
 - **Put one back** — drag it out of the tray onto a cell.
-- **Resize one** — click it, then the size button (`1×1`) in the toolbar. It
-  steps through the footprints that widget type offers, and moves the widget
-  if the new size does not fit where it was standing.
+- **Resize one** — click it and pick from **Size** in the inspector. It offers
+  the footprints that widget type declares, and moves the widget if the new
+  size does not fit where it was standing.
 - **Reshape the grid** — the **Side** and **Columns** buttons change the grid
   itself rather than any one widget.
 
@@ -740,6 +783,79 @@ The **Owner name** field in the editor is yours, and it is what the pet calls
 you. Nothing here leaves your machine, and nothing here talks to anything but
 the Omate plugin.
 
+## Photos
+
+A picture of your own on the wallpaper. Point it at a file and that is the
+card; point it at a folder and it shows what is in it, one at a time.
+
+It is the only card here whose content is not a reading, and it is drawn to
+say so: the picture fills the card edge to edge and takes the card's own
+corners with it, rather than sitting inset inside a translucent pane. A
+photograph in a frame inside a frame reads as a screenshot of a photograph.
+
+### One picture, or a folder of them
+
+There is one **Picture** setting and it holds one path, because the choice
+between a photograph and a slideshow is a choice you already made when you
+picked one. A path ending in an image extension is that picture. Anything else
+is a folder, and the card walks the images in it.
+
+Two buttons open the desktop's own file chooser — the same dialog every other
+application on your machine opens, with your places and your recent folders
+already in it:
+
+- **Image…** picks one file, filtered to `jpg`, `jpeg`, `png`, `webp`, `gif`
+  and `bmp`.
+- **Folder…** picks a directory.
+
+You can also just type or paste a path into the field, which is faster when
+you already have one in a terminal. `~/` and a bare name resolve against your
+home directory.
+
+> [!NOTE]
+> The editor closes while the chooser is up and opens again when you answer
+> it. That is not politeness: the editor is a layer-shell overlay and every
+> ordinary window is below it, so a dialog opened underneath would be one you
+> could neither see nor click. The widget stays selected, so you come back to
+> exactly the panel you left.
+
+For a folder, **Change every** is how long each picture stays up — *Never*,
+30 seconds, 5 minutes, 30 minutes or an hour — and **Shuffle** picks at random
+instead of walking the folder in order. A shuffle never lands on the picture
+already up: a change that changes nothing reads as a broken slideshow.
+
+The folder is read once per directory however many cards share it, and re-read
+every ten minutes so a photograph dropped in during a session turns up. Only
+the top level is read, not the folders inside it, and a listing stops at 400
+pictures. Nothing about any of this leaves your machine.
+
+**Fit** is *Fill the card* — the picture is cropped to the card's shape, which
+is what you want almost always — or *Whole picture*, which fits the whole
+image inside the card and lets the card's translucent background show around
+it.
+
+**Caption** writes a line along the bottom of the picture, over a soft floor of
+the card's own background colour so it stays legible over anything. Empty
+draws nothing. It is also the name that tells two photo cards apart in the
+bar popup and the editor's tray.
+
+### Every size there is
+
+This type offers seven footprints — `1 × 1`, `2 × 1`, `1 × 2`, `2 × 2`,
+`3 × 2`, `2 × 3` and `3 × 3` — where every other widget offers two or three.
+
+That is not this card ignoring the house rule, it is the rule's own test being
+met: a size is worth offering when it is a genuinely different composition
+rather than the same one stretched, and a different-shaped card is a different
+*crop* of the photograph. A portrait in a `1 × 2` and the same portrait in a
+`2 × 1` are two pictures.
+
+The ones wider than your grid are simply not offered. Widen the grid with
+**Columns** and they appear.
+
+Pictures are decoded no larger than the card can show them, so a folder of
+twenty-megapixel camera JPEGs costs the same as a folder of thumbnails.
+
 ## Config file
 
 `~/.config/omarchy/widgets.json`, created with sensible defaults the first
@@ -877,7 +993,7 @@ is refused outright.
 
 | Key | Meaning |
 |---|---|
-| `file` | Path to the list. `""` means `~/.config/omarchy/todos.txt`; `~/` and a bare name resolve against home |
+| `file` | Path to the list. `""` means `~/.config/omarchy/todos.txt`; `~/` and a bare name resolve against home. The editor offers **Choose…** for it |
 | `title` | The name on the card. `""` uses the file's first `#` heading, then `Todo` |
 | `showDone` | Whether finished items appear |
 | `showProgress` | The hairline along the bottom |
@@ -889,6 +1005,18 @@ is refused outright.
 |---|---|
 | `showArt` | Album art |
 | `showProgress` | The progress bar and times |
+| `showSkip` | The back and forward buttons |
+| `player` | The player to follow. `""` follows whatever is playing |
+
+#### Photos
+
+| Key | Meaning |
+|---|---|
+| `path` | An image file, or a folder of them. `~/` and a bare name resolve against home. A path that walks upwards is refused |
+| `interval` | Seconds a picture stays up, as a string: `"0"` (never), `"30"`, `"300"`, `"1800"`, `"3600"`. Only read for a folder |
+| `shuffle` | Pick at random rather than walking the folder in order |
+| `fit` | `fill` crops to the card, `contain` fits the whole picture inside it |
+| `label` | A caption along the bottom. `""` draws none |
 
 ## Command line
 
@@ -949,15 +1077,20 @@ widgets exist. Adding one is two steps:
 
 1. Write `widgets/YourWidget.qml`. It is handed `service`, `instance` and
    `card`, and draws into the card it is given.
-2. Add an entry to `catalog()` with its `type`, `name`, `description`,
+2. Add an entry to `catalog()` with its `type`, `name`, `description`, `icon`,
    `source`, the `sizes` it may take as `[cols, rows]` in cells, and a
    `settings` schema.
 
 `settings` is a schema rather than a bag of defaults — each entry says how it
-is edited (`text`, `boolean`, `choice`, `timezone`) and what it starts as —
-so the editor builds a working settings panel for your widget without knowing
-anything about it. Values are coerced to the kind you declared before your
-QML sees them, so you never have to defend against a config file.
+is edited (`text`, `boolean`, `choice`, `timezone`, `path`) and what it starts
+as — so the editor builds a working settings panel for your widget without
+knowing anything about it. Values are coerced to the kind you declared before
+your QML sees them, so you never have to defend against a config file.
+
+`icon` is one glyph from the theme's Nerd Font, and it is what makes the bar
+popup and the editor's tray scannable once there are more than a handful of
+widgets. `sizes` may list a footprint wider than the default grid; the editor
+only offers the ones the user's grid can actually hold.
 
 The bar popup, the editor, the grid and the config validation all read that
 one list, so nothing else has to learn the new name. A type added by an update

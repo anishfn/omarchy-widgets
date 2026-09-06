@@ -2692,7 +2692,7 @@ test("the types that take clicks are exactly the ones that say so", () => {
   // turns its own rectangle into an input region on the desktop, so one added
   // by accident is a card silently swallowing clicks meant for a window.
   const interactive = Model.catalogTypes().filter((t) => Model.isInteractiveType(t))
-  assert.deepEqual(interactive.sort(), ["music", "repo-pulse", "todos"])
+  assert.deepEqual(interactive.sort(), ["music", "omate", "repo-pulse", "todos"])
   for (const quiet of ["clock", "weather", "github", "calendar"]) {
     assert.equal(Model.isInteractiveType(quiet), false, `${quiet} should stay click-through`)
   }
@@ -2710,10 +2710,12 @@ test("ticking can be switched off without switching the widget off", () => {
 test("a type says for itself whether a second one makes sense", () => {
   // Several clocks is the point of a clock widget; several music cards would
   // be the same player twice, and several weather cards the same location.
+  // One omate card: every control on it writes through to the one pet's
+  // global settings, so a second card would fight the first mid-drag.
   for (const many of ["clock", "github", "repo-pulse", "calendar", "todos"]) {
     assert.equal(Model.allowsMultiple(many), true, `${many} should allow several`)
   }
-  for (const one of ["weather", "music"]) {
+  for (const one of ["weather", "music", "omate"]) {
     assert.equal(Model.allowsMultiple(one), false, `${one} reads one source`)
   }
   assert.equal(Model.allowsMultiple("nope"), false)

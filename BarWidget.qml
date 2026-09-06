@@ -194,7 +194,6 @@ BarWidget {
 
             width: column.width
             label: root.nameFor(modelData)
-            description: root.descriptionFor(modelData)
             checked: modelData.enabled === true
             hasCursor: root.cursorActive && root.cursorIndex === index
             foreground: root.foreground

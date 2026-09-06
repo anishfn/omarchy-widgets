@@ -49,7 +49,7 @@ on your desktop.
 | **Weather** | Now, today's range, and the condition | `wttr.in` |
 | **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
 | **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
-| **Calendar** | What is next in your Google Calendar, and when | `calendar.google.com` |
+| **Calendar** | What is still to come today, and first tomorrow | `calendar.google.com` |
 | **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
 | **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
 
@@ -413,10 +413,13 @@ per address, two per repository every half hour.
 
 ## The calendar
 
-What is next, and when. The card is a list of times against sentences, which
-is what a calendar is once you take the week grid away — a grid of squares on
-a wallpaper tells you that Thursday is busy; it does not tell you what you are
-late for.
+Today's day, and tomorrow's first line. The card is a small dashboard rather
+than an agenda: the next event's start as one large time, a countdown beside
+it, the calendar label and the event title beneath, and a bar across the foot
+showing how far through the day you are — with when the event ends, a compact
+word of what it is, and how many events are left. A grid of squares on a
+wallpaper tells you that Thursday is busy; it does not tell you what you are
+late for. Tomorrow's earliest event is the one small line underneath.
 
 Recurring events, all-day events, moved instances and cancelled ones are all
 handled, and times are shown in your own clock however the event was written.

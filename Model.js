@@ -2753,6 +2753,47 @@ function upcomingEvents(events, nowMs, limit, includeAllDay) {
   return out
 }
 
+// Everything that still has to end today, earliest first. The card used to
+// be an agenda for the whole week; a day's limit is not a filter bolted on
+// to that, because the shape is different -- an event that began yesterday
+// and is running now is still today's business, and an event that starts at
+// 1am is not. So the test is the day an event falls in, not the amount of
+// day left in it.
+function todayEvents(events, nowMs, limit, includeAllDay) {
+  var list = Array.isArray(events) ? events : []
+  var now = Number(nowMs)
+  var max = limit > 0 ? limit : 8
+  var out = []
+  if (!isFinite(now)) return out
+  var today = startOfDay(now)
+  for (var i = 0; i < list.length && out.length < max; i++) {
+    var ev = list[i]
+    if (!ev) continue
+    if (ev.allDay && includeAllDay === false) continue
+    var end = ev.end > ev.start ? ev.end : ev.start + 60000
+    if (end <= now) continue
+    if (startOfDay(ev.start) !== today && !(ev.start <= now && end > now)) continue
+    out.push(ev)
+  }
+  return out
+}
+
+// The earliest thing on a day that is not this one, for the small line the
+// card keeps under today's list. One event only: the rest of tomorrow can
+// wait until it is today.
+function nextDayEvent(events, nowMs, daysAhead, includeAllDay) {
+  var list = Array.isArray(events) ? events : []
+  var now = Number(nowMs)
+  if (!isFinite(now)) return null
+  for (var i = 0; i < list.length; i++) {
+    var ev = list[i]
+    if (!ev) continue
+    if (ev.allDay && includeAllDay === false) continue
+    if (daysApart(ev.start, now) === daysAhead) return ev
+  }
+  return null
+}
+
 function padTwo(n) { return n < 10 ? "0" + n : String(n) }
 
 // "14:30", or "2:30 PM" on a twelve-hour clock.
@@ -3245,6 +3286,8 @@ if (typeof module !== "undefined" && module.exports) {
     icsExceptions: icsExceptions,
     parseCalendar: parseCalendar,
     upcomingEvents: upcomingEvents,
+    todayEvents: todayEvents,
+    nextDayEvent: nextDayEvent,
     clockLabel: clockLabel,
     eventTimeLabel: eventTimeLabel,
     untilLabel: untilLabel,

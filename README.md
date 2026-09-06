@@ -326,11 +326,14 @@ Three panels, each about one thing.
   tray is the only part of the editor's chrome a drag may end on — a card
   dropped on the bar or the inspector goes back where it came from rather than
   landing in the cell hidden underneath.
-- **The inspector**, down the side: everything about the widget you have
-  selected. Its name and id, its **Size**, its own **Opacity**, every setting
-  its type declares, and **Duplicate** / **Remove**. It appears when you click
-  a widget and goes away when you click empty grid, and it docks to the side
-  the selected widget is *not* on, so it never covers the card it is about.
+- **The inspector**, stacked over the other two and the same width as them:
+  everything about the widget you have selected. Its name and id, its
+  **Size**, its own **Opacity**, every setting its type declares, and
+  **Duplicate** / **Remove**. It appears when you click a widget and goes away
+  when you click empty grid. The settings flow across the width rather than
+  down it, four to a line on a wide bar, so the panel is as tall as the widget
+  needs and no taller — and the two panels under it do not move when it comes
+  and goes.
 
 **Size** is a list rather than a button that cycles. It offers exactly the
 footprints the widget's type declares and the current grid can hold — a card

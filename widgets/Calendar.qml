@@ -129,37 +129,29 @@ Item {
       ? events[0]
       : null
 
-  readonly property var tomorrowEvent:
-    ready
-      ? Model.nextDayEvent(
-          calendar.events,
-          nowMs,
-          1,
-          showAllDay
-        )
-      : null
+  readonly property var nextLineEvent: {
+    if (!ready)
+      return null
+
+    var list = Model.upcomingEvents(
+      calendar.events,
+      root.nowMs,
+      8,
+      showAllDay
+    )
+
+    var today = Model.startOfDay(root.nowMs)
+
+    for (var i = 0; i < list.length; i++) {
+      if (Model.startOfDay(list[i].start) > today)
+        return list[i]
+    }
+
+    return null
+  }
 
   readonly property string modLabel:
     String(settings.label || "").toUpperCase()
-
-  readonly property string tomorrowText: {
-    var ev = root.tomorrowEvent
-
-    if (!ev)
-      return ""
-
-    var when = Model.eventTimeLabel(
-      ev,
-      root.twelveHour
-    )
-
-    return when === "all day"
-      ? "Tomorrow · " + root.rowTitle(ev)
-      : "Tomorrow · "
-        + when
-        + " · "
-        + root.rowTitle(ev)
-  }
 
   readonly property real evStartMs: {
     var ev = root.nextEvent
@@ -219,10 +211,23 @@ Item {
       : 0
 
   readonly property string bottomText: {
-    var ev = root.tomorrowEvent
+    var line = root.nextLineEvent
 
-    return ev
-      ? root.tomorrowText
+    if (line)
+      return root.dayLine(line)
+
+    if (!root.ready)
+      return ""
+
+    var upcoming = Model.upcomingEvents(
+      calendar.events,
+      root.nowMs,
+      1,
+      showAllDay
+    )
+
+    return upcoming.length === 0
+      ? "NO UPCOMING EVENTS"
       : ""
   }
 
@@ -243,39 +248,133 @@ Item {
   readonly property bool empty:
     events.length === 0
 
-  Text {
-    anchors.centerIn: parent
+Column {
+    anchors.left:
+      parent.left
 
-    width:
-      parent.width
-      - root.pad * 2
+    anchors.right:
+      parent.right
+
+    anchors.leftMargin:
+      root.pad
+
+    anchors.rightMargin:
+      root.pad
+
+    anchors.top:
+      parent.top
+
+    anchors.topMargin:
+      root.pad
 
     visible:
       root.empty
 
-    horizontalAlignment:
-      Text.AlignHCenter
+    spacing:
+      root.gap
 
-    wrapMode:
-      Text.Wrap
+    Text {
+      visible:
+        root.modLabel !== ""
 
-    textFormat:
-      Text.PlainText
+      text:
+        root.modLabel
 
-    text:
-      root.emptyText
+      color:
+        root.dim
 
-    color:
-      root.dim
+      font.family:
+        root.fontFamily
 
-    font.family:
-      root.fontFamily
+      font.pixelSize:
+        root.smallSize
 
-    font.pixelSize:
-      root.smallSize
+      font.letterSpacing:
+        Math.max(
+          0,
+          Math.round(root.smallSize * 0.1)
+        )
 
-    renderType:
-      Text.NativeRendering
+      renderType:
+        Text.NativeRendering
+    }
+
+    Row {
+      width:
+        parent.width
+
+      spacing:
+        root.gap
+
+      transform: Translate {
+        y: 4
+      }
+
+      Rectangle {
+        id: emptyBar
+
+        anchors.verticalCenter:
+          parent.verticalCenter
+
+        width:
+          Math.max(
+            5,
+            Math.round(root.unit * 0.045)
+          )
+
+        height:
+          Math.max(
+            14,
+            Math.round(root.unit * 0.14)
+          )
+
+        radius:
+          Math.round(width / 2)
+
+        color:
+          root.accent
+      }
+
+      Text {
+        width:
+          parent.width
+          - emptyBar.width
+          - root.gap
+
+        horizontalAlignment:
+          Text.AlignLeft
+
+        wrapMode:
+          Text.Wrap
+
+        textFormat:
+          Text.PlainText
+
+        text:
+          root.emptyText
+
+        color:
+          root.foreground
+
+        font.family:
+          root.fontFamily
+
+        font.pixelSize:
+          Math.max(
+            12,
+            Math.round(root.unit * 0.13)
+          )
+
+        font.weight:
+          Font.Bold
+
+        elide:
+          Text.ElideRight
+
+        renderType:
+          Text.NativeRendering
+      }
+    }
   }
 
   Item {
@@ -707,5 +806,54 @@ Item {
     return event.summary
       + "  ·  "
       + event.location
+  }
+
+  function dayLine(event) {
+    if (!event)
+      return ""
+
+    var days = (
+      Model.startOfDay(event.start)
+      - Model.startOfDay(root.nowMs)
+    ) / Model.DAY_MS
+
+    var label = ""
+
+    if (days <= 1)
+      label = "Tomorrow"
+    else if (days < 7)
+      label = "In " + days + " days"
+    else if (days < 29) {
+      var weeks = Math.round(days / 7)
+      label = "In " + Math.max(1, weeks) + "w"
+    } else if (days >= 360) {
+      var years = Math.round(days / 365)
+      label = "In "
+        + Math.max(1, years)
+        + (Math.max(1, years) === 1
+            ? " year"
+            : " years")
+    } else {
+      var months = Math.round(days / 30)
+      label = "In "
+        + Math.max(1, months)
+        + (Math.max(1, months) === 1
+            ? " month"
+            : " months")
+    }
+
+    var when = Model.eventTimeLabel(
+      event,
+      root.twelveHour
+    )
+
+    if (when === "all day")
+      return label + " · " + root.rowTitle(event)
+
+    return label
+      + " · "
+      + when
+      + " · "
+      + root.rowTitle(event)
   }
 }

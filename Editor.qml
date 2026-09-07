@@ -370,7 +370,15 @@ Item {
               anchors.fill: parent
               anchors.margins: -3
               visible: slot.isSelected && !slot.isDragged
-              radius: (slot.modelData.radius < 0 ? Style.cornerRadius : slot.modelData.radius) + 3
+              // Resolved the way the card itself resolves it, not read off the
+              // instance: a card with no radius of its own carries `null`
+              // there, and `null < 0` is false, so reading it raw drew a
+              // square-ish ring three pixels round a card rounded twenty.
+              radius: {
+                var r = Model.effectiveRadius(root.service ? root.service.config : null,
+                  slot.modelData)
+                return (r < 0 ? Style.cornerRadius : r) + 3
+              }
               color: "transparent"
               border.width: 2
               border.color: root.accent

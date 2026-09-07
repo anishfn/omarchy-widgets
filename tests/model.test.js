@@ -657,6 +657,27 @@ test("setOpacity is per widget and clamps into range", () => {
   assert.equal(Model.setOpacity(cfg, "clock", 0.4).layout.opacity, 0.72)
 })
 
+test("a card with no radius of its own resolves to the grid's, never to null", () => {
+  const cfg = Model.defaultConfig()
+  const clock = Model.findInstance(cfg, "clock")
+  // A fresh card carries null there, the way it does for opacity -- "follow
+  // the grid" rather than a number of its own.
+  assert.equal(clock.radius, null)
+  // So nothing may read the instance raw. `null < 0` is false and `null + 3`
+  // is 3, which is how the editor came to draw a square-ish selection ring
+  // around a card rounded twenty.
+  assert.equal(Model.effectiveRadius(cfg, clock), Model.DEFAULT_RADIUS)
+  assert.equal(typeof Model.effectiveRadius(cfg, clock), "number")
+
+  // The grid's own number is what a card with none of its own follows.
+  const rounder = Model.setLayoutRadius(cfg, 44)
+  assert.equal(rounder.layout.radius, 44)
+  assert.equal(Model.effectiveRadius(rounder, Model.findInstance(rounder, "clock")), 44)
+
+  // And with no config to read at all it still answers with a number.
+  assert.equal(Model.effectiveRadius(null, null), Model.DEFAULT_RADIUS)
+})
+
 test("moving the global opacity re-applies it to every card", () => {
   const cfg = Model.defaultConfig()
   const boosted = Model.setLayoutOpacity(cfg, 0.3)
@@ -3327,6 +3348,42 @@ test("the balance request is built to each chain's shape, or not at all", () => 
   assert.equal(Model.cryptoBalanceCommand("bitcoin", ""), null)
   assert.equal(Model.cryptoBalanceCommand("nonsense", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), null)
 })
+
+test("an address is only ever sent to its own chain's node", () => {
+  // The card promises this out loud, in the catalogue and in the README, so
+  // the flags that keep the promise are pinned here. Without them a courtesy
+  // endpoint could answer with a redirect and curl would carry the address --
+  // which for Bitcoin and Litecoin sits in the URL path -- wherever the
+  // redirect pointed.
+  const every = [
+    Model.cryptoBalanceCommand("bitcoin",
+      "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97"),
+    Model.cryptoBalanceCommand("litecoin", "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw"),
+    Model.cryptoBalanceCommand("ethereum", "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
+    Model.cryptoBalanceCommand("solana", "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"),
+    Model.cryptoPriceCommand(["bitcoin"], ["usd"])
+  ]
+  for (const command of every) {
+    assert.ok(command, "every one of these builds a command")
+    assert.equal(command[command.indexOf("--max-redirs") + 1], "0",
+      "no hop is a hop that could carry the address somewhere else")
+    assert.equal(command[command.indexOf("--proto") + 1], "=https",
+      "and never off https on the way")
+    assert.equal(command.includes("-L"), false, "no follow flag anywhere")
+    // The calendar's rule: this body becomes objects inside the process that
+    // draws the desktop, so it has a ceiling.
+    assert.ok(command.includes("--max-filesize"))
+    assert.equal(command[command.indexOf("--max-filesize") + 1], "262144")
+    // Still through timeout, with absolute paths, like every other fetcher.
+    assert.equal(command[0], "/usr/bin/timeout")
+    assert.ok(command.includes("/usr/bin/curl"))
+  }
+
+  // The price host is asked for prices and is never told whose they are.
+  const price = Model.cryptoPriceCommand(["bitcoin"], ["usd"])
+  assert.equal(price.join(" ").includes("bc1q"), false)
+})
+
 
 test("one price request covers every coin and currency on the desktop", () => {
   const command = Model.cryptoPriceCommand(["bitcoin", "ethereum"], ["usd", "eur"])

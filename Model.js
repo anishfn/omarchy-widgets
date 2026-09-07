@@ -1078,11 +1078,18 @@ function defaultInstance(type, id) {
     // null means "follow the layout's global opacity"; a number overrides the
     // layout for this card alone.
     opacity: null,
-    // -1 follows the theme's Hyprland rounding; anything else is literal px.
-    // The default is a shape rather than the theme's because a desktop card is
-    // an order of magnitude larger than the bar chrome `decoration:rounding`
-    // was chosen for, and a 0 there should not square off a 200px card.
-    radius: 20,
+    // null means "follow the layout's global radius", the same as opacity
+    // above it. A number overrides the layout for this card alone, and -1
+    // follows the theme's Hyprland rounding.
+    //
+    // Both must be null here rather than a literal, because `defaultConfig`
+    // builds an instance straight from this and everything else in the
+    // program goes through `normalizeInstance` -- which resolves an absent
+    // radius to null. A literal here meant the same field held two different
+    // shapes depending on which door the config came in by, and the editor
+    // read it raw and drew a three-pixel ring around a card rounded twenty.
+    // Read it through `effectiveRadius`, never off the instance.
+    radius: null,
     settings: settings
   }
 }
@@ -3724,6 +3731,14 @@ var CRYPTO_DEFAULT_CURRENCY = "usd"
 var MAX_CRYPTO_PRICE = 1e12
 var MAX_CRYPTO_AMOUNT = 1e15
 
+// Where `String` stops writing digits: String(1e21) is "1e+21", and the
+// thousands grouping would turn that into "$1e,+21" on the wallpaper. The two
+// ceilings above catch a figure on the way in, but a holding is a price times
+// an amount and the product of two numbers under their own bounds can still
+// land past this one -- so the labels refuse it here, at the last point
+// before it is drawn, which covers every caller rather than one path.
+var MAX_WRITABLE = 1e21
+
 function cryptoChain(name) {
   var key = String(name || "")
   return Object.prototype.hasOwnProperty.call(CRYPTO_CHAINS, key) ? CRYPTO_CHAINS[key] : null
@@ -3830,19 +3845,36 @@ function cryptoCurrenciesInUse(config) {
 // the kind of thing that is wrong in one branch and right in three, and here
 // it can be tested. Everything interpolated has already been through
 // `isSafeCryptoAddress`, and is checked again by the caller before it runs.
+// The flags every crypto fetch carries, and why each one is there.
+//
+// `--proto =https` and `--max-redirs 0` are the pair that keep the promise
+// this widget makes out loud: an address is only ever sent to its own chain's
+// node. Without them a courtesy endpoint could answer a balance lookup with a
+// redirect, and curl would happily carry the address -- which for Bitcoin and
+// Litecoin sits in the URL path -- to whatever host the redirect named. There
+// is no legitimate redirect on any of these five endpoints, so the number of
+// hops allowed is none.
+//
+// `--max-filesize` is the calendar's rule applied here: this body is about to
+// be turned into objects inside the process that draws the desktop, and a
+// courtesy endpoint that starts streaming is not a thing to find out about by
+// running out of memory. A balance or a price is a few hundred bytes; 256 KiB
+// is a ceiling nothing honest reaches.
+var CRYPTO_CURL_FLAGS = ["-fsS", "--proto", "=https", "--max-redirs", "0",
+  "--max-time", "15", "--max-filesize", "262144"]
+
 function cryptoBalanceCommand(chain, address) {
   var entry = cryptoChain(chain)
   if (!entry || !isSafeCryptoAddress(chain, address)) return null
-  var timeout = ["/usr/bin/timeout", "-k", "2", "20"]
+  var timeout = ["/usr/bin/timeout", "-k", "2", "20", "/usr/bin/curl"]
   if (entry.kind === "esplora") {
-    return timeout.concat(["/usr/bin/curl", "-fsSL", "--max-time", "15",
-      entry.endpoint + address])
+    return timeout.concat(CRYPTO_CURL_FLAGS, [entry.endpoint + address])
   }
   var body = entry.kind === "evm"
     ? JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBalance", params: [address, "latest"] })
     : JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [address] })
-  return timeout.concat(["/usr/bin/curl", "-fsSL", "--max-time", "15",
-    "-X", "POST", "-H", "content-type: application/json", "-d", body, entry.endpoint])
+  return timeout.concat(CRYPTO_CURL_FLAGS,
+    ["-X", "POST", "-H", "content-type: application/json", "-d", body, entry.endpoint])
 }
 
 function cryptoPriceCommand(coins, currencies) {
@@ -3859,10 +3891,10 @@ function cryptoPriceCommand(coins, currencies) {
     if (isCryptoCurrency(currencies[c])) codes.push(String(currencies[c]).toLowerCase())
   }
   if (ids.length === 0 || codes.length === 0) return null
-  return ["/usr/bin/timeout", "-k", "2", "20",
-    "/usr/bin/curl", "-fsSL", "--max-time", "15",
-    "https://api.coingecko.com/api/v3/simple/price?ids=" + ids.join(",")
-      + "&vs_currencies=" + codes.join(",") + "&include_24hr_change=true"]
+  return ["/usr/bin/timeout", "-k", "2", "20", "/usr/bin/curl"].concat(
+    CRYPTO_CURL_FLAGS,
+    ["https://api.coingecko.com/api/v3/simple/price?ids=" + ids.join(",")
+      + "&vs_currencies=" + codes.join(",") + "&include_24hr_change=true"])
 }
 
 // An Esplora address answers with confirmed totals and the mempool's delta on
@@ -3968,7 +4000,7 @@ function cryptoAmountLabel(amount) {
   // numberOrNaN rather than Number: Number(null) is 0, and a balance that has
   // not arrived must never format as a wallet holding nothing.
   var n = numberOrNaN(amount)
-  if (!isFinite(n) || n < 0) return ""
+  if (!isFinite(n) || n < 0 || n >= MAX_WRITABLE) return ""
   if (n === 0) return "0"
   if (n >= 1000) return groupThousands(String(Math.round(n)))
   var decimals
@@ -3997,7 +4029,7 @@ function groupThousands(digits) {
 // over a thousand drops the cents nobody is reading from across a desk.
 function cryptoMoneyLabel(value, currency) {
   var n = numberOrNaN(value)
-  if (!isFinite(n) || n < 0) return ""
+  if (!isFinite(n) || n < 0 || n >= MAX_WRITABLE) return ""
   var symbol = CRYPTO_CURRENCY_SYMBOLS[String(currency)] || ""
   if (n >= 1000) return symbol + groupThousands(String(Math.round(n)))
   return symbol + n.toFixed(2)
@@ -4010,7 +4042,10 @@ function cryptoChangeLabel(change) {
   var n = Number(change)
   if (change === null || change === undefined || !isFinite(n)) return ""
   var rounded = Math.round(Math.abs(n) * 10) / 10
-  return (n < 0 ? "-" : "+") + rounded.toFixed(1) + "%"
+  // A day that moved by less than a twentieth of a percent reads as "+0.0%",
+  // never "-0.0%": the sign is the whole of what this label says, and a minus
+  // in front of a zero says a fall that the number then denies.
+  return (n < 0 && rounded > 0 ? "-" : "+") + rounded.toFixed(1) + "%"
 }
 
 // What one holding is worth, or null when either half is missing. Not zero:
@@ -4021,6 +4056,9 @@ function cryptoHoldingValue(amount, quote) {
   if (!isPlainObject(quote)) return null
   var price = numberOrNaN(quote.price)
   if (!isFinite(price)) return null
+  // No ceiling here: both halves already carry one, and what they make
+  // together is guarded where it is written rather than where it is worked
+  // out -- see MAX_WRITABLE.
   return n * price
 }
 
@@ -4079,6 +4117,7 @@ if (typeof module !== "undefined" && module.exports) {
     CRYPTO_DEFAULT_CURRENCY: CRYPTO_DEFAULT_CURRENCY,
     MAX_CRYPTO_PRICE: MAX_CRYPTO_PRICE,
     MAX_CRYPTO_AMOUNT: MAX_CRYPTO_AMOUNT,
+    MAX_WRITABLE: MAX_WRITABLE,
     cryptoChain: cryptoChain,
     cryptoChainNames: cryptoChainNames,
     cryptoSymbol: cryptoSymbol,

@@ -135,6 +135,7 @@ Item {
         color: root.live ? root.foreground : root.dim
         font.family: root.fontFamily
         font.pixelSize: root.titleSize
+        font.letterSpacing: root.titleSize * 0.14
         renderType: Text.NativeRendering
       }
 
@@ -156,27 +157,70 @@ Item {
     // The power switch: the very button the omate panel uses in its own
     // header -- PanelActionButton, same glyph, same colors, same write --
     // so the card reads as the panel's control, not a lookalike.
-    PanelActionButton {
+    //
+    // Wrapped, for the one thing the panel's button cannot know: this is a
+    // wallpaper, not a toolbar. The wrapper is bigger than the button and
+    // takes the clicks that land near it, which is what the transport button
+    // this replaced did with a negative margin on its own mouse area. A
+    // pointer crossing a desktop should not have to be aimed.
+    Item {
       id: power
 
+      readonly property int buttonSize: Math.round(root.unit * 0.13)
+
       anchors.verticalCenter: parent.verticalCenter
-      // nf-md-power. \u in a QML string takes exactly four hex digits, so
-      // the five-digit codepoint goes through fromCodePoint -- the escape
-      // form parses as U+F042 followed by a literal "5".
-      iconText: String.fromCodePoint(0xF0425)
-      tooltipText: root.petVisible ? "Disable the mate" : "Enable the mate"
-      fontFamily: root.fontFamily
-      foreground: root.petVisible ? root.accent : Qt.alpha(root.foreground, 0.55)
-      bordered: true
-      size: Math.round(root.unit * 0.13)
+      width: buttonSize
+      height: buttonSize
       // Gone rather than greyed when there is no pet: an accent on a
       // click-through desktop is a promise that something happens.
       visible: root.live
       enabled: root.live
-      onClicked: {
+
+      function toggle() {
         if (!root.live) return
         if (typeof root.omate.toggleMateVisible === "function")
           root.omate.toggleMateVisible()
+      }
+
+      MouseArea {
+        id: powerReach
+
+        anchors.fill: parent
+        anchors.margins: -Math.round(power.buttonSize * 0.35)
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        // A press anywhere in reach is the same press. The button on top
+        // takes the ones that land on it; this takes the near misses.
+        onClicked: power.toggle()
+      }
+
+      PanelActionButton {
+        id: powerButton
+
+        anchors.fill: parent
+        // The wrapper's hover, borrowed: a pointer in the margin lights the
+        // button it is about to press, the way it would if the button were
+        // that big. `hasCursor` is the panel's own name for this.
+        hasCursor: powerReach.containsMouse
+
+        // nf-md-power. \u in a QML string takes exactly four hex digits, so
+        // the five-digit codepoint goes through fromCodePoint -- the escape
+        // form parses as U+F042 followed by a literal "5".
+        iconText: String.fromCodePoint(0xF0425)
+        tooltipText: root.petVisible ? "Disable the mate" : "Enable the mate"
+        fontFamily: root.fontFamily
+        foreground: root.petVisible ? root.accent : root.dim
+        bordered: true
+        size: power.buttonSize
+        // The panel sizes this glyph off a bar token, which is a fixed number
+        // of pixels because a bar is a fixed height. A card is not: it is
+        // whatever the grid's cell size and scale make it, so the glyph is a
+        // fraction of the button the way everything else here is a fraction
+        // of the card. Left at the token, a card at cellSize 600 and scale 2
+        // draws a 156px button around a 14px glyph.
+        fontSize: Math.max(8, Math.round(power.buttonSize * 0.5))
+        enabled: root.live
+        onClicked: power.toggle()
       }
     }
   }

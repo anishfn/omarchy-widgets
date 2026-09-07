@@ -2554,6 +2554,45 @@ test("upcoming is what has not ended, not what has not started", () => {
   assert.deepEqual(Model.upcomingEvents(events, NaN, 4, true), [])
 })
 
+test("today's list holds what the day has left, not the week's", () => {
+  const midnight = Model.startOfDay(NOW)
+  const at = (off) => midnight + off * 3600000
+  const events = [
+    // Began yesterday and is running now: still today's business.
+    { start: at(-2), end: at(14), allDay: false, summary: "ran across midnight" },
+    { start: at(0), end: at(24), allDay: true, summary: "all-day today" },
+    { start: at(8), end: at(9), allDay: false, summary: "itself over" },
+    { start: at(14), end: at(15), allDay: false, summary: "afternoon" },
+    { start: at(24 + 1), end: at(24 + 2), allDay: false, summary: "tomorrow" }
+  ]
+  assert.deepEqual(summaries(Model.todayEvents(events, NOW, 8, true)),
+    ["ran across midnight", "all-day today", "afternoon"])
+  assert.deepEqual(summaries(Model.todayEvents(events, NOW, 1, true)),
+    ["ran across midnight"])
+  assert.deepEqual(summaries(Model.todayEvents(events, NOW, 8, false)),
+    ["ran across midnight", "afternoon"], "all-day events can be left out")
+  assert.deepEqual(Model.todayEvents(null, NOW, 4, true), [])
+  assert.deepEqual(Model.todayEvents(events, NaN, 4, true), [])
+})
+
+test("the small line under the card reaches exactly one day ahead", () => {
+  const midnight = Model.startOfDay(NOW)
+  const at = (off) => midnight + off * 3600000
+  const events = [
+    { start: at(2) + 7200000, end: at(3) + 7200000, allDay: false, summary: "later today" },
+    { start: at(24), end: at(48), allDay: true, summary: "all-day tomorrow" },
+    { start: at(26), end: at(27), allDay: false, summary: "tomorrow morning" },
+    { start: at(34), end: at(35), allDay: false, summary: "tomorrow evening" },
+    { start: at(50), end: at(51), allDay: false, summary: "day after" }
+  ]
+  assert.equal(Model.nextDayEvent(events, NOW, 1, true).summary, "all-day tomorrow")
+  assert.equal(Model.nextDayEvent(events, NOW, 1, false).summary, "tomorrow morning",
+    "all-day events can be skipped over")
+  assert.equal(Model.nextDayEvent(events, NOW, 2, true).summary, "day after")
+  assert.equal(Model.nextDayEvent(null, NOW, 1, true), null)
+  assert.equal(Model.nextDayEvent(events, NaN, 1, true), null)
+})
+
 test("a time is written the way the card's clock setting asks for it", () => {
   const at = (h, m) => new Date(2026, 8, 5, h, m).getTime()
   assert.equal(Model.clockLabel(at(14, 30), false), "14:30")

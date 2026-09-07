@@ -601,46 +601,62 @@ Litecoin — then paste an **Address**. **Currency** picks the money it is
 valued in, and **Label** overrides the ticker symbol above the number.
 
 ```
-   ┌──────────┐            ┌──────────┬──────────┐
-   │   LTC    │            │  LTC     │   $54.52 │
-   │  7.963   │            │  7.963   │   +2.0%  │
-   │  $434    │            │  $434    │          │
-   └──────────┘            └──────────┴──────────┘
-     [1 × 1]                      [2 × 1]
+   ┌────────────────┐        ┌────────────────────────────┐
+   │ LTC     +3.0%  │        │ LTC                 +3.0%  │
+   │ 9.072          │        │ 9.072              $55.76  │
+   │      ╱‾╲__╱‾   │        │           __╱‾╲__╱‾        │
+   │ $505.87        │        │ $505.87                    │
+   └────────────────┘        └────────────────────────────┘
+        [1 × 1]                        [2 × 1]
 ```
 
-**Leave the address empty and the card is a ticker instead** — the same three
-lines with the coin's price where the balance was. That is not a second
-widget; it is the one setting nobody has filled in yet, and it is what most
-people actually want.
+The coin and its day sit on the top line, what you hold is the number, the
+week behind it is the shape, and what it is all worth is the line along the
+bottom.
+
+**Leave the address empty and the card is a ticker instead** — the coin's own
+price where the balance was, and no line along the bottom. That is not a
+second widget; it is the one setting nobody has filled in yet, and it is what
+most people actually want.
 
 The wide size is not the small one stretched. The square card spends its last
 line on what your holding is worth, so the coin's own price is the one thing
-it cannot show; the second column is where that goes.
+it cannot show; the second column is where that goes, and the week gets the
+room to be a shape rather than a squiggle.
 
-**The day's change is never coloured.** Every other crypto readout paints a
-rise green and a fall red, and [DESIGN.md](DESIGN.md) rules that out — a
-theme's palette is not a semantic scale, and a widget that invents one fights
-every theme it did not anticipate. The sign carries it, the way the timezone
-offset on [the clock](#the-clock) carries its own.
+**The graph is seven days of hourly closes**, plotted against its own high and
+low — so it answers "is this normal", which is the question a price and a
+percentage between them cannot. It is drawn in the same reduced foreground as
+every label here, never in the accent and never tinted: the shape says which
+way the week went.
+
+**The day's change is never coloured either.** Every other crypto readout
+paints a rise green and a fall red, and [DESIGN.md](DESIGN.md) rules that out
+— a theme's palette is not a semantic scale, and a widget that invents one
+fights every theme it did not anticipate. The sign carries it, the way the
+timezone offset on [the clock](#the-clock) carries its own.
 
 ### What it fetches, and from where
 
-Two requests, to different places, for different reasons.
+Two kinds of request, to different places, for different reasons.
 
 | | Where | How often |
 |---|---|---|
-| Price and 24h change | `api.coingecko.com` | every 5 minutes |
+| Price, 24h change and the week | `api.coingecko.com` | every 5 minutes |
 | Bitcoin balance | `mempool.space` | every 10 minutes |
 | Litecoin balance | `litecoinspace.org` | every 10 minutes |
 | Ethereum balance | `ethereum-rpc.publicnode.com` | every 10 minutes |
 | Solana balance | `api.mainnet-beta.solana.com` | every 10 minutes |
 
-**Prices are one request for the whole desktop.** Six crypto cards in four
-currencies is a single call, not six — the service asks for every coin anyone
-has on screen at once. Balances cannot be batched that way, so they go one at
-a time through a queue, and a balance moves when you move it, which is why it
-is asked for half as often.
+**Prices are one request per currency, for the whole desktop.** Six crypto
+cards priced in dollars is a single call, not six — the service asks for every
+coin anyone has on screen at once, and the price, the day's change and the
+week all come back in the same body. A desktop mixing dollars and euros makes
+two calls, which go one after the other rather than together.
+
+Balances cannot be batched that way — there is no endpoint for "these four
+addresses on three chains" — so they go one at a time through a queue, and a
+balance moves when you move it, which is why it is asked for half as often.
 
 **Nothing here holds an API key**, because there is nowhere in a plugin like
 this to keep one. Every host is a public courtesy endpoint, which also means

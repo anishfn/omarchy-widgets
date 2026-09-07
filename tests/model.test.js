@@ -3187,11 +3187,18 @@ const SOLANA_BODY = {
   result: { context: { apiVersion: "4.2.2", slot: 444795353 }, value: 9188448313401106 }
 }
 
-const PRICE_BODY = {
-  bitcoin: { usd: 79982, usd_24h_change: 0.3395 },
-  ethereum: { usd: 2502.74, usd_24h_change: 1.783 },
-  litecoin: { usd: 54.52, usd_24h_change: -1.97 }
-}
+// A week of hourly closes is 168 of these; eight is the fewest that counts as
+// a shape, so the fixtures use a round twelve.
+const WEEK = [51.1, 52.4, 53.9, 52.2, 50.8, 51.6, 53.3, 54.8, 55.2, 54.1, 53.7, 54.52]
+
+const PRICE_BODY = [
+  { id: "bitcoin", current_price: 79982, price_change_percentage_24h_in_currency: 0.3395,
+    sparkline_in_7d: { price: WEEK.map((n) => n * 1466) } },
+  { id: "ethereum", current_price: 2502.74, price_change_percentage_24h_in_currency: 1.783,
+    sparkline_in_7d: { price: WEEK.map((n) => n * 46) } },
+  { id: "litecoin", current_price: 54.52, price_change_percentage_24h_in_currency: -1.97,
+    sparkline_in_7d: { price: WEEK.slice() } }
+]
 
 function cryptoConfig(settings, extra) {
   return Model.normalizeConfig({
@@ -3291,28 +3298,80 @@ test("a balance that did not arrive is null, never zero", () => {
   assert.equal(Model.parseCryptoBalance("solana", { result: { value: 0 } }), 0)
 })
 
-test("prices parse per coin and per currency", () => {
-  const prices = Model.parseCryptoPrices(PRICE_BODY)
+test("a market answer becomes a price, a day's change and a week's shape", () => {
+  const usd = Model.parseCryptoMarket(PRICE_BODY)
+  const prices = { usd: usd }
   assert.equal(Model.cryptoQuote(prices, "bitcoin", "usd").price, 79982)
   assert.equal(Model.cryptoQuote(prices, "litecoin", "usd").change, -1.97)
+  assert.deepEqual(Model.cryptoQuote(prices, "litecoin", "usd").series, WEEK)
   // A coin nobody asked about, and a currency that was not fetched.
   assert.equal(Model.cryptoQuote(prices, "dogecoin", "usd"), null)
   assert.equal(Model.cryptoQuote(prices, "bitcoin", "eur"), null)
   assert.equal(Model.cryptoQuote(null, "bitcoin", "usd"), null)
 
-  // A price without its 24h figure is still a price: the card shows what it
-  // has rather than nothing.
-  const partial = Model.parseCryptoPrices({ bitcoin: { usd: 79982 } })
-  assert.equal(Model.cryptoQuote(partial, "bitcoin", "usd").price, 79982)
-  assert.equal(Model.cryptoQuote(partial, "bitcoin", "usd").change, null)
+  // The plain 24h field is taken when the per-currency one is absent, which
+  // is what the endpoint answers with if it is not asked for one.
+  const plain = Model.parseCryptoMarket([
+    { id: "bitcoin", current_price: 100, price_change_percentage_24h: -2.5 }])
+  assert.equal(plain.bitcoin.change, -2.5)
+
+  // A price without its 24h figure is still a price, and a price without a
+  // week behind it is still a price: the card shows what it has rather than
+  // nothing.
+  const bare = Model.parseCryptoMarket([{ id: "bitcoin", current_price: 79982 }])
+  assert.equal(bare.bitcoin.price, 79982)
+  assert.equal(bare.bitcoin.change, null)
+  assert.deepEqual(bare.bitcoin.series, [])
 
   // Nothing usable is null rather than an empty table, so the card can tell
   // "not fetched" from "fetched and empty".
-  assert.equal(Model.parseCryptoPrices("rate limited"), null)
-  assert.equal(Model.parseCryptoPrices({}), null)
-  assert.equal(Model.parseCryptoPrices({ bitcoin: { usd: 0 } }), null)
-  assert.equal(Model.parseCryptoPrices({ bitcoin: { usd: -5 } }), null)
-  assert.equal(Model.parseCryptoPrices({ bitcoin: "79982" }), null)
+  assert.equal(Model.parseCryptoMarket("rate limited"), null)
+  assert.equal(Model.parseCryptoMarket([]), null)
+  assert.equal(Model.parseCryptoMarket([{ id: "bitcoin", current_price: 0 }]), null)
+  assert.equal(Model.parseCryptoMarket([{ id: "bitcoin", current_price: -5 }]), null)
+  assert.equal(Model.parseCryptoMarket([{ current_price: 79982 }]), null)
+  // An object is an error body however well formed; the endpoint answers
+  // with a list.
+  assert.equal(Model.parseCryptoMarket({ bitcoin: { usd: 79982 } }), null)
+  assert.equal(Model.parseCryptoMarket({ status: { error_code: 429 } }), null)
+})
+
+test("a week of closes becomes a shape a card can draw", () => {
+  // Too few readings is not a graph. A card would rather draw nothing than a
+  // line implying it knows a week it does not.
+  assert.deepEqual(Model.cryptoSeries([1, 2, 3]), [])
+  assert.deepEqual(Model.cryptoSeries(null), [])
+  assert.deepEqual(Model.cryptoSeries("nope"), [])
+  assert.equal(Model.cryptoSeries(WEEK).length, WEEK.length)
+
+  // Nonsense in the middle of a real week is dropped, not drawn as zero.
+  const holed = Model.cryptoSeries([51, 52, null, 53, "x", 54, -1, 55, 56, 57, 58, 59])
+  assert.equal(holed.length, 9)
+  assert.equal(holed.includes(0), false)
+
+  // 168 hourly closes reduce to the count asked for, and the last point is
+  // the latest reading rather than the mean of the last bucket -- the end of
+  // the line has to be the price printed above it.
+  const week = Array.from({ length: 168 }, (_, i) => 100 + Math.sin(i / 8) * 10)
+  const line = Model.cryptoSparkline(week, 48)
+  assert.equal(line.length, 48)
+  assert.equal(line[line.length - 1], week[week.length - 1])
+  // Every bucket is a mean of real readings, so nothing escapes the range.
+  const low = Math.min(...week)
+  const high = Math.max(...week)
+  for (const point of line) assert.ok(point >= low && point <= high)
+
+  // Asked for more buckets than there are readings, it hands back what it has
+  // rather than inventing points between them.
+  assert.deepEqual(Model.cryptoSparkline(WEEK, 200), WEEK)
+  assert.deepEqual(Model.cryptoSparkline([1, 2, 3], 8), [])
+
+  // The range a graph is plotted against, and the flat week that would
+  // otherwise be plotted against no range at all.
+  assert.deepEqual(Model.cryptoSeriesRange([3, 1, 2]), { low: 1, high: 3 })
+  const flat = Model.cryptoSeriesRange([50, 50, 50])
+  assert.ok(flat.low < 50 && flat.high > 50, "a flat week still has a middle to sit on")
+  assert.equal(Model.cryptoSeriesRange([]), null)
 })
 
 test("the balance request is built to each chain's shape, or not at all", () => {
@@ -3385,20 +3444,27 @@ test("an address is only ever sent to its own chain's node", () => {
 })
 
 
-test("one price request covers every coin and currency on the desktop", () => {
-  const command = Model.cryptoPriceCommand(["bitcoin", "ethereum"], ["usd", "eur"])
+test("one price request covers every coin on the desktop, per currency", () => {
+  const command = Model.cryptoPriceCommand(["bitcoin", "ethereum"], "usd")
   const url = command[command.length - 1]
-  assert.ok(url.startsWith("https://api.coingecko.com/api/v3/simple/price?"))
+  assert.ok(url.startsWith("https://api.coingecko.com/api/v3/coins/markets?"))
+  assert.ok(url.includes("vs_currency=usd"))
   assert.ok(url.includes("ids=bitcoin,ethereum"))
-  assert.ok(url.includes("vs_currencies=usd,eur"))
-  assert.ok(url.includes("include_24hr_change=true"))
+  // The week behind the price rides along in the same body, which is the
+  // whole reason this endpoint is worth one request per currency.
+  assert.ok(url.includes("sparkline=true"))
+  assert.ok(url.includes("price_change_percentage=24h"))
+
+  // A coin asked for twice is asked for once.
+  const doubled = Model.cryptoPriceCommand(["bitcoin", "bitcoin"], "usd")
+  assert.ok(doubled[doubled.length - 1].includes("ids=bitcoin&"))
 
   // Nothing to ask about is no request, not a malformed one.
-  assert.equal(Model.cryptoPriceCommand([], ["usd"]), null)
-  assert.equal(Model.cryptoPriceCommand(["bitcoin"], []), null)
+  assert.equal(Model.cryptoPriceCommand([], "usd"), null)
+  assert.equal(Model.cryptoPriceCommand(["bitcoin"], ""), null)
   // And nothing unknown reaches the query string.
-  assert.equal(Model.cryptoPriceCommand(["bitcoin"], ["doubloons"]), null)
-  assert.equal(Model.cryptoPriceCommand(["not-a-coin"], ["usd"]), null)
+  assert.equal(Model.cryptoPriceCommand(["bitcoin"], "doubloons"), null)
+  assert.equal(Model.cryptoPriceCommand(["not-a-coin"], "usd"), null)
 })
 
 test("only the wallets actually on the desktop are fetched, once each", () => {
@@ -3538,14 +3604,15 @@ test("a number too large to write as digits never reaches the card", () => {
   // "$1e+,300" on somebody's wallpaper. Neither ceiling is reachable by a
   // real price or a real balance, so a figure past one is a response to
   // disbelieve rather than one to clamp.
-  assert.equal(Model.parseCryptoPrices({ bitcoin: { usd: 1e300 } }), null)
-  assert.equal(Model.parseCryptoPrices({ bitcoin: { usd: Infinity } }), null)
+  assert.equal(Model.parseCryptoMarket([{ id: "bitcoin", current_price: 1e300 }]), null)
+  assert.equal(Model.parseCryptoMarket([{ id: "bitcoin", current_price: Infinity }]), null)
   assert.equal(Model.parseCryptoBalance("ethereum", { result: "0x" + "f".repeat(60) }), null)
   assert.equal(Model.parseCryptoBalance("solana", { result: { value: 1e30 } }), null)
 
   // And the real ones still go through untouched.
   assert.equal(Model.cryptoQuote(
-    Model.parseCryptoPrices({ bitcoin: { usd: 79982 } }), "bitcoin", "usd").price, 79982)
+    { usd: Model.parseCryptoMarket([{ id: "bitcoin", current_price: 79982 }]) },
+    "bitcoin", "usd").price, 79982)
   assert.equal(Model.parseCryptoBalance("ethereum", EVM_BODY).toFixed(6), "6.712150")
 
   // A holding worth billions is a number, not an exponent.

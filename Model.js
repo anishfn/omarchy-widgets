@@ -3877,24 +3877,35 @@ function cryptoBalanceCommand(chain, address) {
     ["-X", "POST", "-H", "content-type: application/json", "-d", body, entry.endpoint])
 }
 
-function cryptoPriceCommand(coins, currencies) {
+// One request per currency, covering every coin anybody has on screen.
+//
+// `coins/markets` rather than `simple/price`, which is what this asked for
+// first: it answers with the price, the day's change and a week of hourly
+// closes in the same body, so the card's graph costs no extra request. The
+// trade is that it takes one currency at a time where `simple/price` took a
+// list -- the two-line change that bought a graph. A desktop in one currency,
+// which is nearly all of them, still makes exactly one call.
+//
+// The series is asked for in the card's own currency rather than fetched once
+// in dollars and drawn under every label: the shape is normalised to its own
+// range before it is drawn and the difference would rarely show, but a graph
+// captioned in euros should be a graph of euros.
+function cryptoPriceCommand(coins, currency) {
   var ids = []
   for (var i = 0; i < (coins || []).length; i++) {
     var entry = null
     for (var key in CRYPTO_CHAINS) {
       if (CRYPTO_CHAINS[key].coin === coins[i]) { entry = CRYPTO_CHAINS[key]; break }
     }
-    if (entry) ids.push(entry.coin)
+    if (entry && ids.indexOf(entry.coin) === -1) ids.push(entry.coin)
   }
-  var codes = []
-  for (var c = 0; c < (currencies || []).length; c++) {
-    if (isCryptoCurrency(currencies[c])) codes.push(String(currencies[c]).toLowerCase())
-  }
-  if (ids.length === 0 || codes.length === 0) return null
+  if (ids.length === 0 || !isCryptoCurrency(currency)) return null
+  var code = String(currency).toLowerCase()
   return ["/usr/bin/timeout", "-k", "2", "20", "/usr/bin/curl"].concat(
     CRYPTO_CURL_FLAGS,
-    ["https://api.coingecko.com/api/v3/simple/price?ids=" + ids.join(",")
-      + "&vs_currencies=" + codes.join(",") + "&include_24hr_change=true"])
+    ["https://api.coingecko.com/api/v3/coins/markets?vs_currency=" + code
+      + "&ids=" + ids.join(",")
+      + "&sparkline=true&price_change_percentage=24h"])
 }
 
 // An Esplora address answers with confirmed totals and the mempool's delta on
@@ -3956,40 +3967,112 @@ function parseCryptoBalance(chain, raw) {
   return amount
 }
 
-// { bitcoin: { usd: { price, change } } }. A coin whose price arrived without
-// a 24h figure keeps the price and reports the change as null, so the card
-// can show what it has rather than nothing.
-function parseCryptoPrices(raw) {
+// One currency's worth of `coins/markets`, folded into { coin: { price,
+// change, series } }. A coin whose price arrived without a 24h figure keeps
+// the price and reports the change as null, and one that arrived without a
+// week behind it reports an empty series -- the card shows what it has rather
+// than nothing, which is the rule the whole file is written to.
+function parseCryptoMarket(raw) {
   var data = raw
   if (typeof raw === "string") {
     try { data = JSON.parse(raw) } catch (e) { return null }
   }
-  if (!isPlainObject(data)) return null
+  // The endpoint answers with a list, one entry per coin. An object here is
+  // an error body, which is not a price table however well formed it is.
+  if (!Array.isArray(data)) return null
   var out = {}
   var found = false
-  for (var coin in data) {
-    if (!Object.prototype.hasOwnProperty.call(data, coin)) continue
-    var quotes = data[coin]
-    if (!isPlainObject(quotes)) continue
-    var byCurrency = {}
-    for (var i = 0; i < CRYPTO_CURRENCIES.length; i++) {
-      var code = CRYPTO_CURRENCIES[i]
-      var price = numberOrNaN(quotes[code])
-      if (!isFinite(price) || price <= 0 || price > MAX_CRYPTO_PRICE) continue
-      var change = Number(quotes[code + "_24h_change"])
-      byCurrency[code] = { price: price, change: isFinite(change) ? change : null }
-      found = true
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i]
+    if (!isPlainObject(row)) continue
+    var coin = clampString(row.id)
+    if (!coin) continue
+    var price = numberOrNaN(row.current_price)
+    if (!isFinite(price) || price <= 0 || price > MAX_CRYPTO_PRICE) continue
+    var change = Number(row.price_change_percentage_24h_in_currency)
+    if (!isFinite(change)) change = Number(row.price_change_percentage_24h)
+    out[coin] = {
+      price: price,
+      change: isFinite(change) ? change : null,
+      series: cryptoSeries(isPlainObject(row.sparkline_in_7d)
+        ? row.sparkline_in_7d.price : null)
     }
-    out[coin] = byCurrency
+    found = true
   }
   return found ? out : null
 }
 
+// The week behind the price, cleaned up: every finite positive close, in the
+// order it arrived, and nothing at all if there are too few to be a shape.
+// Two points is a line segment, not a graph, and a graph of one week that
+// happens to hold three readings would be a lie about how much is known.
+var CRYPTO_SERIES_MIN = 8
+
+function cryptoSeries(raw) {
+  if (!Array.isArray(raw)) return []
+  var out = []
+  for (var i = 0; i < raw.length; i++) {
+    var n = numberOrNaN(raw[i])
+    if (!isFinite(n) || n <= 0 || n > MAX_CRYPTO_PRICE) continue
+    out.push(n)
+  }
+  return out.length >= CRYPTO_SERIES_MIN ? out : []
+}
+
+// A week of hourly closes is 168 numbers and the card is about 180 pixels
+// wide, so drawing them all spends detail nobody can see. Reduced to a fixed
+// count of buckets, each the mean of the readings that fall in it, which
+// keeps the shape and drops the noise -- a mean rather than a sample because
+// a sample of one reading per bucket would let a single spike stand for six
+// hours that were nothing like it.
+//
+// The last bucket always ends on the last reading, so the right-hand end of
+// the line is where the price is now and lines up with the number above it.
+function cryptoSparkline(series, buckets) {
+  var list = Array.isArray(series) ? series : []
+  var count = Math.max(2, Math.round(Number(buckets) || 0))
+  if (list.length < CRYPTO_SERIES_MIN) return []
+  if (list.length <= count) return list.slice()
+  var out = []
+  for (var i = 0; i < count; i++) {
+    var from = Math.floor(i * list.length / count)
+    var to = Math.floor((i + 1) * list.length / count)
+    if (to <= from) to = from + 1
+    var sum = 0
+    for (var j = from; j < to; j++) sum += list[j]
+    out.push(sum / (to - from))
+  }
+  // Whatever the averaging did to the last bucket, the end of the line is the
+  // latest reading: the graph and the price above it are the same fact.
+  out[out.length - 1] = list[list.length - 1]
+  return out
+}
+
+// The low and the high of a drawn series, as the range a graph is plotted
+// against. A flat week has no range at all, and a zero-height plot would put
+// the line on the floor rather than through the middle, so a flat series is
+// given a nominal band around its own value.
+function cryptoSeriesRange(series) {
+  var list = Array.isArray(series) ? series : []
+  if (list.length === 0) return null
+  var low = list[0]
+  var high = list[0]
+  for (var i = 1; i < list.length; i++) {
+    if (list[i] < low) low = list[i]
+    if (list[i] > high) high = list[i]
+  }
+  if (high - low > 0) return { low: low, high: high }
+  var pad = Math.abs(low) * 0.01 || 1
+  return { low: low - pad, high: high + pad }
+}
+
+// The table is keyed by currency first, because one desktop can hold cards
+// priced in two, and each is a separate request with a separate answer.
 function cryptoQuote(prices, coin, currency) {
   if (!isPlainObject(prices)) return null
-  var byCurrency = prices[String(coin)]
-  if (!isPlainObject(byCurrency)) return null
-  var quote = byCurrency[String(currency)]
+  var byCoin = prices[String(currency)]
+  if (!isPlainObject(byCoin)) return null
+  var quote = byCoin[String(coin)]
   return isPlainObject(quote) ? quote : null
 }
 
@@ -4132,7 +4215,11 @@ if (typeof module !== "undefined" && module.exports) {
     cryptoBalanceCommand: cryptoBalanceCommand,
     cryptoPriceCommand: cryptoPriceCommand,
     parseCryptoBalance: parseCryptoBalance,
-    parseCryptoPrices: parseCryptoPrices,
+    parseCryptoMarket: parseCryptoMarket,
+    cryptoSeries: cryptoSeries,
+    cryptoSparkline: cryptoSparkline,
+    cryptoSeriesRange: cryptoSeriesRange,
+    CRYPTO_SERIES_MIN: CRYPTO_SERIES_MIN,
     cryptoQuote: cryptoQuote,
     cryptoAmountLabel: cryptoAmountLabel,
     cryptoMoneyLabel: cryptoMoneyLabel,

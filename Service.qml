@@ -654,12 +654,13 @@ Item {
   // and any of them can stop answering: a balance that fails to parse leaves
   // the last one it knew on the card rather than blanking it.
 
-  // coingecko coin id -> currency -> { price, change }
+  // currency -> coingecko coin id -> { price, change, series }
   property var cryptoPrices: ({})
   // "chain:address" -> the balance in whole coins
   property var cryptoBalances: ({})
   property string cryptoError: ""
   property var cryptoQueue: []
+  property var cryptoPriceQueue: []
 
   readonly property bool cryptoWanted: {
     for (var i = 0; i < widgets.length; i++)
@@ -680,13 +681,37 @@ Item {
   onCryptoPriceKeyChanged: refreshCryptoPrices()
   onCryptoWalletsChanged: refreshCryptoBalances(false)
 
+  // One request per currency on the desktop, through a queue for the same
+  // reason the balances use one: a desktop in four currencies is four curls,
+  // and four at once for a wallpaper is not a thing to do to anybody's link
+  // or to a courtesy endpoint. Nearly every desktop is one currency and so
+  // one request.
   function refreshCryptoPrices() {
-    if (!service.cryptoWanted || cryptoPriceProc.running) return
-    var command = Model.cryptoPriceCommand(Model.cryptoCoinsInUse(config),
-      Model.cryptoCurrenciesInUse(config))
-    if (!command) return
+    if (!service.cryptoWanted) return
+    var currencies = Model.cryptoCurrenciesInUse(config)
+    if (currencies.length === 0) return
+    service.cryptoPriceQueue = currencies
+    startNextCryptoPrice()
+  }
+
+  function startNextCryptoPrice() {
+    if (cryptoPriceProc.running) return
+    var queue = service.cryptoPriceQueue
+    if (!queue || queue.length === 0) return
+    var currency = queue[0]
+    service.cryptoPriceQueue = queue.slice(1)
+    var command = Model.cryptoPriceCommand(Model.cryptoCoinsInUse(config), currency)
+    if (!command) { Qt.callLater(service.startNextCryptoPrice); return }
+    cryptoPriceProc.currency = currency
     cryptoPriceProc.command = command
     cryptoPriceProc.running = true
+  }
+
+  function storeCryptoPrices(currency, table) {
+    var next = ({})
+    for (var k in service.cryptoPrices) next[k] = service.cryptoPrices[k]
+    next[currency] = table
+    service.cryptoPrices = next
   }
 
   function refreshCryptoBalances(force) {
@@ -729,18 +754,23 @@ Item {
   Process {
     id: cryptoPriceProc
     running: false
+    property string currency: ""
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var parsed = Model.parseCryptoPrices(text)
+        var parsed = Model.parseCryptoMarket(text)
         if (parsed) {
-          service.cryptoPrices = parsed
+          service.storeCryptoPrices(cryptoPriceProc.currency, parsed)
           service.cryptoError = ""
-        } else {
+        } else if (service.cryptoPrices[cryptoPriceProc.currency] === undefined) {
+          // Only says so when there is nothing to show, the way a balance
+          // does: a host that hiccups under prices already on screen leaves
+          // them alone rather than blanking every card.
           service.cryptoError = "unavailable"
         }
       }
     }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextCryptoPrice)
   }
 
   Process {

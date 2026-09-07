@@ -86,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/instal
 | **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
 | **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
 | **Crypto** | A wallet's balance and what it is worth, or just the coin's price | four chains, `api.coingecko.com` |
-| **Calendar** | What is still to come today, and first tomorrow | `calendar.google.com` |
+| **Calendar** | What is next, how long you have, and where it falls in the day | `calendar.google.com` |
 | **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
 | **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
 | **Omate** | The desktop pet: show and hide it, pick its skin, size it, set the cursor chase | local (Omate plugin) |
@@ -682,13 +682,10 @@ Worth reading before you paste an address.
 
 ## The calendar
 
-Today's day, and tomorrow's first line. The card is a small dashboard rather
-than an agenda: the next event's start as one large time, a countdown beside
-it, the calendar label and the event title beneath, and a bar across the foot
-showing how far through the day you are — with when the event ends, a compact
-word of what it is, and how many events are left. A grid of squares on a
-wallpaper tells you that Thursday is busy; it does not tell you what you are
-late for. Tomorrow's earliest event is the one small line underneath.
+What is next, when it is, and where it falls in the day. The card is a time
+against a sentence, which is what a calendar is once you take the week grid
+away — a grid of squares on a wallpaper tells you that Thursday is busy; it
+does not tell you what you are late for.
 
 Recurring events, all-day events, moved instances and cancelled ones are all
 handled, and times are shown in your own clock however the event was written.
@@ -724,18 +721,42 @@ Google's holiday calendars.
 
 ### Three sizes
 
+Each one is a layer on the last, not the one before it stretched.
+
 | | |
 |---|---|
-| **1×1** | The next thing on its own: what it is, when it starts, how long you have |
-| **2×1** | Two or three rows — time, event, and the day in the margin where it changes |
-| **2×2** | The agenda, broken into days, as far ahead as the card holds |
+| **1×1** | The next thing — when it starts, how long you have, what it is |
+| **2×1** | And the day it sits in, as a bar with the event drawn on it |
+| **2×2** | And the rest of today under that, then what tomorrow opens with |
 
-The next event carries a short accent rule in the margin. That is the whole of
-the card's emphasis: everything below it is simply what comes after.
+```
+   ┌──────────────────┐   ┌────────────────────────────────────┐
+   │ Mon 7 Sep  in 24m│   │ WORK                        in 24m │
+   │ 15:46            │   │ 15:46                              │
+   │ Standup          │   │ Standup                            │
+   └──────────────────┘   │ ──────────────────│▬────────────── │
+        [1 × 1]           └────────────────────────────────────┘
+                                        [2 × 1]
+```
 
-The tall card dates every group it draws, so it drops the date across the top
-— that line would be saying "Today" twice. It keeps the line if you have given
-the widget a **Label**, which is the one thing the day headings cannot say.
+**How long you have is the card's one accent**, sitting opposite the date
+rather than beside the time. Beside the time it only fits at two columns — at
+one the hour fills the line and the countdown elides to nothing, which is the
+most useful thing on the card quietly disappearing at the card's default size.
+
+**The bar is the reason the wide sizes exist.** A day is 24 hours across and a
+meeting is one of them, so at a single cell the event would be four pixels and
+the bar would be decoration pretending to be content. Given a second column it
+says the thing a list cannot: not just what is next, but whether the day ahead
+is packed or empty, and how much of it has gone. The event is the accent block;
+the hairline crossing it is now. An all-day event draws no block — it runs
+midnight to midnight, so it would fill the bar end to end and answer "where in
+the day" with "everywhere" — but the mark stays, because how much of the day
+has gone is still true.
+
+The tall card draws as many rows as actually fit, and dates the ones that are
+not today. It shows the date across the top when you have not given the widget
+a **Label**, which is the one thing the day headings cannot say.
 
 Times are shown on a 24-hour clock by default; **Clock** switches to 12-hour.
 **All-day events** and **Location** can each be turned off.

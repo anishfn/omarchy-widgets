@@ -327,7 +327,9 @@ function catalog() {
       description: "What is next, from your Google Calendar's secret iCal address.",
       source: "widgets/Calendar.qml",
       // Wide first: an event is a time and a sentence, and a square card can
-      // hold one of them at a time. The tall size is the day's agenda.
+      // hold one of them at a time. Each size is a layer on the last -- the
+      // wide one adds the day as a bar, the tall one adds the rest of today
+      // and what tomorrow opens with.
       sizes: [[2, 1], [1, 1], [2, 2]],
       // Google publishes every calendar as an iCalendar file at a private
       // address, which is the one way to read a calendar without a wallpaper

@@ -38,12 +38,20 @@ That is the whole install. Plugins land disabled so you can read the code
 before it runs; `enable` puts the **Widgets** button in your bar and the clock
 on your desktop.
 
-Or let the script do it, which also offers the companion plugin the Omate card
-needs and restarts the shell at the end:
+The plugin ships a script that does the three things a bare `add` leaves you to
+find out on your own: it offers the companion plugin the Omate card needs,
+restarts the shell so what you installed is what you can see, and picks `add`
+or `update` for you on a re-run. It runs from the copy you already have:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/install | bash -s -- --yes
+~/.config/omarchy/plugins/anishfn.widgets/install --yes
 ```
+
+**Nothing is fetched and piped into a shell.** Streaming a script off a branch
+and executing it reads from a mutable ref, so a later repository or account
+compromise would become arbitrary code execution on your machine at install
+time. This script is in the checkout you already made, and can be read before
+it runs — which is the same reason plugins land disabled.
 
 | | |
 |---|---|
@@ -99,8 +107,8 @@ curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/instal
   <sub>Type sizes are fractions of the card, so a widget scaled up is the same drawing at a different size — never a small drawing in a big box.</sub>
 </td>
 <td width="50%" valign="top" align="center">
-  <img src="assets/omate.png" alt="The Omate card: a power switch, a scrolling row of skins, and the pet's dials" width="380"><br>
-  <sub>The Omate card, with each skin chip playing that pack's own idle animation. It owns nothing: every control writes through to the pet's plugin.</sub>
+  <img src="assets/omate.png" alt="The Omate card: a power switch, a scrolling row of skins with an arrow to step through them, and the pet's dials" width="380"><br>
+  <sub>The Omate card, with each skin chip playing that pack's own idle animation. The arrow steps the row one skin at a time; it appears only in the direction there is somewhere to go. It owns nothing: every control writes through to the pet's plugin.</sub>
 </td>
 </tr>
 </table>
@@ -614,6 +622,11 @@ The coin and its day sit on the top line, what you hold is the number, the
 week behind it is the shape, and what it is all worth is the line along the
 bottom.
 
+<p align="center">
+  <img src="assets/crypto.png" alt="Three crypto cards: a wide Litecoin wallet showing the balance, the coin price and a week's graph, and two square ticker cards for Bitcoin and Ethereum" width="380"><br>
+  <sub>A wallet card and two tickers. The graph sits on a strip that is reserved whether or not there is a sum of money to put in it, so cards side by side line up.</sub>
+</p>
+
 **Leave the address empty and the card is a ticker instead** — the coin's own
 price where the balance was, and no line along the bottom. That is not a
 second widget; it is the one setting nobody has filled in yet, and it is what
@@ -738,6 +751,11 @@ Each one is a layer on the last, not the one before it stretched.
         [1 × 1]           └────────────────────────────────────┘
                                         [2 × 1]
 ```
+
+<p align="center">
+  <img src="assets/calendar.png" alt="Two calendar cards: a wide one with the next event's time, title and the day as a bar, and a tall one adding the rest of today's events and tomorrow's first" width="380"><br>
+  <sub>The bar is midnight to midnight. The hairline is now; the block is the next event.</sub>
+</p>
 
 **How long you have is the card's one accent**, sitting opposite the date
 rather than beside the time. Beside the time it only fits at two columns — at

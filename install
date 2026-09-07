@@ -26,12 +26,16 @@
 #   --yes             take every prompt as answered, for scripts and pipes
 #   --no-companions   this plugin only; leave the Omate card inert
 #
-# From a terminal:
+# From a terminal, after `omarchy plugin add` has put this file on your disk:
 #
-#   curl -fsSL https://raw.githubusercontent.com/anishfn/omarchy-widgets/main/install | bash -s -- --yes
+#   ~/.config/omarchy/plugins/anishfn.widgets/install --yes
 #
-# Piping to bash gives the confirmations no terminal to appear on, which is
-# why that line carries --yes. Read the script first if you would rather not.
+# It is deliberately not offered as a one-liner that streams this file from
+# a branch into a shell. A branch is a mutable ref: a later
+# repository or account compromise would become arbitrary code execution on
+# somebody else's machine at install time, with no immutable identity or
+# integrity check anywhere in the path. Running the copy already in the
+# checkout costs one more command and removes that entirely.
 
 set -uo pipefail
 

@@ -3099,3 +3099,359 @@ test("a number read from another plugin never reaches a control as NaN", () => {
   // default that no longer makes sense.
   assert.equal(Model.settingNumber(undefined, undefined, 1, 6), 1)
 })
+
+// ------------------------------------------------------------------ crypto
+//
+// Responses captured from the four live endpoints while writing the parsers,
+// trimmed to the fields the card reads. The Litecoin body is a real answer
+// for a real address, kept because it is the one that caught the mempool
+// delta being dropped; the address it names is a public one and holds the
+// balance these numbers describe.
+
+const ESPLORA_BODY = {
+  address: "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw",
+  chain_stats: {
+    funded_txo_count: 50, funded_txo_sum: 1680555983,
+    spent_txo_count: 41, spent_txo_sum: 884256859, tx_count: 50
+  },
+  mempool_stats: {
+    funded_txo_count: 0, funded_txo_sum: 0,
+    spent_txo_count: 0, spent_txo_sum: 0, tx_count: 0
+  }
+}
+
+const EVM_BODY = { jsonrpc: "2.0", id: 1, result: "0x5d2659027b0b8043" }
+
+const SOLANA_BODY = {
+  jsonrpc: "2.0", id: 1,
+  result: { context: { apiVersion: "4.2.2", slot: 444795353 }, value: 9188448313401106 }
+}
+
+const PRICE_BODY = {
+  bitcoin: { usd: 79982, usd_24h_change: 0.3395 },
+  ethereum: { usd: 2502.74, usd_24h_change: 1.783 },
+  litecoin: { usd: 54.52, usd_24h_change: -1.97 }
+}
+
+function cryptoConfig(settings, extra) {
+  return Model.normalizeConfig({
+    widgets: [Object.assign(
+      { id: "c1", type: "crypto", enabled: true, col: 0, row: 0, settings },
+      extra || {})]
+  })
+}
+
+test("an address that could escape a path or a JSON body is refused", () => {
+  // Each chain's own shape, and nothing else. These become a path segment on
+  // the Esplora hosts and a JSON string sent to a node.
+  assert.equal(Model.isSafeCryptoAddress("litecoin", "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw"), true)
+  assert.equal(Model.isSafeCryptoAddress("bitcoin",
+    "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97"), true)
+  assert.equal(Model.isSafeCryptoAddress("bitcoin", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), true)
+  assert.equal(Model.isSafeCryptoAddress("ethereum",
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"), true)
+  assert.equal(Model.isSafeCryptoAddress("solana",
+    "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"), true)
+
+  for (const bad of [
+    "../../etc/passwd",
+    "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw/../x",
+    "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw?x=1",
+    "bc1q\"; rm -rf /",
+    "0xdeadbeef",
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045extra",
+    "",
+    "   "
+  ]) {
+    for (const chain of Model.cryptoChainNames()) {
+      assert.equal(Model.isSafeCryptoAddress(chain, bad), false,
+        `${chain} accepted ${JSON.stringify(bad)}`)
+    }
+  }
+
+  // An address is only ever valid for the chain it belongs to: a Bitcoin
+  // address pointed at Ethereum is a typo, not a lookup worth making.
+  assert.equal(Model.isSafeCryptoAddress("ethereum", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), false)
+  assert.equal(Model.isSafeCryptoAddress("nonsense", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), false)
+
+  // Bech32 has no b, i or o, so an address carrying one never reaches a host.
+  assert.equal(Model.isSafeCryptoAddress("bitcoin", "bc1bbbbbbbbbbbbbbbbbbbb"), false)
+})
+
+test("each chain's own answer shape becomes a balance in whole coins", () => {
+  // 1680555983 - 884256859 litoshi, at 1e8.
+  assert.equal(Model.parseCryptoBalance("litecoin", ESPLORA_BODY), 7.96299124)
+  // The same body is what mempool.space answers for Bitcoin.
+  assert.equal(Model.parseCryptoBalance("bitcoin", ESPLORA_BODY), 7.96299124)
+  // Wei, via hex, at 1e18.
+  assert.equal(Model.parseCryptoBalance("ethereum", EVM_BODY).toFixed(6), "6.712150")
+  // Lamports at 1e9.
+  assert.equal(Model.parseCryptoBalance("solana", SOLANA_BODY), 9188448.313401107)
+
+  // The raw text is what the process actually hands over.
+  assert.equal(Model.parseCryptoBalance("litecoin", JSON.stringify(ESPLORA_BODY)), 7.96299124)
+})
+
+test("an unconfirmed payment counts towards the balance", () => {
+  // A wallet shows it, so a card that left it out would read as broken rather
+  // than as careful.
+  const pending = JSON.parse(JSON.stringify(ESPLORA_BODY))
+  pending.mempool_stats.funded_txo_sum = 100000000
+  assert.equal(Model.parseCryptoBalance("litecoin", pending), 8.96299124)
+
+  // And a spend that has not confirmed comes back off it.
+  const leaving = JSON.parse(JSON.stringify(ESPLORA_BODY))
+  leaving.mempool_stats.spent_txo_sum = 96299124
+  assert.equal(Model.parseCryptoBalance("litecoin", leaving), 7)
+})
+
+test("a balance that did not arrive is null, never zero", () => {
+  // Zero is a wallet that holds nothing. Null is a wallet we cannot see.
+  // Confusing the two is the one failure on this card that costs money.
+  for (const raw of ["", "not json", "<html>rate limited</html>", "null", "[]", "{}"]) {
+    assert.equal(Model.parseCryptoBalance("bitcoin", raw), null, `bitcoin took ${raw}`)
+    assert.equal(Model.parseCryptoBalance("ethereum", raw), null, `ethereum took ${raw}`)
+    assert.equal(Model.parseCryptoBalance("solana", raw), null, `solana took ${raw}`)
+  }
+
+  // A node answering with an error is not a balance of zero.
+  assert.equal(Model.parseCryptoBalance("ethereum",
+    { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "Unauthorized" } }), null)
+  assert.equal(Model.parseCryptoBalance("solana",
+    { jsonrpc: "2.0", id: 1, error: { code: -32601, message: "Method not found" } }), null)
+
+  // Nor is a result that is not the shape it should be.
+  assert.equal(Model.parseCryptoBalance("ethereum", { result: "deadbeef" }), null)
+  assert.equal(Model.parseCryptoBalance("ethereum", { result: "0xnothex" }), null)
+  assert.equal(Model.parseCryptoBalance("solana", { result: { value: "lots" } }), null)
+  assert.equal(Model.parseCryptoBalance("solana", { result: { value: -1 } }), null)
+
+  // An empty wallet, on the other hand, really is zero.
+  assert.equal(Model.parseCryptoBalance("ethereum", { result: "0x0" }), 0)
+  assert.equal(Model.parseCryptoBalance("solana", { result: { value: 0 } }), 0)
+})
+
+test("prices parse per coin and per currency", () => {
+  const prices = Model.parseCryptoPrices(PRICE_BODY)
+  assert.equal(Model.cryptoQuote(prices, "bitcoin", "usd").price, 79982)
+  assert.equal(Model.cryptoQuote(prices, "litecoin", "usd").change, -1.97)
+  // A coin nobody asked about, and a currency that was not fetched.
+  assert.equal(Model.cryptoQuote(prices, "dogecoin", "usd"), null)
+  assert.equal(Model.cryptoQuote(prices, "bitcoin", "eur"), null)
+  assert.equal(Model.cryptoQuote(null, "bitcoin", "usd"), null)
+
+  // A price without its 24h figure is still a price: the card shows what it
+  // has rather than nothing.
+  const partial = Model.parseCryptoPrices({ bitcoin: { usd: 79982 } })
+  assert.equal(Model.cryptoQuote(partial, "bitcoin", "usd").price, 79982)
+  assert.equal(Model.cryptoQuote(partial, "bitcoin", "usd").change, null)
+
+  // Nothing usable is null rather than an empty table, so the card can tell
+  // "not fetched" from "fetched and empty".
+  assert.equal(Model.parseCryptoPrices("rate limited"), null)
+  assert.equal(Model.parseCryptoPrices({}), null)
+  assert.equal(Model.parseCryptoPrices({ bitcoin: { usd: 0 } }), null)
+  assert.equal(Model.parseCryptoPrices({ bitcoin: { usd: -5 } }), null)
+  assert.equal(Model.parseCryptoPrices({ bitcoin: "79982" }), null)
+})
+
+test("the balance request is built to each chain's shape, or not at all", () => {
+  const btc = Model.cryptoBalanceCommand("bitcoin",
+    "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97")
+  // Through timeout, with an absolute path, the way every other fetcher here
+  // shells out.
+  assert.equal(btc[0], "/usr/bin/timeout")
+  assert.ok(btc.includes("/usr/bin/curl"))
+  assert.equal(btc[btc.length - 1],
+    "https://mempool.space/api/address/bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97")
+
+  // Litecoin is the same shape at its own host.
+  const ltc = Model.cryptoBalanceCommand("litecoin", "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw")
+  assert.equal(ltc[ltc.length - 1],
+    "https://litecoinspace.org/api/address/LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw")
+
+  // The two RPC chains POST a body instead.
+  const eth = Model.cryptoBalanceCommand("ethereum", "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
+  assert.equal(eth[eth.length - 1], "https://ethereum-rpc.publicnode.com")
+  const ethBody = JSON.parse(eth[eth.indexOf("-d") + 1])
+  assert.equal(ethBody.method, "eth_getBalance")
+  assert.deepEqual(ethBody.params, ["0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "latest"])
+
+  const sol = Model.cryptoBalanceCommand("solana", "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+  const solBody = JSON.parse(sol[sol.indexOf("-d") + 1])
+  assert.equal(solBody.method, "getBalance")
+  assert.deepEqual(solBody.params, ["9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"])
+
+  // An address that did not pass gets no command at all, so there is nothing
+  // for the caller to run by accident.
+  assert.equal(Model.cryptoBalanceCommand("bitcoin", "../../etc/passwd"), null)
+  assert.equal(Model.cryptoBalanceCommand("bitcoin", ""), null)
+  assert.equal(Model.cryptoBalanceCommand("nonsense", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), null)
+})
+
+test("one price request covers every coin and currency on the desktop", () => {
+  const command = Model.cryptoPriceCommand(["bitcoin", "ethereum"], ["usd", "eur"])
+  const url = command[command.length - 1]
+  assert.ok(url.startsWith("https://api.coingecko.com/api/v3/simple/price?"))
+  assert.ok(url.includes("ids=bitcoin,ethereum"))
+  assert.ok(url.includes("vs_currencies=usd,eur"))
+  assert.ok(url.includes("include_24hr_change=true"))
+
+  // Nothing to ask about is no request, not a malformed one.
+  assert.equal(Model.cryptoPriceCommand([], ["usd"]), null)
+  assert.equal(Model.cryptoPriceCommand(["bitcoin"], []), null)
+  // And nothing unknown reaches the query string.
+  assert.equal(Model.cryptoPriceCommand(["bitcoin"], ["doubloons"]), null)
+  assert.equal(Model.cryptoPriceCommand(["not-a-coin"], ["usd"]), null)
+})
+
+test("only the wallets actually on the desktop are fetched, once each", () => {
+  const config = Model.normalizeConfig({
+    widgets: [
+      { id: "a", type: "crypto", enabled: true, col: 0, row: 0,
+        settings: { chain: "litecoin", address: "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw" } },
+      // The same address twice is one request.
+      { id: "b", type: "crypto", enabled: true, col: 1, row: 0,
+        settings: { chain: "litecoin", address: "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw" } },
+      // Switched off fetches nothing.
+      { id: "c", type: "crypto", enabled: false, col: 0, row: 1,
+        settings: { chain: "bitcoin", address: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa" } },
+      // A ticker has no address and still wants its price.
+      { id: "d", type: "crypto", enabled: true, col: 0, row: 2,
+        settings: { chain: "ethereum", address: "" } },
+      // A typo never becomes a request.
+      { id: "e", type: "crypto", enabled: true, col: 1, row: 2,
+        settings: { chain: "solana", address: "not an address" } }
+    ]
+  })
+
+  assert.deepEqual(Model.cryptoWalletsInUse(config).map((w) => w.key),
+    ["litecoin:LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw"])
+  // Solana is in the coin list because its card is on and wants a price, even
+  // though its address is junk and no balance will be asked for.
+  assert.deepEqual(Model.cryptoCoinsInUse(config).sort(), ["ethereum", "litecoin", "solana"])
+  assert.deepEqual(Model.cryptoCurrenciesInUse(config), ["usd"])
+
+  // Nothing on the desktop is nothing fetched.
+  assert.deepEqual(Model.cryptoWalletsInUse(Model.normalizeConfig({ widgets: [] })), [])
+  assert.deepEqual(Model.cryptoCoinsInUse(null), [])
+})
+
+test("a holding reads as a magnitude, not as an audit", () => {
+  assert.equal(Model.cryptoAmountLabel(7.96299124), "7.963")
+  assert.equal(Model.cryptoAmountLabel(0.0412), "0.0412")
+  assert.equal(Model.cryptoAmountLabel(0.00001234), "0.0000123")
+  assert.equal(Model.cryptoAmountLabel(0.5), "0.5")
+  assert.equal(Model.cryptoAmountLabel(1204.5), "1,205")
+  assert.equal(Model.cryptoAmountLabel(9188448.313401107), "9,188,448")
+  assert.equal(Model.cryptoAmountLabel(0), "0")
+
+  // Never scientific notation: a card reading "1.2e-7 BTC" has failed at the
+  // one thing it does.
+  assert.ok(!Model.cryptoAmountLabel(0.00000012).includes("e"))
+  assert.equal(Model.cryptoAmountLabel(0.00000012), "0.00000012")
+
+  assert.equal(Model.cryptoAmountLabel(null), "")
+  assert.equal(Model.cryptoAmountLabel(-1), "")
+  assert.equal(Model.cryptoAmountLabel("lots"), "")
+})
+
+test("money keeps the cents only while they are worth reading", () => {
+  assert.equal(Model.cryptoMoneyLabel(434.1409, "usd"), "$434.14")
+  assert.equal(Model.cryptoMoneyLabel(3295.4, "usd"), "$3,295")
+  assert.equal(Model.cryptoMoneyLabel(79982, "usd"), "$79,982")
+  assert.equal(Model.cryptoMoneyLabel(1200, "inr"), "₹1,200")
+  assert.equal(Model.cryptoMoneyLabel(12.5, "eur"), "€12.50")
+  assert.equal(Model.cryptoMoneyLabel(0, "usd"), "$0.00")
+  assert.equal(Model.cryptoMoneyLabel(null, "usd"), "")
+  // A currency with no symbol still prints its number rather than nothing.
+  assert.equal(Model.cryptoMoneyLabel(10, "xyz"), "10.00")
+})
+
+test("the day's change is told by its sign and never by a colour", () => {
+  // DESIGN.md forbids tinting by meaning, so the sign is the whole of it and
+  // the label has to carry one in both directions.
+  assert.equal(Model.cryptoChangeLabel(2.14), "+2.1%")
+  assert.equal(Model.cryptoChangeLabel(-1.97), "-2.0%")
+  assert.equal(Model.cryptoChangeLabel(0), "+0.0%")
+  assert.equal(Model.cryptoChangeLabel(0.3395), "+0.3%")
+  // Missing is empty rather than a confident zero.
+  assert.equal(Model.cryptoChangeLabel(null), "")
+  assert.equal(Model.cryptoChangeLabel(undefined), "")
+  assert.equal(Model.cryptoChangeLabel("up a bit"), "")
+})
+
+test("a holding is worth nothing only when it holds nothing", () => {
+  const quote = { price: 54.52, change: 1.97 }
+  assert.equal(Model.cryptoHoldingValue(7.96299124, quote).toFixed(2), "434.14")
+  assert.equal(Model.cryptoHoldingValue(0, quote), 0)
+  // A price that has not arrived is not a wallet worth zero.
+  assert.equal(Model.cryptoHoldingValue(7.96, null), null)
+  assert.equal(Model.cryptoHoldingValue(null, quote), null)
+})
+
+test("a wallet address never becomes the name of a widget", () => {
+  // The same promise the calendar makes about its secret address: a label
+  // nobody typed must not announce what you hold. The symbol is the fallback.
+  const address = "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw"
+  assert.equal(Model.cryptoCardLabel({ address }, "litecoin"), "LTC")
+  assert.equal(Model.cryptoCardLabel({ address, label: "Savings" }, "litecoin"), "Savings")
+  assert.equal(Model.cryptoCardLabel({}, "ethereum"), "ETH")
+
+  // And where one is shown on purpose, it is shortened.
+  assert.equal(Model.cryptoAddressShort(address), "LYEe8F…cpYAcw")
+  assert.equal(Model.cryptoAddressShort("short"), "short")
+  assert.equal(Model.cryptoAddressShort(""), "")
+})
+
+test("a setting that arrived as nonsense falls back rather than reaching a host", () => {
+  assert.equal(Model.cryptoChainOf({ chain: "dogecoin" }), "bitcoin")
+  assert.equal(Model.cryptoChainOf({}), "bitcoin")
+  assert.equal(Model.cryptoChainOf({ chain: "solana" }), "solana")
+  assert.equal(Model.cryptoCurrencyOf({ currency: "doubloons" }), "usd")
+  assert.equal(Model.cryptoCurrencyOf({ currency: "EUR" }), "eur")
+  assert.equal(Model.cryptoCurrencyOf(null), "usd")
+})
+
+test("the crypto card declares every host it can reach", () => {
+  const entry = Model.catalogEntry("crypto")
+  // More than one host, so this one declares a list. An address only ever
+  // goes to its own chain; the price host never sees one.
+  assert.ok(Array.isArray(entry.network), "a widget with several hosts lists them")
+  assert.ok(entry.network.includes(Model.CRYPTO_PRICE_HOST))
+  for (const name of Model.cryptoChainNames()) {
+    assert.ok(entry.network.includes(Model.cryptoChain(name).host),
+      `${name} reaches a host the catalogue does not declare`)
+  }
+  // Every declared host is one of those two kinds and not something stray.
+  const known = [Model.CRYPTO_PRICE_HOST].concat(
+    Model.cryptoChainNames().map((n) => Model.cryptoChain(n).host))
+  for (const host of entry.network) {
+    assert.ok(known.includes(host), `${host} is declared but nothing reaches it`)
+  }
+})
+
+test("a crypto card with no address is a ticker, not a broken wallet", () => {
+  const config = cryptoConfig({ chain: "bitcoin", address: "" })
+  assert.deepEqual(Model.cryptoWalletsInUse(config), [], "no address, no balance request")
+  assert.deepEqual(Model.cryptoCoinsInUse(config), ["bitcoin"], "but it still wants a price")
+})
+
+test("a number too large to write as digits never reaches the card", () => {
+  // String(1e21) is "1e+21", and the thousands grouping would turn that into
+  // "$1e+,300" on somebody's wallpaper. Neither ceiling is reachable by a
+  // real price or a real balance, so a figure past one is a response to
+  // disbelieve rather than one to clamp.
+  assert.equal(Model.parseCryptoPrices({ bitcoin: { usd: 1e300 } }), null)
+  assert.equal(Model.parseCryptoPrices({ bitcoin: { usd: Infinity } }), null)
+  assert.equal(Model.parseCryptoBalance("ethereum", { result: "0x" + "f".repeat(60) }), null)
+  assert.equal(Model.parseCryptoBalance("solana", { result: { value: 1e30 } }), null)
+
+  // And the real ones still go through untouched.
+  assert.equal(Model.cryptoQuote(
+    Model.parseCryptoPrices({ bitcoin: { usd: 79982 } }), "bitcoin", "usd").price, 79982)
+  assert.equal(Model.parseCryptoBalance("ethereum", EVM_BODY).toFixed(6), "6.712150")
+
+  // A holding worth billions is a number, not an exponent.
+  assert.equal(Model.cryptoMoneyLabel(10393516000, "usd"), "$10,393,516,000")
+})

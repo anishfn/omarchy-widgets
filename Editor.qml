@@ -5,21 +5,22 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// The layout editor. One interactive overlay per output, drawn over the grid
-// the desktop uses, showing the real widget cards in their real places.
-//
-// It is the desktop surface's opposite: on top instead of underneath, and
-// made of input instead of free of it. What makes the two line up is that
-// both use `exclusiveZone: 0`, so their coordinate origins are the same point
-// below the bar, and both ask Model for cell rectangles rather than computing
-// their own — the cell you drop into is the cell that gets drawn.
-//
-// Dragging is done by hand rather than with Drag/DropArea. A drag here starts
-// on one of three surfaces (a card on the grid, a tile in the tray) and can
-// end on any of them, and a manual grab is the only way to keep one gesture
-// in charge across all of it while the drop target changes underneath.
 Item {
   id: root
+
+  // The layout editor. One interactive overlay per output, drawn over the grid
+  // the desktop uses, showing the real widget cards in their real places.
+  //
+  // It is the desktop surface's opposite: on top instead of underneath, and
+  // made of input instead of free of it. What makes the two line up is that
+  // both use `exclusiveZone: 0`, so their coordinate origins are the same point
+  // below the bar, and both ask Model for cell rectangles rather than computing
+  // their own — the cell you drop into is the cell that gets drawn.
+  //
+  // Dragging is done by hand rather than with Drag/DropArea. A drag here starts
+  // on one of three surfaces (a card on the grid, a tile in the tray) and can
+  // end on any of them, and a manual grab is the only way to keep one gesture
+  // in charge across all of it while the drop target changes underneath.
 
   property var shell: null
   property var service: null
@@ -723,27 +724,36 @@ Item {
                 }
 
                 // One field, in percent, set at 100: any whole number from 25
-                // to 200, typecast by the spinbox and written back as the
-                // factor. The floor is Model.MIN_SCALE, because a grid scaled
-                // to nothing cannot be clicked back.
+                // to 200, clamped by the knob and written back as the factor.
+                // The floor is Model.MIN_SCALE, because a grid scaled to
+                // nothing cannot be clicked back. Applies on every keystroke:
+                // typing "110" moves the grid while you are on the second
+                // digit, there is no Enter to wait on.
                 Field {
                   anchors.bottom: parent.bottom
                   label: "Scale"
                   foreground: root.foreground
                   fontFamily: root.fontFamily
 
-                  NumberField {
-                    label: ""
+                  NumberKnob {
                     value: Math.round(root.layout.scale * 100)
                     from: Math.round(Model.MIN_SCALE * 100)
                     to: Math.round(Model.MAX_SCALE * 100)
-                    stepSize: 10
                     fieldWidth: Style.space(76)
                     foreground: root.foreground
                     accent: root.accent
                     fontFamily: root.fontFamily
                     onModified: function(v) { if (root.service) root.service.setScale(Number(v) / 100) }
                   }
+                }
+
+                PanelSeparator {
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(4)
+                  width: 1
+                  height: Style.space(24)
+                  foreground: root.foreground
+                  strength: 0.25
                 }
 
                 // The whole grid's opacity, in percent. Moving it writes over
@@ -754,12 +764,10 @@ Item {
                   foreground: root.foreground
                   fontFamily: root.fontFamily
 
-                  NumberField {
-                    label: ""
+                  NumberKnob {
                     value: Math.round(root.layout.opacity * 100)
                     from: 0
                     to: 100
-                    stepSize: 5
                     fieldWidth: Style.space(76)
                     foreground: root.foreground
                     accent: root.accent
@@ -785,12 +793,10 @@ Item {
                   foreground: root.foreground
                   fontFamily: root.fontFamily
 
-                  NumberField {
-                    label: ""
+                  NumberKnob {
                     value: Math.round(root.layout.radius)
                     from: Math.round(Model.MIN_RADIUS)
                     to: Math.round(Model.MAX_RADIUS)
-                    stepSize: 2
                     fieldWidth: Style.space(76)
                     foreground: root.foreground
                     accent: root.accent

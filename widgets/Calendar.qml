@@ -3,17 +3,24 @@ import Quickshell
 import qs.Commons
 import "../Model.js" as Model
 
-// What is next in your calendar, and when.
+// What is next, when it is, and where it falls in the day.
 //
-// The card is a list of times against sentences, which is what a calendar is
-// once you take the week grid away. A grid of squares on a wallpaper tells you
-// that Thursday is busy; it does not tell you what you are late for.
+// The card is a time against a sentence, which is what a calendar is once you
+// take the week grid away. A grid of squares on a wallpaper tells you that
+// Thursday is busy; it does not tell you what you are late for.
 //
-// Three sizes, three compositions rather than one stretched:
+// Three sizes, three compositions, each one a layer on the last rather than
+// the one before it stretched:
 //
-//   1x1   the next thing, on its own, big enough to read across a room
-//   2x1   a couple of rows -- time, what it is, how far off
-//   2x2   the agenda, broken by day, as far ahead as the card holds
+//   1x1   the next thing -- when, how long you have, what it is
+//   2x1   and the day it sits in, as a bar with the event on it
+//   2x2   and the rest of the day under that, then what tomorrow opens with
+//
+// The bar is the reason the wide sizes exist. A day is 24 hours wide and a
+// meeting is one of them, so at a single cell the event would be four pixels
+// and the bar would be decoration pretending to be content. Given a second
+// column it becomes the thing the list cannot say: not just what is next but
+// whether the day ahead is packed or empty, and how much of it has gone.
 Item {
   id: root
 
@@ -32,58 +39,39 @@ Item {
   // ------------------------------------------------------------- the scale
   //
   // One grid cell, whatever footprint the card is wearing -- not the card's
-  // own short axis, which is what every other widget here uses.
-  //
-  // The difference only shows up on a size taller than one row, and it is the
-  // whole point of offering one: a card given a second row should hold twice
-  // as much agenda, not the same agenda in letters twice the size. Sizing
-  // from the cell keeps the type identical at 1x1, 2x1 and 2x2 and spends the
-  // extra area on rows, which is what the reader wanted the bigger card for.
+  // short axis, because this offers a size two rows tall and dividing by the
+  // span is what stops a 2x2 answering a request for more content with the
+  // same content in bigger letters. See DESIGN.md.
   readonly property int spanCols: instance && instance.cols > 0 ? instance.cols : 1
   readonly property int spanRows: instance && instance.rows > 0 ? instance.rows : 1
   readonly property real unit: Math.min(width / spanCols, height / spanRows)
 
   readonly property real pad: Math.round(unit * 0.11)
+  readonly property real gap: Math.round(unit * 0.04)
+
   readonly property real smallSize: Math.max(8, Math.round(unit * 0.068))
-  readonly property real bodySize: Math.max(9, Math.round(unit * 0.083))
-  readonly property real bigSize: Math.max(11, Math.round(unit * 0.115))
-  readonly property real rowHeight: Math.round(unit * 0.175)
-  readonly property real dayHeight: Math.round(unit * 0.16)
+  readonly property real titleSize: Math.max(9, Math.round(unit * 0.082))
+  readonly property real timeSize: Math.max(16, Math.round(unit * 0.23))
 
-  // The rectangle the list gets, worked out from the type rather than from
-  // the things drawn in it. Measuring the header instead would make the row
-  // count depend on a label that is itself inside the header, which is a
-  // binding that chases its own tail.
-  readonly property real headerHeight: Math.round(smallSize * 1.5)
-
-  // The tall card dates every group it draws, so a date across the top would
-  // be the card saying "Today" twice. It keeps the line only when there is a
-  // label on it, which is the one thing the day headings cannot say.
-  readonly property bool showHeader: !tall || String(settings.label || "") !== ""
-  readonly property real listTop: pad + (showHeader ? headerHeight + Math.round(unit * 0.05) : 0)
-  readonly property real listHeight: Math.max(0, height - pad - listTop)
-
-  // A card is "wide" once it has more than one column, and "tall" once it has
-  // more than one row. Measured off the rectangle rather than the config so
-  // the editor's drag preview is the same drawing as the desktop.
-  readonly property bool wide: width > unit * 1.4
-  readonly property bool tall: height > unit * 1.4
+  // Which composition this footprint gets. Both are questions about the
+  // card's own rectangle rather than about the numbers in the config, so a
+  // card resized in the editor changes drawing as you drag it.
+  readonly property bool wide: spanCols > 1
+  readonly property bool tall: spanRows > 1
 
   // --------------------------------------------------------------- the data
 
   readonly property string icsUrl: String(settings.icsUrl || "")
   readonly property bool configured: Model.isSafeIcsUrl(icsUrl)
-  readonly property bool twelveHour: String(settings.format || "24h") === "12h"
   readonly property bool showAllDay: settings.showAllDay !== false
   readonly property bool showLocation: settings.showLocation === true
+  readonly property bool twelveHour: String(settings.format || "24h") === "12h"
 
   readonly property var calendar: service && service.calendars && configured
     ? service.calendars[icsUrl] : null
   readonly property string error: service ? String(service.calendarError || "") : ""
   readonly property bool ready: calendar !== null && calendar !== undefined
 
-  // Minutes, because that is the finest thing on the card: a countdown reading
-  // "in 24m" has nothing to say sixty times a second.
   property date now: clock.date
   readonly property real nowMs: now.getTime()
 
@@ -93,315 +81,380 @@ Item {
     onDateChanged: root.now = date
   }
 
-  // How many rows there is actually room for, rather than a number picked to
-  // suit one cell size. The tall card gets what it can hold; the wide one
-  // usually gets three.
-  readonly property int capacity: Math.max(1, Math.min(8, Math.floor(listHeight / rowHeight)))
-
+  // Everything today still has to give. The first is the hero; the rest are
+  // the tall card's list, which is the whole reason a limit above one is
+  // worth fetching.
   readonly property var events: ready
-    ? Model.upcomingEvents(calendar.events, nowMs, capacity, showAllDay) : []
+    ? Model.todayEvents(calendar.events, nowMs, 12, showAllDay) : []
   readonly property var nextEvent: events.length > 0 ? events[0] : null
+  readonly property bool empty: events.length === 0
 
-  // The list, flattened. The tall card breaks it by day, because a column of
-  // times with no dates against it is a column you have to date yourself; the
-  // wide card has room for two or three rows and says the day in the margin
-  // instead.
-  readonly property var entries: {
+  // What tomorrow opens with, for the line the tall card ends on. Exactly one
+  // day ahead: the rest of tomorrow can wait until it is today.
+  readonly property var tomorrowEvent: ready
+    ? Model.nextDayEvent(calendar.events, nowMs, 1, showAllDay) : null
+
+  // The rows under the hero, as one flat list so the drawing does not have to
+  // know where today stops and tomorrow starts -- a heading is just a row
+  // that happens to be a date.
+  readonly property var agenda: {
     var out = []
-    var i
-    if (!tall) {
-      // Two or three rows, so the day goes in the margin rather than into a
-      // heading of its own -- and only where it changes. Every other row
-      // spends that width on the sentence instead, which is the part you
-      // cannot guess.
-      for (i = 0; i < events.length; i++) {
-        var note = ""
-        if (i === 0) note = Model.eventUntilLabel(events[i], nowMs)
-        else if (Model.startOfDay(events[i].start) !== Model.startOfDay(events[i - 1].start))
-          note = Model.dayHeading(events[i].start, nowMs)
-        // Flagged here rather than compared by identity in the delegate: what
-        // reaches `modelData` is a copy, and `===` against the original would
-        // be false on every row.
-        out.push({ day: "", event: events[i], next: i === 0, note: note })
-      }
-      return out
+    for (var i = 1; i < events.length; i++) out.push({ heading: "", event: events[i] })
+    if (tomorrowEvent) {
+      out.push({ heading: Model.dayHeading(tomorrowEvent.start, root.nowMs), event: null })
+      out.push({ heading: "", event: tomorrowEvent })
     }
-
-    var groups = Model.groupEventsByDay(events, nowMs)
-    var seen = 0
-    for (var g = 0; g < groups.length; g++) {
-      out.push({ day: groups[g].heading, event: null, next: false, note: "" })
-      for (var e = 0; e < groups[g].events.length; e++) {
-        out.push({ day: "", event: groups[g].events[e], next: seen === 0, note: "" })
-        seen++
-      }
-    }
-
-    // The headings take room the row count knew nothing about, so the tail is
-    // trimmed here rather than drawn past the bottom of the card. A day left
-    // with no events under it goes with them: a heading on its own is a
-    // promise the card cannot keep.
-    var used = 0
-    for (i = 0; i < out.length; i++) {
-      used += out[i].day === "" ? rowHeight : dayHeight
-      if (used > listHeight) { out = out.slice(0, i); break }
-    }
-    while (out.length > 0 && out[out.length - 1].day !== "") out.pop()
     return out
   }
 
-  // What the card says when it has nothing to show, and why. "No address" and
-  // "nothing on" want different things done about them.
+  // The label, or the date when nobody wrote one -- a card that says which
+  // calendar it is beats a card that says nothing, and a card with one
+  // calendar would rather know what day it is.
+  readonly property string headText: {
+    var typed = String(settings.label || "").trim()
+    return typed.length > 0 ? typed.toUpperCase() : Model.todayHeading(root.nowMs)
+  }
+
+  // Which nothing the card is saying: unset, unreachable, still loading, or
+  // genuinely a clear day.
   readonly property string emptyText: {
     if (!configured) return icsUrl === "" ? "Add your calendar" : "That is not an iCal address"
     if (!ready) return error === "unavailable" ? "Calendar unavailable" : "Loading…"
-    return "Nothing scheduled"
+    return "Nothing left today"
   }
 
-  readonly property bool empty: events.length === 0
+  // ------------------------------------------------------------ the day bar
+  //
+  // Where the next event sits in the day, and how much of the day has gone.
+  // Both are fractions of local midnight to local midnight, clamped -- an
+  // event that began yesterday and is still running draws from the left edge
+  // rather than off it.
+
+  readonly property real dayStart: Model.startOfDay(root.nowMs)
+
+  readonly property real eventFrom: {
+    if (!nextEvent) return 0
+    return Math.max(0, Math.min(1,
+      (Math.max(Number(nextEvent.start), dayStart) - dayStart) / Model.DAY_MS))
+  }
+
+  readonly property real eventTo: {
+    if (!nextEvent) return 0
+    var end = nextEvent.end > nextEvent.start
+      ? Number(nextEvent.end) : Number(nextEvent.start) + 3600000
+    return Math.max(0, Math.min(1, (end - dayStart) / Model.DAY_MS))
+  }
+
+  readonly property real nowFraction:
+    Math.max(0, Math.min(1, (root.nowMs - dayStart) / Model.DAY_MS))
+
+  // The name of an event, and its place when the setting asks for one -- a
+  // card that shows where should not have to repeat the name as a subtitle.
+  function rowTitle(event) {
+    if (!event) return ""
+    if (!root.showLocation || !event.location) return event.summary
+    return event.summary + "  ·  " + event.location
+  }
 
   // ---------------------------------------------------------------- paint
 
-  Text {
-    anchors.centerIn: parent
-    width: parent.width - root.pad * 2
+  // A clear day, or a card that cannot answer yet. The head stays: a card
+  // still says which calendar it is while it is saying it has nothing.
+  Column {
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: parent.top
+    anchors.leftMargin: root.pad
+    anchors.rightMargin: root.pad
+    anchors.topMargin: root.pad
     visible: root.empty
-    horizontalAlignment: Text.AlignHCenter
-    wrapMode: Text.Wrap
-    textFormat: Text.PlainText
-    text: root.emptyText
-    color: root.dim
-    font.family: root.fontFamily
-    font.pixelSize: root.smallSize
-    renderType: Text.NativeRendering
-  }
-
-  // The header: what the user called this calendar, or simply what day it is.
-  // Kept out of the empty branch so the card still says something while it
-  // waits, rather than going blank between a restart and the first fetch.
-  Item {
-    id: headerRow
-    x: root.pad
-    y: root.pad
-    width: Math.max(0, parent.width - root.pad * 2)
-    // Measured off the type rather than off the text in it: the row's height
-    // feeds the row count, the row count feeds the "n ahead" label, and that
-    // label is inside this row. Sizing from the font keeps that a line rather
-    // than a circle.
-    height: root.headerHeight
-    visible: !root.empty && root.showHeader
+    spacing: root.gap
 
     Text {
-      id: headerText
-      anchors.verticalCenter: parent.verticalCenter
-      anchors.left: parent.left
-      anchors.right: countText.left
-      anchors.rightMargin: Math.round(root.unit * 0.04)
+      width: parent.width
       textFormat: Text.PlainText
-      text: root.settings.label ? String(root.settings.label) : Model.todayHeading(root.nowMs)
+      text: root.headText
       color: root.dim
       font.family: root.fontFamily
       font.pixelSize: root.smallSize
+      font.letterSpacing: Math.round(root.smallSize * 0.1)
       elide: Text.ElideRight
       renderType: Text.NativeRendering
     }
 
-    // How much is left, opposite the header. Only where there is width for it
-    // to be a second thing on the line rather than a competitor to the first.
     Text {
-      id: countText
-      anchors.right: parent.right
-      anchors.baseline: headerText.baseline
-      // Only where the list is not already showing you the answer: on the
-      // tall card every one of them is on screen, and counting them out loud
-      // is the card talking about itself.
-      visible: root.wide && !root.tall && root.events.length > 1
+      width: parent.width
       textFormat: Text.PlainText
-      text: root.events.length + " ahead"
-      color: root.faint
+      text: root.emptyText
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: root.titleSize
+      wrapMode: Text.Wrap
+      maximumLineCount: 2
+      renderType: Text.NativeRendering
+    }
+  }
+
+  // Today, when there is a today.
+  Item {
+    id: body
+
+    anchors.fill: parent
+    anchors.margins: root.pad
+    visible: !root.empty
+
+    // ------------------------------------------------------------ the head
+
+    Text {
+      id: headLine
+
+      anchors.left: parent.left
+      anchors.right: headUntil.left
+      anchors.rightMargin: Math.round(root.unit * 0.04)
+      anchors.top: parent.top
+      textFormat: Text.PlainText
+      text: root.headText
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: root.smallSize
+      font.letterSpacing: Math.round(root.smallSize * 0.1)
+      elide: Text.ElideRight
+      renderType: Text.NativeRendering
+    }
+
+    // How long you have: the card's one accent, opposite the date.
+    //
+    // It sits up here rather than beside the time, where it reads better,
+    // because beside the time it only reads better at two columns -- at one
+    // the hour fills the line and the countdown elides to nothing, which is
+    // the single most useful thing on the card quietly disappearing at the
+    // card's default size. Up here it always has its own room, and it puts
+    // the calendar and the crypto card in the same shape: what this is on
+    // the left, the one number worth the accent on the right.
+    Text {
+      id: headUntil
+
+      anchors.right: parent.right
+      anchors.baseline: headLine.baseline
+      textFormat: Text.PlainText
+      text: root.nextEvent ? Model.eventUntilLabel(root.nextEvent, root.nowMs) : ""
+      color: root.accent
       font.family: root.fontFamily
       font.pixelSize: root.smallSize
       renderType: Text.NativeRendering
     }
-  }
 
-  // ------------------------------------------------------------ the square
-  //
-  // One event, and the three things you want about it: what it is, when it
-  // starts, and how long you have. Anchored to the bottom so the header stays
-  // where it is however many lines the title takes.
-
-  Column {
-    id: squareBody
-    visible: !root.empty && !root.wide
-    x: root.pad
-    width: Math.max(0, parent.width - root.pad * 2)
-    y: Math.max(headerRow.y + headerRow.height + Math.round(root.unit * 0.06),
-      parent.height - root.pad - height)
-    spacing: Math.round(root.unit * 0.035)
+    // ------------------------------------------------------------ the hero
+    //
+    // The time is the headline and the countdown is the one accent, sitting
+    // on the same baseline: one says when, the other says how long you have,
+    // and they are the same fact said two ways.
 
     Text {
-      width: parent.width
+      id: heroTime
+
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: headLine.bottom
+      anchors.topMargin: root.gap
       textFormat: Text.PlainText
-      text: root.nextEvent ? root.nextEvent.summary : ""
+      text: root.nextEvent
+        ? (root.nextEvent.allDay ? "All day"
+          : Model.clockLabel(root.nextEvent.start, root.twelveHour))
+        : ""
+      // "All day" is a phrase where the rest are four digits; let it shrink
+      // rather than elide, so the one event a day that has no clock still
+      // says so in full.
+      fontSizeMode: Text.HorizontalFit
+      minimumPixelSize: Math.max(12, Math.round(root.unit * 0.12))
+      elide: Text.ElideRight
       color: root.foreground
       font.family: root.fontFamily
-      font.pixelSize: root.bigSize
+      font.pixelSize: root.timeSize
       font.weight: Font.Light
+      renderType: Text.NativeRendering
+    }
+
+    Text {
+      id: heroTitle
+
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: heroTime.bottom
+      anchors.topMargin: Math.round(root.unit * 0.01)
+      textFormat: Text.PlainText
+      text: root.rowTitle(root.nextEvent)
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: root.titleSize
       wrapMode: Text.Wrap
-      maximumLineCount: 2
+      // Two lines at a single cell, one when there is a list underneath that
+      // has more claim on the room.
+      maximumLineCount: root.tall ? 1 : 2
       elide: Text.ElideRight
       renderType: Text.NativeRendering
     }
 
-    Row {
-      width: parent.width
-      spacing: Math.round(root.unit * 0.04)
+    // ------------------------------------------------------------- the day
+    //
+    // Midnight to midnight as a hairline, with the event drawn on it and a
+    // mark where the clock is. Only on the wide sizes: at one cell the whole
+    // day is 150 pixels and an hour of it is six, which is a texture rather
+    // than a reading.
 
-      Text {
-        textFormat: Text.PlainText
-        text: root.nextEvent ? Model.eventTimeLabel(root.nextEvent, root.twelveHour) : ""
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: root.smallSize
-        renderType: Text.NativeRendering
+    Item {
+      id: dayBar
+
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: heroTitle.bottom
+      anchors.topMargin: Math.round(root.unit * 0.05)
+      height: Math.max(4, Math.round(root.unit * 0.035))
+      // Dropped rather than crowded when the hero has taken the room, which
+      // is the rule the weather card set.
+      visible: root.wide && root.nextEvent !== null
+        && y + height < parent.height
+
+      Rectangle {
+        id: track
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        height: Math.max(1, Math.round(root.unit * 0.008))
+        radius: height / 2
+        color: root.faint
       }
 
-      // The one accent on the card: how long you have is the only thing here
-      // you could not have worked out from the clock beside it.
-      Text {
-        textFormat: Text.PlainText
-        text: root.nextEvent ? Model.eventUntilLabel(root.nextEvent, root.nowMs) : ""
+      // The event, as a block along the day. Never thinner than it is tall,
+      // so a half-hour meeting is a mark you can see rather than a hairline
+      // crossing a hairline.
+      //
+      // Not drawn at all for an all-day event, which is the one case where
+      // the block has nothing to say: it runs midnight to midnight, so it
+      // fills the bar end to end and the day becomes a solid accent rule --
+      // which is both a slab of the one colour the card is allowed to spend
+      // once, and an answer to "where in the day" of "everywhere". The track
+      // and the mark stay, so the bar still says how much of the day has
+      // gone, which is the part that is still true.
+      Rectangle {
+        id: block
+
+        readonly property real span: Math.max(0, root.eventTo - root.eventFrom)
+
+        visible: root.nextEvent !== null && !root.nextEvent.allDay
+        x: Math.round(Math.min(parent.width - width, root.eventFrom * parent.width))
+        width: Math.max(parent.height, Math.round(span * parent.width))
+        anchors.verticalCenter: parent.verticalCenter
+        height: parent.height
+        radius: height / 2
         color: root.accent
-        font.family: root.fontFamily
-        font.pixelSize: root.smallSize
-        renderType: Text.NativeRendering
+      }
+
+      // The clock, riding the same day toward the block it is counting down
+      // to. Drawn over the block rather than under it: when the event is
+      // happening now, where you are in it is the more interesting fact.
+      Rectangle {
+        id: nowMark
+
+        x: Math.round(Math.min(parent.width - width, root.nowFraction * parent.width))
+        width: Math.max(1, Math.round(root.unit * 0.008))
+        anchors.verticalCenter: parent.verticalCenter
+        height: parent.height
+        radius: width / 2
+        color: root.foreground
       }
     }
-  }
 
-  // -------------------------------------------------------------- the list
-  //
-  // Rows of time against sentence. The next one carries a short accent rule
-  // in the margin, which is the whole of the card's emphasis: everything
-  // below it is simply what comes after.
-
-  Item {
-    id: list
-    visible: !root.empty && root.wide
-    x: root.pad
-    y: root.listTop
-    width: Math.max(0, parent.width - root.pad * 2)
-    // Explicit, and clipping: a Column grows to whatever is inside it, so a
-    // row too many would be drawn past the bottom of the card rather than
-    // cut off by it. The trimming above is what keeps that from happening;
-    // this is what makes a mistake in it visible as a cut row instead of as
-    // text floating on the wallpaper.
-    height: root.listHeight
-    clip: true
+    // ------------------------------------------------------------ the list
+    //
+    // The rest of the day, and what tomorrow opens with. Only on the tall
+    // size, and only as many rows as actually fit -- a card that elided its
+    // last row into nothing would be worse than a card that drew one fewer.
 
     Column {
-      id: listColumn
-      width: parent.width
+      id: list
+
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: dayBar.visible ? dayBar.bottom : heroTitle.bottom
+      anchors.topMargin: Math.round(root.unit * 0.06)
+      anchors.bottom: parent.bottom
+      visible: root.tall && root.agenda.length > 0
+      spacing: Math.round(root.unit * 0.025)
+
+      readonly property real rowHeight: Math.round(root.unit * 0.1)
+      readonly property int fits: Math.max(0,
+        Math.floor((height + spacing) / (rowHeight + spacing)))
 
       Repeater {
-        model: root.entries
+        model: list.fits > 0 ? root.agenda.slice(0, list.fits) : []
 
         delegate: Item {
           id: row
+
           required property var modelData
-          readonly property bool isDay: modelData.day !== ""
-          readonly property bool isNext: !isDay && modelData.next === true
 
-          width: listColumn.width
-          height: isDay ? root.dayHeight : root.rowHeight
+          width: list.width
+          height: list.rowHeight
 
-          // A day heading, on the tall card only.
-          Text {
+          // A day heading: the rule and the word, which is what turns a run
+          // of times into a list you do not have to date yourself.
+          Rectangle {
             anchors.left: parent.left
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: Math.round(root.unit * 0.02)
-            visible: row.isDay
+            anchors.right: headingText.left
+            anchors.rightMargin: Math.round(root.unit * 0.03)
+            anchors.verticalCenter: parent.verticalCenter
+            visible: row.modelData.heading !== ""
+            height: Math.max(1, Math.round(root.unit * 0.006))
+            color: root.faint
+          }
+
+          Text {
+            id: headingText
+
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            visible: row.modelData.heading !== ""
             textFormat: Text.PlainText
-            text: row.modelData.day
+            text: row.modelData.heading
             color: root.faint
             font.family: root.fontFamily
             font.pixelSize: root.smallSize
             renderType: Text.NativeRendering
           }
 
-          // The next thing, marked. A rule rather than a dot: it sits in the
-          // margin the times are already ragged against, so it points at the
-          // row without adding a column.
-          Rectangle {
-            id: marker
-            visible: row.isNext
-            x: 0
-            anchors.verticalCenter: timeText.verticalCenter
-            width: Math.max(2, Math.round(root.unit * 0.014))
-            height: Math.round(root.rowHeight * 0.5)
-            radius: width / 2
-            color: root.accent
-          }
-
+          // An event row: the time, then what it is.
           Text {
-            id: timeText
-            visible: !row.isDay
-            x: Math.round(root.unit * 0.05)
-            y: Math.round((parent.height - implicitHeight) / 2)
-            width: Math.round(root.unit * 0.36)
+            id: rowTime
+
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            visible: row.modelData.event !== null
             textFormat: Text.PlainText
-            text: row.isDay ? "" : Model.eventTimeLabel(row.modelData.event, root.twelveHour)
-            color: row.isNext ? root.foreground : root.dim
+            text: Model.eventTimeLabel(row.modelData.event, root.twelveHour)
+            color: root.dim
             font.family: root.fontFamily
-            font.pixelSize: root.bodySize
-            elide: Text.ElideRight
+            font.pixelSize: root.smallSize
             renderType: Text.NativeRendering
           }
 
           Text {
-            id: titleText
-            visible: !row.isDay
-            anchors.left: timeText.right
-            anchors.leftMargin: Math.round(root.unit * 0.05)
-            anchors.right: untilText.left
-            anchors.rightMargin: Math.round(root.unit * 0.05)
-            anchors.baseline: timeText.baseline
+            anchors.left: rowTime.right
+            anchors.leftMargin: Math.round(root.unit * 0.045)
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            visible: row.modelData.event !== null
             textFormat: Text.PlainText
-            text: row.isDay ? "" : root.rowTitle(row.modelData.event)
+            text: root.rowTitle(row.modelData.event)
             color: root.foreground
             font.family: root.fontFamily
-            font.pixelSize: root.bodySize
-            elide: Text.ElideRight
-            renderType: Text.NativeRendering
-          }
-
-          // How far off, or which day it moved to, in the right margin. Faint on
-          // every row: the accent is already spent on the marker, and two of
-          // them would leave the eye with no instruction about where to land.
-          Text {
-            id: untilText
-            visible: !row.isDay
-            anchors.right: parent.right
-            anchors.baseline: timeText.baseline
-            textFormat: Text.PlainText
-            text: row.isDay ? "" : String(row.modelData.note || "")
-            color: root.faint
-            font.family: root.fontFamily
             font.pixelSize: root.smallSize
+            elide: Text.ElideRight
             renderType: Text.NativeRendering
           }
         }
       }
     }
-  }
-
-  // Where an event is, folded into its own line rather than given a column of
-  // its own: a room name is worth a few words when it is there and nothing at
-  // all when it is not, which is exactly what a column cannot express.
-  function rowTitle(event) {
-    if (!event) return ""
-    if (!root.showLocation || !event.location) return event.summary
-    return event.summary + "  ·  " + event.location
   }
 }

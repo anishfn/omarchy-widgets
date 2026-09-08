@@ -16,28 +16,72 @@
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-8a9a9a?style=for-the-badge"></a>
 </p>
 
+<p align="center">
+  <img src="assets/desktop.jpg" alt="Widgets on the desktop: a clock, the weather, a todo list and the music card down the left, contributions and two repositories on the right, and the Omate card" width="880">
+</p>
+
+<p align="center">
+  <sub>Everything here takes its colours from the Omarchy theme. Nothing draws
+  a background of its own — the cards are the wallpaper, dimmed.</sub>
+</p>
+
 ---
 
 ## Get it
 
 ```bash
 omarchy plugin add https://github.com/anishfn/omarchy-widgets.git
-omarchy plugin enable io.github.anishfn.widgets
+omarchy plugin enable anishfn.widgets
 ```
 
 That is the whole install. Plugins land disabled so you can read the code
 before it runs; `enable` puts the **Widgets** button in your bar and the clock
 on your desktop.
 
+The plugin ships a script that does the three things a bare `add` leaves you to
+find out on your own: it offers the companion plugin the Omate card needs,
+restarts the shell so what you installed is what you can see, and picks `add`
+or `update` for you on a re-run. It runs from the copy you already have:
+
+```bash
+~/.config/omarchy/plugins/anishfn.widgets/install --yes
+```
+
+**Nothing is fetched and piped into a shell.** Streaming a script off a branch
+and executing it reads from a mutable ref, so a later repository or account
+compromise would become arbitrary code execution on your machine at install
+time. This script is in the checkout you already made, and can be read before
+it runs — which is the same reason plugins land disabled.
+
 | | |
 |---|---|
 | **Clone URL** | `https://github.com/anishfn/omarchy-widgets.git` |
-| **Plugin id** | `io.github.anishfn.widgets` |
+| **Plugin id** | `anishfn.widgets` |
 | **Requires** | Omarchy 4 (the Quickshell shell) |
-| **Update** | `omarchy plugin update io.github.anishfn.widgets` |
-| **Remove** | `omarchy plugin remove io.github.anishfn.widgets` |
+| **Update** | `~/.config/omarchy/plugins/anishfn.widgets/update` |
+| **Remove** | `omarchy plugin remove anishfn.widgets` |
 
 <sub>Removing the plugin leaves `~/.config/omarchy/widgets.json` alone.</sub>
+
+> **`omarchy plugin add` does not upgrade.** It refuses when the plugin is
+> already installed, so running the install line a second time reports an
+> error rather than pulling anything. Use `update` — either the script above
+> or `omarchy plugin update anishfn.widgets`.
+
+> **The id changed in 0.2.0.** It was `io.github.anishfn.widgets`. An id is
+> also a directory name, so an install made before the change sits under the
+> old one and none of the commands above will find it. Remove it and add it
+> again:
+>
+> ```bash
+> omarchy plugin remove io.github.anishfn.widgets
+> omarchy plugin add https://github.com/anishfn/omarchy-widgets.git
+> omarchy plugin enable anishfn.widgets
+> ```
+>
+> Your desktop survives the round trip — `remove` leaves
+> `~/.config/omarchy/widgets.json` where it is, and the new install reads it
+> back.
 
 ---
 
@@ -49,10 +93,26 @@ on your desktop.
 | **Weather** | Now, today's range, and the condition | `wttr.in` |
 | **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
 | **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
-| **Calendar** | What is next in your Google Calendar, and when | `calendar.google.com` |
+| **Crypto** | A wallet's balance and what it is worth, or just the coin's price | four chains, `api.coingecko.com` |
+| **Calendar** | What is next, how long you have, and where it falls in the day | `calendar.google.com` |
 | **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
 | **Todoist** | What is due, from Todoist. Tick things off | `api.todoist.com` |
 | **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
+| **Omate** | The desktop pet: show and hide it, pick its skin, size it, set the cursor chase | local (Omate plugin) |
+| **Photos** | A picture of your own, or a folder of them shown one at a time | local (your files) |
+
+<table>
+<tr>
+<td width="50%" valign="top" align="center">
+  <img src="assets/cards.png" alt="The clock, weather, todo and music cards" width="380"><br>
+  <sub>Type sizes are fractions of the card, so a widget scaled up is the same drawing at a different size — never a small drawing in a big box.</sub>
+</td>
+<td width="50%" valign="top" align="center">
+  <img src="assets/omate.png" alt="The Omate card: a power switch, a scrolling row of skins with an arrow to step through them, and the pet's dials" width="380"><br>
+  <sub>The Omate card, with each skin chip playing that pack's own idle animation. The arrow steps the row one skin at a time; it appears only in the direction there is somewhere to go. It owns nothing: every control writes through to the pet's plugin.</sub>
+</td>
+</tr>
+</table>
 
 ```
    ┌─────────┬─────────┐        side: left | right
@@ -79,9 +139,13 @@ says which.
 
 - [What it does](#what-it-does)
 - [Install](#install)
+  - [The scripts](#the-scripts)
+  - [Updating](#updating)
+  - [From a local copy](#from-a-local-copy)
 - [Turning widgets on and off](#turning-widgets-on-and-off)
   - [More than one of the same widget](#more-than-one-of-the-same-widget)
 - [Arranging them](#arranging-them)
+  - [The bar, the tray and the inspector](#the-bar-the-tray-and-the-inspector)
   - [Two sides](#two-sides)
   - [The grid](#the-grid)
   - [Dragging](#dragging)
@@ -90,6 +154,9 @@ says which.
 - [The weather](#the-weather)
 - [The contribution graph](#the-contribution-graph)
 - [Repo pulse](#repo-pulse)
+- [Crypto](#crypto)
+  - [What it fetches, and from where](#what-it-fetches-and-from-where)
+  - [Who can see it](#who-can-see-it)
 - [The calendar](#the-calendar)
   - [Connecting your Google Calendar](#connecting-your-google-calendar)
   - [Three sizes](#three-sizes)
@@ -102,6 +169,10 @@ says which.
   - [The filter](#the-filter)
   - [Ticking things off, in Todoist](#ticking-things-off-in-todoist)
 - [Music](#music)
+- [Omate](#omate)
+- [Photos](#photos)
+  - [One picture, or a folder of them](#one-picture-or-a-folder-of-them)
+  - [Every size there is](#every-size-there-is)
 - [Config file](#config-file)
   - [The layout block](#the-layout-block)
   - [Each widget](#each-widget)
@@ -125,7 +196,7 @@ Draws widget cards on the desktop:
 | **Input** | None, unless a widget asks for it — [Music](#music), [Repo pulse](#repo-pulse), [Todos](#todos), [Todoist](#todoist) |
 | **Space** | Reserves none, and stays inside the area the bar has already claimed |
 | **Screens** | Every output by default, or one you name |
-| **Network** | Only the weather, GitHub, calendar and Todoist widgets, only while they are on |
+| **Network** | Only the weather, GitHub, calendar, crypto and Todoist widgets, only while they are on |
 
 Nothing here is a window. You cannot focus a widget or click it — it is
 something you see when you clear the screen. Arranging them happens in an
@@ -133,14 +204,81 @@ editor of its own, so the widgets themselves never have to take input.
 
 ## Install
 
-Everything you need is at the [top of this page](#get-it). Two extra notes:
+The two lines at the [top of this page](#get-it) are the whole install. The
+rest of this section is for when they are not enough.
 
-To install from a **local copy** instead of git, put the folder at
-`~/.config/omarchy/plugins/io.github.anishfn.widgets/` and enable the same id.
+### The scripts
+
+Two scripts ship with the plugin. Neither replaces `omarchy plugin` — both
+call it — and both are safe to run twice.
 
 ```bash
-omarchy plugin disable io.github.anishfn.widgets   # off, config kept
-omarchy plugin remove io.github.anishfn.widgets    # gone
+./install            # add or update, offer companions, restart the shell
+./update             # update this and its companions, restart if anything moved
+```
+
+`install` does four things a bare `omarchy plugin add` does not:
+
+- **Picks `add` or `update` for you.** `add` *refuses* when the plugin is
+  already installed — a second clone over a checkout is not an upgrade — so
+  re-running the install line to upgrade reports an error and pulls nothing.
+- **Offers the companion plugin.** The Omate card is inert without
+  [`palccod.omate`](https://github.com/Palccod/Omate), and nothing in `add`
+  knows that, so a fresh install draws a card that says "not loaded" without
+  saying what would load it.
+- **Restarts the shell.** A rescan tells the registry about new files; it does
+  not re-instantiate a panel that is already mounted, and this plugin is
+  `keepLoaded`. Without a restart the install appears to have done nothing.
+- **Checks what the cards shell out to** — `curl` for weather, the
+  contribution graph, repo pulse and the calendar; `timedatectl` for timezone
+  offsets. A missing one is not an install failure, it is a card that never
+  stops saying "fetching", which is a much worse way to find out.
+
+| Flag | |
+|---|---|
+| `--yes` | answer every prompt; required when piping to `bash` |
+| `--no-companions` | this plugin only, leave the Omate card inert |
+| `--this-only` | (`update`) skip the companions |
+
+Both skip the restart when nothing actually changed — a restart you did not
+need costs you every panel you had open. Both end by printing the manifest
+version and the commit each plugin is on:
+
+```
+Updated
+  anishfn.widgets              0.1.0 → 0.2.0         3374b22 → 5b634fe
+  palccod.omate                0.4.0 (unchanged)     742a67b → 9c1d004
+```
+
+A version that stayed put while the commits moved is shown as `(unchanged)`
+rather than hidden — it means the author shipped without bumping the
+manifest, which is a thing worth knowing about a plugin you just pulled.
+
+### Updating
+
+```bash
+~/.config/omarchy/plugins/anishfn.widgets/update
+```
+
+Or by hand, which is the same thing without the companions or the restart:
+
+```bash
+omarchy plugin update anishfn.widgets
+omarchy restart shell
+```
+
+`omarchy plugin update` shows you the diff before it applies it, fast-forwards
+only, and rolls back if the result fails validation.
+
+### From a local copy
+
+Put the folder at `~/.config/omarchy/plugins/anishfn.widgets/` and
+enable the same id. A folder that is not a git checkout has nothing to pull
+from, so `update` will say so rather than pretending.
+
+```bash
+omarchy plugin disable anishfn.widgets   # off, config kept
+omarchy plugin remove anishfn.widgets    # gone
 ```
 
 ## Turning widgets on and off
@@ -150,8 +288,22 @@ row and a switch; flip one and the desktop follows immediately. The button
 dims when nothing is on, so the bar answers "are my widgets up?" without a
 click, and its tooltip counts what is showing.
 
+The list is grouped: what is **on the desktop** first, what is **off** below
+it, with a count at the top saying how many of how many. A row is one line —
+a glyph for the type, the widget's name, and the switch — and the sentence
+describing the type is the row's tooltip rather than a third line printed
+under every one of them. If there are more rows than fit, the list scrolls
+inside the panel instead of running off the bottom of the screen.
+
+That shape is deliberate and it is the reason for the glyphs: this list is as
+long as the catalogue, and the catalogue grows every time somebody contributes
+a widget. A list you scan by shape stays usable at thirty rows; a list of
+paragraphs does not.
+
 Arrow keys move down the rows, Enter flips the one under the cursor, Escape
-closes.
+closes. Switching a widget off moves its row to the second group, and the
+cursor goes with it rather than staying on a row number that now belongs to
+something else.
 
 A widget you switch off is off, not gone: its settings stay in the config
 file, and switching it back on brings them back — in its old cell if it is
@@ -184,6 +336,42 @@ including on the command line.
 **Arrange…** in the same popup opens the layout editor: the desktop dims, the
 grid appears under your widgets, and you can drag them around. Escape or
 **Done** closes it.
+
+<p align="center">
+  <img src="assets/editor.jpg" alt="The layout editor: the grid under the widgets, and the chrome in one bottom-centred column — the inspector for the selected widget with its settings flowing four to a line, the tray of switched-off widgets, and the bar of layout controls" width="880">
+</p>
+
+<p align="center">
+  <sub>The grid under the cards, and the editor's chrome as one column: the
+  inspector for whatever is selected, the tray of widgets that are off, and
+  the layout bar.</sub>
+</p>
+
+### The bar, the tray and the inspector
+
+Three panels, each about one thing.
+
+- **The bar**, along the bottom: **Side**, **Columns**, **Scale**,
+  **Opacity**, **Reset** and **Done**. These are about the grid, not about any
+  one widget, so the bar is the same size whatever is selected.
+- **The tray**, just above it: every widget that is off. Drag one out onto a
+  cell to put it up, and drag one back down onto the tray to take it off. The
+  tray is the only part of the editor's chrome a drag may end on — a card
+  dropped on the bar or the inspector goes back where it came from rather than
+  landing in the cell hidden underneath.
+- **The inspector**, stacked over the other two and the same width as them:
+  everything about the widget you have selected. Its name and id, its
+  **Size**, its own **Opacity**, every setting its type declares, and
+  **Duplicate** / **Remove**. It appears when you click a widget and goes away
+  when you click empty grid. The settings flow across the width rather than
+  down it, four to a line on a wide bar, so the panel is as tall as the widget
+  needs and no taller — and the two panels under it do not move when it comes
+  and goes.
+
+**Size** is a list rather than a button that cycles. It offers exactly the
+footprints the widget's type declares and the current grid can hold — a card
+three columns wide is not offered on a two-column grid — so picking `2 × 2` is
+one click rather than four presses of the same button.
 
 ### Two sides
 
@@ -259,11 +447,12 @@ is repacked in reading order.
   over brightens as you cross, so you can see which board you are aiming at.
 - **Drop it on another widget** — the other one moves out of the way. See
   below.
-- **Take one off** — drag it down into the tray at the bottom.
+- **Take one off** — drag it down into the tray, the strip of chips above the
+  bar. Dropping on the bar or the inspector does nothing.
 - **Put one back** — drag it out of the tray onto a cell.
-- **Resize one** — click it, then the size button (`1×1`) in the toolbar. It
-  steps through the footprints that widget type offers, and moves the widget
-  if the new size does not fit where it was standing.
+- **Resize one** — click it and pick from **Size** in the inspector. It offers
+  the footprints that widget type declares, and moves the widget if the new
+  size does not fit where it was standing.
 - **Reshape the grid** — the **Side** and **Columns** buttons change the grid
   itself rather than any one widget.
 
@@ -416,12 +605,105 @@ anywhere on it are caught — only the name does anything with them.
 Data comes from the public REST API, unauthenticated: sixty requests an hour
 per address, two per repository every half hour.
 
+## Crypto
+
+What a wallet holds, and what that is worth.
+
+Click it in the editor and pick a **Chain** — Bitcoin, Ethereum, Solana or
+Litecoin — then paste an **Address**. **Currency** picks the money it is
+valued in, and **Label** overrides the ticker symbol above the number.
+
+```
+   ┌────────────────┐        ┌────────────────────────────┐
+   │ LTC     +3.0%  │        │ LTC                 +3.0%  │
+   │ 9.072          │        │ 9.072              $55.76  │
+   │      ╱‾╲__╱‾   │        │           __╱‾╲__╱‾        │
+   │ $505.87        │        │ $505.87                    │
+   └────────────────┘        └────────────────────────────┘
+        [1 × 1]                        [2 × 1]
+```
+
+The coin and its day sit on the top line, what you hold is the number, the
+week behind it is the shape, and what it is all worth is the line along the
+bottom.
+
+<p align="center">
+  <img src="assets/crypto.png" alt="Three crypto cards: a wide Litecoin wallet showing the balance, the coin price and a week's graph, and two square ticker cards for Bitcoin and Ethereum" width="380"><br>
+  <sub>A wallet card and two tickers. The graph sits on a strip that is reserved whether or not there is a sum of money to put in it, so cards side by side line up.</sub>
+</p>
+
+**Leave the address empty and the card is a ticker instead** — the coin's own
+price where the balance was, and no line along the bottom. That is not a
+second widget; it is the one setting nobody has filled in yet, and it is what
+most people actually want.
+
+The wide size is not the small one stretched. The square card spends its last
+line on what your holding is worth, so the coin's own price is the one thing
+it cannot show; the second column is where that goes, and the week gets the
+room to be a shape rather than a squiggle.
+
+**The graph is seven days of hourly closes**, plotted against its own high and
+low — so it answers "is this normal", which is the question a price and a
+percentage between them cannot. It is drawn in the same reduced foreground as
+every label here, never in the accent and never tinted: the shape says which
+way the week went.
+
+**The day's change is never coloured either.** Every other crypto readout
+paints a rise green and a fall red, and [DESIGN.md](DESIGN.md) rules that out
+— a theme's palette is not a semantic scale, and a widget that invents one
+fights every theme it did not anticipate. The sign carries it, the way the
+timezone offset on [the clock](#the-clock) carries its own.
+
+### What it fetches, and from where
+
+Two kinds of request, to different places, for different reasons.
+
+| | Where | How often |
+|---|---|---|
+| Price, 24h change and the week | `api.coingecko.com` | every 5 minutes |
+| Bitcoin balance | `mempool.space` | every 10 minutes |
+| Litecoin balance | `litecoinspace.org` | every 10 minutes |
+| Ethereum balance | `ethereum-rpc.publicnode.com` | every 10 minutes |
+| Solana balance | `api.mainnet-beta.solana.com` | every 10 minutes |
+
+**Prices are one request per currency, for the whole desktop.** Six crypto
+cards priced in dollars is a single call, not six — the service asks for every
+coin anyone has on screen at once, and the price, the day's change and the
+week all come back in the same body. A desktop mixing dollars and euros makes
+two calls, which go one after the other rather than together.
+
+Balances cannot be batched that way — there is no endpoint for "these four
+addresses on three chains" — so they go one at a time through a queue, and a
+balance moves when you move it, which is why it is asked for half as often.
+
+**Nothing here holds an API key**, because there is nowhere in a plugin like
+this to keep one. Every host is a public courtesy endpoint, which also means
+any of them can stop answering: a balance that fails to arrive leaves the last
+one it knew on the card rather than blanking it, and a card that has never
+seen a balance says so rather than showing a zero.
+
+### Who can see it
+
+Worth reading before you paste an address.
+
+- **The chain node learns that your IP watches that address.** That is the
+  price of reading a balance without running your own node. An address is only
+  ever sent to its own chain's host — the price host never sees one.
+- **The card shows your money to whoever can see your screen.** Turn
+  **Value in money** off and the card keeps the holding and drops what it is
+  worth.
+- **A label you did not type is never your address.** The fallback is the
+  ticker symbol, so a card you have not named says `BTC`, not the first six
+  characters of your wallet.
+- **The plugin never sees a private key**, and there is nothing here that
+  could spend anything. It reads public chain data about a public address.
+
 ## The calendar
 
-What is next, and when. The card is a list of times against sentences, which
-is what a calendar is once you take the week grid away — a grid of squares on
-a wallpaper tells you that Thursday is busy; it does not tell you what you are
-late for.
+What is next, when it is, and where it falls in the day. The card is a time
+against a sentence, which is what a calendar is once you take the week grid
+away — a grid of squares on a wallpaper tells you that Thursday is busy; it
+does not tell you what you are late for.
 
 Recurring events, all-day events, moved instances and cancelled ones are all
 handled, and times are shown in your own clock however the event was written.
@@ -457,18 +739,47 @@ Google's holiday calendars.
 
 ### Three sizes
 
+Each one is a layer on the last, not the one before it stretched.
+
 | | |
 |---|---|
-| **1×1** | The next thing on its own: what it is, when it starts, how long you have |
-| **2×1** | Two or three rows — time, event, and the day in the margin where it changes |
-| **2×2** | The agenda, broken into days, as far ahead as the card holds |
+| **1×1** | The next thing — when it starts, how long you have, what it is |
+| **2×1** | And the day it sits in, as a bar with the event drawn on it |
+| **2×2** | And the rest of today under that, then what tomorrow opens with |
 
-The next event carries a short accent rule in the margin. That is the whole of
-the card's emphasis: everything below it is simply what comes after.
+```
+   ┌──────────────────┐   ┌────────────────────────────────────┐
+   │ Mon 7 Sep  in 24m│   │ WORK                        in 24m │
+   │ 15:46            │   │ 15:46                              │
+   │ Standup          │   │ Standup                            │
+   └──────────────────┘   │ ──────────────────│▬────────────── │
+        [1 × 1]           └────────────────────────────────────┘
+                                        [2 × 1]
+```
 
-The tall card dates every group it draws, so it drops the date across the top
-— that line would be saying "Today" twice. It keeps the line if you have given
-the widget a **Label**, which is the one thing the day headings cannot say.
+<p align="center">
+  <img src="assets/calendar.png" alt="Two calendar cards: a wide one with the next event's time, title and the day as a bar, and a tall one adding the rest of today's events and tomorrow's first" width="380"><br>
+  <sub>The bar is midnight to midnight. The hairline is now; the block is the next event.</sub>
+</p>
+
+**How long you have is the card's one accent**, sitting opposite the date
+rather than beside the time. Beside the time it only fits at two columns — at
+one the hour fills the line and the countdown elides to nothing, which is the
+most useful thing on the card quietly disappearing at the card's default size.
+
+**The bar is the reason the wide sizes exist.** A day is 24 hours across and a
+meeting is one of them, so at a single cell the event would be four pixels and
+the bar would be decoration pretending to be content. Given a second column it
+says the thing a list cannot: not just what is next, but whether the day ahead
+is packed or empty, and how much of it has gone. The event is the accent block;
+the hairline crossing it is now. An all-day event draws no block — it runs
+midnight to midnight, so it would fill the bar end to end and answer "where in
+the day" with "everywhere" — but the mark stays, because how much of the day
+has gone is still true.
+
+The tall card draws as many rows as actually fit, and dates the ones that are
+not today. It shows the date across the top when you have not given the widget
+a **Label**, which is the one thing the day headings cannot say.
 
 Times are shown on a 24-hour clock by default; **Clock** switches to 12-hour.
 **All-day events** and **Location** can each be turned off.
@@ -652,8 +963,8 @@ Spotify or a browser tab or mpv, rather than any one application. Album art,
 title, artist, a progress bar, and the transport: back, play or pause,
 forward.
 
-**This is one of the two widgets you can click** — the other is
-[Repo pulse](#repo-pulse). Every other card here is click-through: the desktop surface has no input region, so a click lands on
+**This is one of the widgets you can click** — the others are
+[Repo pulse](#repo-pulse), [Todos](#todos) and [Omate](#omate). Every other card here is click-through: the desktop surface has no input region, so a click lands on
 whatever is underneath it. A type that needs a control declares `interactive`
 in the catalogue and gets *its own rectangle* back, and nothing else changes.
 A play/pause you have to go somewhere else to reach is not a play/pause; that
@@ -696,6 +1007,115 @@ If you always have two players running and the card keeps choosing the wrong
 one, the **Player** setting names the one to follow — `spotify`, `firefox`,
 `mpv`. It is matched against the player's own name and its bus name, and a
 blank value goes back to following whatever is playing.
+
+## Omate
+
+The desktop pet, if you run Omate — its power switch, its skins, and its
+dials, on one card instead of in a panel.
+
+The card does not own anything about the pet. Every control writes through to
+the Omate plugin's own settings, reached in-process, so the card and the pet's
+own panel are two views of one state: flip the switch here and the panel's
+status line changes with it. If Omate is not loaded the card says so and goes
+inert rather than drawing controls that answer to nothing.
+
+- **The switch** shows and hides the pet — the very power button from
+  Omate's own panel (same component, same glyph), not the plugin's
+  enable/disable.
+- **The skin row** is every character pack Omate can see, each chip playing
+  that pack's idle animation with the pet's own sprite component; a tap makes
+  it the pet. The row flicks sideways when the packs do not fit, and the two
+  arrows under it step one skin per click — the second widget here to scroll
+  (the todo list was the first).
+- **Roaming** is the same switch as the panel's: whether the pet wanders or
+  stays where you put it.
+- **Naps / chatter** are the two cadences in minutes, stepped with `−` and `+`
+  rather than typed — the desktop layer never takes the keyboard. Same ranges
+  the panel offers: 0–120 and 1–60.
+- **Size** is the pet's scale, one to six. The slider commits when you let go,
+  not per pixel; a drag across six sizes is not six writes to disk.
+- **Chase cursor** is off, or one of four cadences — 10s, 1 min, 5 min,
+  30 min — in the panel's own wording. A cooldown set over the IPC that has no
+  chip of its own is spelled out beside the row rather than leaving it looking
+  unset.
+
+The pet's name is not set here — pets have names of their own, in their packs.
+The **Owner name** field in the editor is yours, and it is what the pet calls
+you. Nothing here leaves your machine, and nothing here talks to anything but
+the Omate plugin.
+
+## Photos
+
+A picture of your own on the wallpaper. Point it at a file and that is the
+card; point it at a folder and it shows what is in it, one at a time.
+
+It is the only card here whose content is not a reading, and it is drawn to
+say so: the picture fills the card edge to edge and takes the card's own
+corners with it, rather than sitting inset inside a translucent pane. A
+photograph in a frame inside a frame reads as a screenshot of a photograph.
+
+### One picture, or a folder of them
+
+There is one **Picture** setting and it holds one path, because the choice
+between a photograph and a slideshow is a choice you already made when you
+picked one. A path ending in an image extension is that picture. Anything else
+is a folder, and the card walks the images in it.
+
+Two buttons open the desktop's own file chooser — the same dialog every other
+application on your machine opens, with your places and your recent folders
+already in it:
+
+- **Image…** picks one file, filtered to `jpg`, `jpeg`, `png`, `webp`, `gif`
+  and `bmp`.
+- **Folder…** picks a directory.
+
+You can also just type or paste a path into the field, which is faster when
+you already have one in a terminal. `~/` and a bare name resolve against your
+home directory.
+
+> [!NOTE]
+> The editor closes while the chooser is up and opens again when you answer
+> it. That is not politeness: the editor is a layer-shell overlay and every
+> ordinary window is below it, so a dialog opened underneath would be one you
+> could neither see nor click. The widget stays selected, so you come back to
+> exactly the panel you left.
+
+For a folder, **Change every** is how long each picture stays up — *Never*,
+30 seconds, 5 minutes, 30 minutes or an hour — and **Shuffle** picks at random
+instead of walking the folder in order. A shuffle never lands on the picture
+already up: a change that changes nothing reads as a broken slideshow.
+
+The folder is read once per directory however many cards share it, and re-read
+every ten minutes so a photograph dropped in during a session turns up. Only
+the top level is read, not the folders inside it, and a listing stops at 400
+pictures. Nothing about any of this leaves your machine.
+
+**Fit** is *Fill the card* — the picture is cropped to the card's shape, which
+is what you want almost always — or *Whole picture*, which fits the whole
+image inside the card and lets the card's translucent background show around
+it.
+
+**Caption** writes a line along the bottom of the picture, over a soft floor of
+the card's own background colour so it stays legible over anything. Empty
+draws nothing. It is also the name that tells two photo cards apart in the
+bar popup and the editor's tray.
+
+### Every size there is
+
+This type offers seven footprints — `1 × 1`, `2 × 1`, `1 × 2`, `2 × 2`,
+`3 × 2`, `2 × 3` and `3 × 3` — where every other widget offers two or three.
+
+That is not this card ignoring the house rule, it is the rule's own test being
+met: a size is worth offering when it is a genuinely different composition
+rather than the same one stretched, and a different-shaped card is a different
+*crop* of the photograph. A portrait in a `1 × 2` and the same portrait in a
+`2 × 1` are two pictures.
+
+The ones wider than your grid are simply not offered. Widen the grid with
+**Columns** and they appear.
+
+Pictures are decoded no larger than the card can show them, so a folder of
+twenty-megapixel camera JPEGs costs the same as a folder of thumbnails.
 
 ## Config file
 
@@ -834,7 +1254,7 @@ is refused outright.
 
 | Key | Meaning |
 |---|---|
-| `file` | Path to the list. `""` means `~/.config/omarchy/todos.txt`; `~/` and a bare name resolve against home |
+| `file` | Path to the list. `""` means `~/.config/omarchy/todos.txt`; `~/` and a bare name resolve against home. The editor offers **Choose…** for it |
 | `title` | The name on the card. `""` uses the file's first `#` heading, then `Todo` |
 | `showDone` | Whether finished items appear |
 | `showProgress` | The hairline along the bottom |
@@ -855,6 +1275,18 @@ is refused outright.
 |---|---|
 | `showArt` | Album art |
 | `showProgress` | The progress bar and times |
+| `showSkip` | The back and forward buttons |
+| `player` | The player to follow. `""` follows whatever is playing |
+
+#### Photos
+
+| Key | Meaning |
+|---|---|
+| `path` | An image file, or a folder of them. `~/` and a bare name resolve against home. A path that walks upwards is refused |
+| `interval` | Seconds a picture stays up, as a string: `"0"` (never), `"30"`, `"300"`, `"1800"`, `"3600"`. Only read for a folder |
+| `shuffle` | Pick at random rather than walking the folder in order |
+| `fit` | `fill` crops to the card, `contain` fits the whole picture inside it |
+| `label` | A caption along the bottom. `""` draws none |
 
 ## Command line
 
@@ -886,13 +1318,15 @@ omarchy-shell widgets weather       # the current reading
 omarchy-shell widgets github        # the fetched graphs
 omarchy-shell widgets repos         # the fetched repositories
 omarchy-shell widgets calendar      # the next few events, per calendar
+omarchy-shell widgets crypto        # prices, and each wallet's balance
+omarchy-shell widgets refreshCrypto # fetch prices and balances now
 omarchy-shell widgets todos         # the list, as it was parsed
 omarchy-shell widgets todoist       # the fetched tasks, per filter
 omarchy-shell widgets refreshTodoist # fetch now rather than in five minutes
 omarchy-shell widgets todo '' 3 true # tick line 3 of the only list off
 omarchy-shell widgets reload        # re-read the file now
 
-omarchy-shell shell toggle io.github.anishfn.widgets   # open the bar popup
+omarchy-shell shell toggle anishfn.widgets   # open the bar popup
 ```
 
 `add` and `duplicate` answer with the id of the widget they made, so a script
@@ -917,15 +1351,20 @@ widgets exist. Adding one is two steps:
 
 1. Write `widgets/YourWidget.qml`. It is handed `service`, `instance` and
    `card`, and draws into the card it is given.
-2. Add an entry to `catalog()` with its `type`, `name`, `description`,
+2. Add an entry to `catalog()` with its `type`, `name`, `description`, `icon`,
    `source`, the `sizes` it may take as `[cols, rows]` in cells, and a
    `settings` schema.
 
 `settings` is a schema rather than a bag of defaults — each entry says how it
-is edited (`text`, `boolean`, `choice`, `timezone`) and what it starts as —
-so the editor builds a working settings panel for your widget without knowing
-anything about it. Values are coerced to the kind you declared before your
-QML sees them, so you never have to defend against a config file.
+is edited (`text`, `boolean`, `choice`, `timezone`, `path`) and what it starts
+as — so the editor builds a working settings panel for your widget without
+knowing anything about it. Values are coerced to the kind you declared before
+your QML sees them, so you never have to defend against a config file.
+
+`icon` is one glyph from the theme's Nerd Font, and it is what makes the bar
+popup and the editor's tray scannable once there are more than a handful of
+widgets. `sizes` may list a footprint wider than the default grid; the editor
+only offers the ones the user's grid can actually hold.
 
 The bar popup, the editor, the grid and the config validation all read that
 one list, so nothing else has to learn the new name. A type added by an update

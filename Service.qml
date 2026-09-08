@@ -141,12 +141,16 @@ Item {
   // any card that had its own.
   function setLayoutOpacity(opacity) { apply(Model.setLayoutOpacity(config, opacity)) }
 
+  // The layout's global corner radius, applied to every card, the same deal.
+  function setLayoutRadius(radius) { apply(Model.setLayoutRadius(config, radius)) }
+
   function setOpacity(id, opacity) { apply(Model.setOpacity(config, id, opacity)) }
 
   // Put a card back on the layout's global opacity after it had its own.
   function clearOpacity(id) { apply(Model.clearOpacity(config, id)) }
 
-  // Restore the grid's default scale and opacity, and drop any per-card opacity.
+  // Restore the grid's default scale, opacity and corner radius, and drop any
+  // per-card override of either.
   function resetAppearance() { apply(Model.resetAppearance(config)) }
 
   function openEditor() { service.editing = true }
@@ -635,6 +639,182 @@ Item {
     onTriggered: service.refreshRepos(true)
   }
 
+  // ------------------------------------------------------------- crypto
+  //
+  // Two fetches with different shapes and different reasons to repeat.
+  //
+  // Prices go to CoinGecko in a single call for every coin and every currency
+  // anybody has on screen, which is what keeps a desktop of six of these
+  // cards down to one request. Balances go to each chain's own node, one
+  // wallet at a time through a queue, the way the repositories do -- there is
+  // no batch endpoint for "these four addresses on three chains", and firing
+  // them together would be four processes at once for a wallpaper.
+  //
+  // Nothing here holds a key, because there is nowhere in a plugin like this
+  // to keep one. That is also why every host is a public courtesy endpoint
+  // and any of them can stop answering: a balance that fails to parse leaves
+  // the last one it knew on the card rather than blanking it.
+
+  // currency -> coingecko coin id -> { price, change, series }
+  property var cryptoPrices: ({})
+  // "chain:address" -> the balance in whole coins
+  property var cryptoBalances: ({})
+  property string cryptoError: ""
+  property var cryptoQueue: []
+  property var cryptoPriceQueue: []
+
+  readonly property bool cryptoWanted: {
+    for (var i = 0; i < widgets.length; i++)
+      if (widgets[i].enabled && widgets[i].type === "crypto") return true
+    return false
+  }
+
+  // The coins and currencies actually wanted, as one string so this only
+  // changes when the set does -- an array would compare by reference and
+  // refetch on every unrelated edit to the config.
+  readonly property string cryptoPriceKey: Model.cryptoCoinsInUse(config).join(",")
+    + "|" + Model.cryptoCurrenciesInUse(config).join(",")
+
+  readonly property var cryptoWallets: Model.cryptoWalletsInUse(config)
+
+  // Typing an address should show a balance now, not at the next tick of a
+  // ten-minute timer.
+  onCryptoPriceKeyChanged: refreshCryptoPrices()
+  onCryptoWalletsChanged: refreshCryptoBalances(false)
+
+  // One request per currency on the desktop, through a queue for the same
+  // reason the balances use one: a desktop in four currencies is four curls,
+  // and four at once for a wallpaper is not a thing to do to anybody's link
+  // or to a courtesy endpoint. Nearly every desktop is one currency and so
+  // one request.
+  function refreshCryptoPrices() {
+    if (!service.cryptoWanted) return
+    var currencies = Model.cryptoCurrenciesInUse(config)
+    if (currencies.length === 0) return
+    service.cryptoPriceQueue = currencies
+    startNextCryptoPrice()
+  }
+
+  function startNextCryptoPrice() {
+    if (cryptoPriceProc.running) return
+    var queue = service.cryptoPriceQueue
+    if (!queue || queue.length === 0) return
+    var currency = queue[0]
+    service.cryptoPriceQueue = queue.slice(1)
+    var command = Model.cryptoPriceCommand(Model.cryptoCoinsInUse(config), currency)
+    if (!command) { Qt.callLater(service.startNextCryptoPrice); return }
+    cryptoPriceProc.currency = currency
+    cryptoPriceProc.command = command
+    cryptoPriceProc.running = true
+  }
+
+  function storeCryptoPrices(currency, table) {
+    var next = ({})
+    for (var k in service.cryptoPrices) next[k] = service.cryptoPrices[k]
+    next[currency] = table
+    service.cryptoPrices = next
+  }
+
+  function refreshCryptoBalances(force) {
+    if (!service.cryptoWanted) return
+    var wallets = service.cryptoWallets
+    var queue = []
+    for (var i = 0; i < wallets.length; i++) {
+      var have = service.cryptoBalances[wallets[i].key]
+      if (force === true || have === undefined || have === null) queue.push(wallets[i])
+    }
+    if (queue.length === 0) return
+    service.cryptoQueue = queue
+    startNextCryptoBalance()
+  }
+
+  function startNextCryptoBalance() {
+    if (cryptoBalanceProc.running) return
+    var queue = service.cryptoQueue
+    if (!queue || queue.length === 0) return
+    var wallet = queue[0]
+    service.cryptoQueue = queue.slice(1)
+    // Built again here rather than trusted from the queue: the address
+    // becomes a path segment or the body of a POST, and cryptoBalanceCommand
+    // refuses one that does not match its chain's own shape.
+    var command = Model.cryptoBalanceCommand(wallet.chain, wallet.address)
+    if (!command) { Qt.callLater(service.startNextCryptoBalance); return }
+    cryptoBalanceProc.chain = wallet.chain
+    cryptoBalanceProc.key = wallet.key
+    cryptoBalanceProc.command = command
+    cryptoBalanceProc.running = true
+  }
+
+  function storeCryptoBalance(key, amount) {
+    var next = ({})
+    for (var k in service.cryptoBalances) next[k] = service.cryptoBalances[k]
+    next[key] = amount
+    service.cryptoBalances = next
+  }
+
+  Process {
+    id: cryptoPriceProc
+    running: false
+    property string currency: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var parsed = Model.parseCryptoMarket(text)
+        if (parsed) {
+          service.storeCryptoPrices(cryptoPriceProc.currency, parsed)
+          service.cryptoError = ""
+        } else if (service.cryptoPrices[cryptoPriceProc.currency] === undefined) {
+          // Only says so when there is nothing to show, the way a balance
+          // does: a host that hiccups under prices already on screen leaves
+          // them alone rather than blanking every card.
+          service.cryptoError = "unavailable"
+        }
+      }
+    }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextCryptoPrice)
+  }
+
+  Process {
+    id: cryptoBalanceProc
+    running: false
+    property string chain: ""
+    property string key: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var amount = Model.parseCryptoBalance(cryptoBalanceProc.chain, text)
+        if (amount !== null) {
+          service.storeCryptoBalance(cryptoBalanceProc.key, amount)
+          service.cryptoError = ""
+        } else if (service.cryptoBalances[cryptoBalanceProc.key] === undefined) {
+          // Only says so when there is nothing to show. A node that hiccups
+          // under a balance already on screen leaves that balance alone.
+          service.cryptoError = "unavailable"
+        }
+      }
+    }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextCryptoBalance)
+  }
+
+  // A price moves in minutes. A wallpaper does not need it in seconds, and
+  // CoinGecko's free tier is a courtesy worth not straining.
+  Timer {
+    interval: 300000
+    repeat: true
+    running: service.cryptoWanted
+    triggeredOnStart: true
+    onTriggered: service.refreshCryptoPrices()
+  }
+
+  // A balance moves when you move it, which is rarely.
+  Timer {
+    interval: 600000
+    repeat: true
+    running: service.cryptoWanted
+    triggeredOnStart: true
+    onTriggered: service.refreshCryptoBalances(true)
+  }
+
   // ------------------------------------------------------------- calendar
   //
   // Google publishes every calendar as an iCalendar file at a private
@@ -1078,6 +1258,176 @@ Item {
     onTriggered: service.refreshTodoist(true)
   }
 
+  // -------------------------------------------------------------- photos
+  //
+  // One listing per directory a photo card points at, shared by every card
+  // pointing at the same one. It is done here rather than in the widget
+  // because the widget is built once per output and once again inside the
+  // editor: three copies of the same card would otherwise be three scans of
+  // the same folder to draw one photograph.
+  //
+  // `find`, run without a shell, with the extensions as arguments rather than
+  // a filter applied afterwards -- a Pictures folder can hold fifty thousand
+  // files and only a few hundred of them are ever going on the wallpaper.
+
+  // absolute directory -> the image paths in it, sorted
+  property var photoFiles: ({})
+  property var photoQueue: []
+
+  readonly property var photoFolders: Model.photoFoldersInUse(config, home)
+  readonly property bool photosWanted: photoFolders.length > 0
+
+  onPhotoFoldersChanged: refreshPhotos(false)
+
+  // `force` re-reads every folder, which is what the timer wants -- pictures
+  // are added to a directory by something other than this shell. Without it
+  // only folders with nothing listed yet are queued, which is what a config
+  // change wants: every drag across the grid replaces the config object, and
+  // none of them has anything to do with what is in somebody's Pictures.
+  function refreshPhotos(force) {
+    var folders = service.photoFolders
+
+    // Drop listings for folders nothing points at any more. Assigned back
+    // only when something actually went, because reassigning this property is
+    // what makes every photo card re-evaluate which file it is showing.
+    var kept = ({})
+    var dropped = false
+    for (var key in service.photoFiles) {
+      if (folders.indexOf(key) === -1) { dropped = true; continue }
+      kept[key] = service.photoFiles[key]
+    }
+    if (dropped) service.photoFiles = kept
+
+    var queue = []
+    for (var i = 0; i < folders.length; i++) {
+      if (force === true || service.photoFiles[folders[i]] === undefined) queue.push(folders[i])
+    }
+    if (queue.length === 0) return
+    service.photoQueue = queue
+    startNextPhotoScan()
+  }
+
+  function startNextPhotoScan() {
+    if (photoScanProc.running) return
+    var queue = service.photoQueue
+    if (!queue || queue.length === 0) return
+    var folder = String(queue[0])
+    service.photoQueue = queue.slice(1)
+    // Checked again here rather than trusted from the queue: this string is
+    // about to be an argument to a process.
+    if (!folder || folder.charAt(0) !== "/") { startNextPhotoScan(); return }
+
+    var argv = ["/usr/bin/find", "-L", folder, "-maxdepth", "1", "-type", "f", "("]
+    for (var i = 0; i < Model.PHOTO_EXTENSIONS.length; i++) {
+      if (i > 0) argv.push("-o")
+      argv.push("-iname")
+      argv.push("*." + Model.PHOTO_EXTENSIONS[i])
+    }
+    argv.push(")")
+
+    photoScanProc.folder = folder
+    photoScanProc.command = argv
+    photoScanProc.running = true
+  }
+
+  Process {
+    id: photoScanProc
+    running: false
+    property string folder: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        // Reassign whole, never mutate: a card reading one folder's listing
+        // only re-evaluates when the property itself changes.
+        var next = ({})
+        for (var key in service.photoFiles) next[key] = service.photoFiles[key]
+        next[photoScanProc.folder] = Model.parsePhotoList(text)
+        service.photoFiles = next
+      }
+    }
+    onRunningChanged: if (!running) Qt.callLater(service.startNextPhotoScan)
+  }
+
+  Timer {
+    // A folder gains pictures by something that is not this shell, so there
+    // is nothing to be notified by. Ten minutes is often enough that a photo
+    // dropped in during a session turns up, and rare enough that the disk
+    // never hears about the widget.
+    interval: 600000
+    repeat: true
+    running: service.photosWanted
+    onTriggered: service.refreshPhotos(true)
+  }
+
+  // ------------------------------------------------------- choosing a file
+  //
+  // The desktop's own file chooser, through `omarchy-file-select` and the
+  // portal behind it, so picking a picture is the same dialog every other
+  // application on the machine opens -- with the places, the thumbnails and
+  // the recent folders already in it. Writing our own browser inside the
+  // editor would be a worse one that nobody had used before.
+  //
+  // The editor closes while the chooser is up and opens again when it is
+  // answered. That is not politeness: the editor is a layer-shell overlay and
+  // every ordinary window is below it, so a dialog opened underneath is one
+  // nobody can see or click. What comes back is the widget still selected and
+  // the panel where it was, because both of those live here rather than in
+  // the window that closed.
+
+  property string pickId: ""
+  property string pickKey: ""
+  property bool picking: false
+
+  function choosePath(id, key, kind, title, extensions) {
+    if (pickProc.running) return
+    var target = Model.findInstance(config, id)
+    if (!target || !Model.settingSpec(target.type, key)) return
+    // Without this the command is "/bin/omarchy-file-select", which does not
+    // exist, and the only visible effect would be the editor blinking closed
+    // and open again for no reason.
+    if (!service.omarchyPath) return
+
+    var argv = [service.omarchyPath + "/bin/omarchy-file-select",
+      "--title", String(title || "Choose a file")]
+    if (String(kind) === "folder") argv.push("--directory")
+    else if (extensions) { argv.push("--extensions"); argv.push(String(extensions)) }
+
+    service.pickId = String(id)
+    service.pickKey = String(key)
+    service.picking = true
+    service.editing = false
+    pickProc.command = argv
+    pickProc.running = true
+  }
+
+  Process {
+    id: pickProc
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        // One path per line; the chooser is opened without --multiple, so
+        // there is one. Nothing picked is a decision rather than a failure --
+        // the setting simply keeps what it had.
+        var picked = String(text).split("\n")[0].replace(/\s+$/, "")
+        if (picked.charAt(0) === "/") service.setSetting(service.pickId, service.pickKey, picked)
+      }
+    }
+    onRunningChanged: {
+      if (running) return
+      service.picking = false
+      // `pickId` and `pickKey` are deliberately left standing. The collector's
+      // `streamFinished` can arrive after this, and clearing them here would
+      // mean the path the chooser just handed back was written to nothing.
+      // The next `choosePath` overwrites them anyway.
+      //
+      // Back to the editor, however it ended. A chooser dismissed with Escape
+      // has to put the editor back too, or the gesture reads as having closed
+      // it on purpose.
+      service.editing = true
+    }
+  }
+
   // ----------------------------------------------------------------- IPC
 
   IpcHandler {
@@ -1223,6 +1573,12 @@ Item {
       return String(service.layout.opacity)
     }
 
+    // The layout's global corner radius, applied to every card, same outline.
+    function radiusAll(value: string): string {
+      service.setLayoutRadius(Number(value))
+      return String(service.layout.radius)
+    }
+
     function opacity(id: string, value: string): string {
       if (!Model.findInstance(service.config, id)) return "no widget with id " + id
       service.setOpacity(id, Number(value))
@@ -1288,6 +1644,41 @@ Item {
 
     function refreshRepos(): string {
       service.refreshRepos(true)
+      return "ok"
+    }
+
+    function crypto(): string {
+      if (!service.cryptoWanted) return "no crypto widget is on"
+      var out = []
+      var coins = Model.cryptoCoinsInUse(service.config)
+      var currencies = Model.cryptoCurrenciesInUse(service.config)
+      for (var i = 0; i < coins.length; i++) {
+        for (var c = 0; c < currencies.length; c++) {
+          var quote = Model.cryptoQuote(service.cryptoPrices, coins[i], currencies[c])
+          out.push(coins[i] + " " + currencies[c] + ": " + (quote
+            ? Model.cryptoMoneyLabel(quote.price, currencies[c])
+              + "  " + Model.cryptoChangeLabel(quote.change)
+            : (service.cryptoError || "not fetched yet")))
+        }
+      }
+      var wallets = service.cryptoWallets
+      for (var w = 0; w < wallets.length; w++) {
+        var held = service.cryptoBalances[wallets[w].key]
+        // Shortened, the way the calendar withholds its address: this answer
+        // goes wherever the caller sends it, and a wallet is not a thing to
+        // print in full for the convenience of a debug command.
+        out.push(Model.cryptoSymbol(wallets[w].chain) + " "
+          + Model.cryptoAddressShort(wallets[w].address) + ": "
+          + (held === undefined || held === null
+            ? (service.cryptoError || "not fetched yet")
+            : Model.cryptoAmountLabel(held)))
+      }
+      return out.join("\n")
+    }
+
+    function refreshCrypto(): string {
+      service.refreshCryptoPrices()
+      service.refreshCryptoBalances(true)
       return "ok"
     }
 

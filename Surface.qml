@@ -28,7 +28,7 @@ Item {
   property string omarchyPath: ""
 
   readonly property string pluginId: manifest && manifest.id
-    ? String(manifest.id) : "io.github.anishfn.widgets"
+    ? String(manifest.id) : "anishfn.widgets"
 
   // The shell assigns `service` once, as the panel loads. If the service
   // singleton was not built yet at that moment the assignment lands as null
@@ -168,6 +168,7 @@ Item {
             height: rect.height
 
             service: root.svc
+            shell: root.shell
             instance: modelData
             widgetSource: root.sourceFor(modelData.type)
           }

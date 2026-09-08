@@ -13,6 +13,11 @@ var SCHEMA_VERSION = 2
 // an unbounded one would exhaust the shell long before anyone could read it.
 var MAX_WIDGETS = 64
 var MAX_STRING = 256
+// Paths get their own ceiling. 256 characters is generous for a label and
+// mean for a file somebody actually has: a photograph three directories deep
+// with the camera's own name on it clears it easily, and a truncated path is
+// a setting that silently points at nothing.
+var MAX_PATH = 1024
 var MAX_COLUMNS = 6
 var MAX_ROWS = 24
 var MAX_MARGIN = 4000
@@ -29,6 +34,16 @@ var MAX_SCALE = 2
 
 // The opacity every card starts at; a widget can override it on its own.
 var DEFAULT_OPACITY = 0.72
+
+// Corner roundness in pixels, per card. Any value from 0 (square) to 60 is
+// offered; -1 means "follow the shell theme's own corner radius". Past 60 the
+// rounding would crowd out the card's own face, so the knob stops there.
+var MIN_RADIUS = 0
+var MAX_RADIUS = 60
+// The radius every card comes up as; a widget can override it on its own. This
+// is 20 because that is the size a card first looks "deliberately round"
+// without lousing up the corner art — 40 is an important-looking bulge.
+var DEFAULT_RADIUS = 20
 
 // Which edge of the screen the grid hugs.
 var SIDES = ["left", "right"]
@@ -54,7 +69,8 @@ var DEFAULT_LAYOUT = {
   marginX: 40,
   marginY: 40,
   scale: 1,
-  opacity: DEFAULT_OPACITY
+  opacity: DEFAULT_OPACITY,
+  radius: DEFAULT_RADIUS
 }
 
 // ---------------------------------------------------------------- catalogue
@@ -63,10 +79,16 @@ var DEFAULT_LAYOUT = {
 // Everything else — the bar popup, the editor, the config file, the layout on
 // screen — is driven off this list, so nothing else has to learn the new name.
 //
+// `icon` is one glyph, from the theme's own Nerd Font, and it is what makes a
+// list of these scannable once there are more than a handful: the bar popup
+// and the editor's tray both lead with it, and a row you find by its shape is
+// found faster than one you have to read. One glyph, no colour of its own.
+//
 // `sizes` is every footprint the type is allowed to take, as [cols, rows] in
 // cells, first one being its default. The editor offers exactly these, which
 // is how a type says "I read well wide" without anything else having to know
-// why.
+// why. A size wider than the grid the user has is dropped rather than
+// offered, so a type may list one without every grid having to be that wide.
 //
 // `settings` is the type's whole tunable surface, and it is a schema rather
 // than a bag of defaults: each entry carries the key, how to edit it, and
@@ -82,12 +104,16 @@ var DEFAULT_LAYOUT = {
 // widget that can never say anything different from the one beside it.
 //
 // Supported setting types: "text", "boolean", "choice" (needs `options`),
-// and "timezone" (an IANA zone name, offered as a searchable list).
+// "timezone" (an IANA zone name, offered as a searchable list), and "path"
+// (a file or a directory, chosen through the desktop's own file chooser --
+// `pathKinds` lists which of "file", "image" and "folder" it may be, and
+// `extensions` is the space-separated list the chooser filters on).
 
 function catalog() {
   return [
     {
       type: "clock",
+      icon: "\uf017",
       name: "Clock",
       description: "The time, in any timezone, and how far that is from your own.",
       source: "widgets/Clock.qml",
@@ -132,6 +158,7 @@ function catalog() {
     },
     {
       type: "weather",
+      icon: "\uf0c2",
       name: "Weather",
       description: "Now, and today's range, for wherever Omarchy points.",
       source: "widgets/Weather.qml",
@@ -170,6 +197,7 @@ function catalog() {
     },
     {
       type: "github",
+      icon: "\uf09b",
       name: "GitHub",
       description: "A year of contributions, as many weeks as the card can hold.",
       source: "widgets/Github.qml",
@@ -197,6 +225,7 @@ function catalog() {
     },
     {
       type: "repo-pulse",
+      icon: "\uf005",
       name: "Repo pulse",
       description: "Stars, forks, issues and open pull requests for a repository.",
       source: "widgets/RepoPulse.qml",
@@ -225,12 +254,82 @@ function catalog() {
       ]
     },
     {
+      type: "crypto",
+      icon: "\uf0d6",
+      name: "Crypto",
+      description: "What a wallet holds and what it is worth, or just the coin's price.",
+      source: "widgets/Crypto.qml",
+      sizes: [[1, 1], [2, 1]],
+      // One per holding. A person with one coin is not who this is for.
+      multiple: true,
+      // Two things are fetched and they go to different places: the price to
+      // CoinGecko, which answers for every coin at once, and the balance to
+      // the chain itself. An address is only ever sent to its own chain's
+      // node, and never to the price host.
+      network: ["api.coingecko.com", "mempool.space", "litecoinspace.org",
+        "ethereum-rpc.publicnode.com", "api.mainnet-beta.solana.com"],
+      settings: [
+        {
+          key: "chain",
+          type: "choice",
+          label: "Chain",
+          defaultValue: "bitcoin",
+          options: [
+            { value: "bitcoin", label: "Bitcoin" },
+            { value: "ethereum", label: "Ethereum" },
+            { value: "solana", label: "Solana" },
+            { value: "litecoin", label: "Litecoin" }
+          ]
+        },
+        {
+          key: "address",
+          type: "text",
+          label: "Address",
+          help: "Empty shows the price alone",
+          defaultValue: ""
+        },
+        {
+          key: "label",
+          type: "text",
+          label: "Label",
+          help: "Empty follows the coin",
+          defaultValue: ""
+        },
+        {
+          key: "currency",
+          type: "choice",
+          label: "Currency",
+          defaultValue: "usd",
+          options: [
+            { value: "usd", label: "USD" },
+            { value: "eur", label: "EUR" },
+            { value: "gbp", label: "GBP" },
+            { value: "inr", label: "INR" },
+            { value: "jpy", label: "JPY" },
+            { value: "aud", label: "AUD" },
+            { value: "cad", label: "CAD" }
+          ]
+        },
+        {
+          // The one dial that matters on a wallpaper somebody else can see.
+          // Off leaves the holding and hides what it is worth.
+          key: "showFiat",
+          type: "boolean",
+          label: "Value in money",
+          defaultValue: true
+        }
+      ]
+    },
+    {
       type: "calendar",
+      icon: "\uf073",
       name: "Calendar",
       description: "What is next, from your Google Calendar's secret iCal address.",
       source: "widgets/Calendar.qml",
       // Wide first: an event is a time and a sentence, and a square card can
-      // hold one of them at a time. The tall size is the day's agenda.
+      // hold one of them at a time. Each size is a layer on the last -- the
+      // wide one adds the day as a bar, the tall one adds the rest of today
+      // and what tomorrow opens with.
       sizes: [[2, 1], [1, 1], [2, 2]],
       // Google publishes every calendar as an iCalendar file at a private
       // address, which is the one way to read a calendar without a wallpaper
@@ -280,6 +379,7 @@ function catalog() {
     },
     {
       type: "todos",
+      icon: "\uf046",
       name: "Todos",
       description: "Today's list, from a text file. Tick things off; the title opens it.",
       source: "widgets/Todos.qml",
@@ -295,8 +395,12 @@ function catalog() {
       interactive: true,
       settings: [
         {
+          // A path rather than free text, so it comes with the chooser. The
+          // value is the same string it always was and an old config still
+          // reads: only the control changed.
           key: "file",
-          type: "text",
+          type: "path",
+          pathKinds: ["file"],
           label: "List file",
           help: "~/.config/omarchy/todos.txt",
           defaultValue: ""
@@ -330,6 +434,7 @@ function catalog() {
     },
     {
       type: "todoist",
+      icon: "\uf0ae",
       name: "Todoist",
       description: "What is due, from Todoist. Tick things off.",
       source: "widgets/Todoist.qml",
@@ -374,6 +479,7 @@ function catalog() {
     },
     {
       type: "music",
+      icon: "\uf001",
       name: "Music",
       description: "What is playing, how far in, and the transport for it.",
       source: "widgets/Music.qml",
@@ -410,6 +516,109 @@ function catalog() {
           type: "text",
           label: "Player",
           help: "Spotify, Firefox, mpv - blank follows whatever is playing",
+          defaultValue: ""
+        }
+      ]
+    },
+    {
+      type: "omate",
+      icon: "\uf1b0",
+      name: "Omate",
+      description: "The desktop pet: show and hide it, pick its skin, size it, set how fast it chases the cursor.",
+      source: "widgets/Omate.qml",
+      sizes: [[2, 2]],
+      // Every control on the card writes through to the omate plugin's own
+      // settings, which are global -- two cards would fight each other's
+      // slider mid-drag. One card, speaking for the one pet.
+      multiple: false,
+      // The widest interactivity in the set: a power switch, a selectable
+      // skin row, and two sliders, all about the pet the card exists to
+      // show. See DESIGN.md, which records this as an exception.
+      interactive: true,
+      settings: [
+        {
+          // The owner's name, not the pet's -- the pet already has one in
+          // its pack. Pushed through to omate's own userName, so the pet's
+          // speech uses whatever is written here no matter which side it
+          // was edited from.
+          key: "label",
+          type: "text",
+          label: "Owner name",
+          help: "What the pet calls you",
+          defaultValue: ""
+        }
+      ]
+    },
+    {
+      type: "photo",
+      name: "Photos",
+      description: "A picture of your own, or a folder of them, one at a time.",
+      icon: "\uf03e",
+      source: "widgets/Photo.qml",
+      // The one type in the set where a bigger card is a different picture
+      // rather than the same one stretched: a photograph is a crop, and every
+      // footprint crops it differently. So it offers more sizes than anything
+      // else here, and the editor answers that with a list rather than a
+      // button you press until the right one comes round.
+      sizes: [[2, 2], [1, 1], [2, 1], [1, 2], [3, 2], [2, 3], [3, 3]],
+      // One per picture. Two photographs on a wall is the obvious thing to
+      // want, and each is a different file.
+      multiple: true,
+      settings: [
+        {
+          // One path, meaning two things, decided by what it points at: a
+          // file is that photograph, a directory is everything in it, shown
+          // one at a time. That is the same choice the chooser already asks
+          // ("pick a file" or "pick a folder"), so making it a second setting
+          // would be asking twice.
+          key: "path",
+          type: "path",
+          label: "Picture",
+          help: "An image, or a folder of them",
+          pathKinds: ["image", "folder"],
+          extensions: "jpg jpeg png webp gif bmp",
+          defaultValue: ""
+        },
+        {
+          // Seconds, as a choice rather than a number, because the useful
+          // ones are decades apart and nobody wants to type 1800. Only read
+          // when the path is a folder; a single picture has nothing to
+          // change to.
+          key: "interval",
+          type: "choice",
+          label: "Change every",
+          defaultValue: "300",
+          options: [
+            { value: "0", label: "Never" },
+            { value: "30", label: "30 seconds" },
+            { value: "300", label: "5 minutes" },
+            { value: "1800", label: "30 minutes" },
+            { value: "3600", label: "An hour" }
+          ]
+        },
+        {
+          key: "shuffle",
+          type: "boolean",
+          label: "Shuffle",
+          defaultValue: false
+        },
+        {
+          key: "fit",
+          type: "choice",
+          label: "Fit",
+          defaultValue: "fill",
+          options: [
+            { value: "fill", label: "Fill the card" },
+            { value: "contain", label: "Whole picture" }
+          ]
+        },
+        {
+          // Doubles as the name the popup and the tray use to tell two of
+          // these apart, which is the `label` convention every type shares.
+          key: "label",
+          type: "text",
+          label: "Caption",
+          help: "Empty shows none",
           defaultValue: ""
         }
       ]
@@ -491,6 +700,55 @@ function isAllowedSize(type, cols, rows) {
   return false
 }
 
+// The glyph a type wears in a list. Always a string -- empty when a type has
+// not chosen one -- so a caller can draw it without first asking whether it
+// is there.
+function iconFor(type) {
+  var entry = catalogEntry(type)
+  return entry && typeof entry.icon === "string" ? entry.icon : ""
+}
+
+// A footprint written the way the editor says it: "2 × 1".
+function sizeLabel(cols, rows) {
+  return String(Math.round(Number(cols) || 1)) + " \u00d7 " + String(Math.round(Number(rows) || 1))
+}
+
+// The footprints a type offers that a grid this wide can actually hold.
+//
+// The catalogue is free to list a size wider than anybody's grid -- the photo
+// card lists three of them -- because the alternative is a type whose widest
+// composition nobody with a six-column grid can ever reach. This is the one
+// place that is narrowed down, so the editor offers only sizes that will fit
+// and nothing downstream has to ask again.
+//
+// A type none of whose sizes fit still answers with its narrowest, because
+// every answer here has to be a size the type declared: a footprint invented
+// by clamping is one `isAllowedSize` would refuse a moment later.
+function sizesWithin(type, maxCols) {
+  var limit = Math.round(clampNumber(maxCols, 1, MAX_COLUMNS, MAX_COLUMNS))
+  var sizes = sizesFor(type)
+  var out = []
+  var narrowest = sizes[0]
+  for (var i = 0; i < sizes.length; i++) {
+    if (sizes[i][0] <= limit) out.push(sizes[i])
+    if (sizes[i][0] < narrowest[0]) narrowest = sizes[i]
+  }
+  return out.length ? out : [narrowest]
+}
+
+// The largest footprint a type offers that fits a grid this wide. Used when a
+// grid narrows under a widget, and when a config asks for a size the grid
+// cannot hold -- both cases want the widget to end up at a size the type
+// actually declared rather than at a clamped one.
+function fitSize(type, maxCols) {
+  var fits = sizesWithin(type, maxCols)
+  var best = fits[0]
+  for (var i = 1; i < fits.length; i++) {
+    if (fits[i][0] > best[0] || (fits[i][0] === best[0] && fits[i][1] > best[1])) best = fits[i]
+  }
+  return best
+}
+
 // The next footprint in the type's list, wrapping. This is what the editor's
 // size control steps through.
 function nextSize(type, cols, rows) {
@@ -512,6 +770,18 @@ function clampString(value) {
   return value.length > MAX_STRING ? value.slice(0, MAX_STRING) : value
 }
 
+// A path as a setting can hold it. Longer than a string, and with the two
+// characters that would make it ambiguous taken out rather than escaped: a
+// newline in a path is what turns one line of `find` output into two, and a
+// null byte never reaches anything that would keep it. A file named with
+// either is a file this cannot address, which is a better answer than a
+// listing that quietly means something else.
+function clampPath(value) {
+  if (typeof value !== "string") return ""
+  var out = value.replace(/[\r\n\0]/g, "")
+  return out.length > MAX_PATH ? out.slice(0, MAX_PATH) : out
+}
+
 function clampNumber(value, min, max, fallback) {
   var n = Number(value)
   if (!isFinite(n)) return fallback
@@ -531,7 +801,8 @@ function normalizeLayout(raw) {
     marginX: Math.round(clampNumber(source.marginX, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginX)),
     marginY: Math.round(clampNumber(source.marginY, 0, MAX_MARGIN, DEFAULT_LAYOUT.marginY)),
     scale: Math.round(clampNumber(source.scale, MIN_SCALE, MAX_SCALE, DEFAULT_LAYOUT.scale) * 100) / 100,
-    opacity: Math.round(clampNumber(source.opacity, 0, 1, DEFAULT_LAYOUT.opacity) * 100) / 100
+    opacity: Math.round(clampNumber(source.opacity, 0, 1, DEFAULT_LAYOUT.opacity) * 100) / 100,
+    radius: Math.round(clampNumber(source.radius, MIN_RADIUS, MAX_RADIUS, DEFAULT_LAYOUT.radius))
   }
 }
 
@@ -854,11 +1125,18 @@ function defaultInstance(type, id) {
     // null means "follow the layout's global opacity"; a number overrides the
     // layout for this card alone.
     opacity: null,
-    // -1 follows the theme's Hyprland rounding; anything else is literal px.
-    // The default is a shape rather than the theme's because a desktop card is
-    // an order of magnitude larger than the bar chrome `decoration:rounding`
-    // was chosen for, and a 0 there should not square off a 200px card.
-    radius: 20,
+    // null means "follow the layout's global radius", the same as opacity
+    // above it. A number overrides the layout for this card alone, and -1
+    // follows the theme's Hyprland rounding.
+    //
+    // Both must be null here rather than a literal, because `defaultConfig`
+    // builds an instance straight from this and everything else in the
+    // program goes through `normalizeInstance` -- which resolves an absent
+    // radius to null. A literal here meant the same field held two different
+    // shapes depending on which door the config came in by, and the editor
+    // read it raw and drew a three-pixel ring around a card rounded twenty.
+    // Read it through `effectiveRadius`, never off the instance.
+    radius: null,
     settings: settings
   }
 }
@@ -902,6 +1180,8 @@ function coerceSetting(spec, value) {
     return fallback
   }
 
+  if (spec.type === "path") return clampPath(value)
+
   if (spec.type === "timezone") {
     // A zone that is not a zone would reach a command line as one. Empty is
     // always allowed and means "my own clock".
@@ -944,6 +1224,16 @@ function normalizeInstance(raw, index, layout) {
   var rows = Math.round(clampNumber(raw.rows, 1, MAX_ROWS, out.rows))
   if (isAllowedSize(entry.type, cols, rows)) { out.cols = cols; out.rows = rows }
 
+  // A size the type offers but this grid is too narrow for is not a size this
+  // config can hold: left alone it would draw off the edge of the grid and no
+  // free cell would ever be found for it, because there is no column it fits
+  // in. Fall back to the widest footprint that does fit.
+  if (out.cols > layout.columns) {
+    var fitted = fitSize(entry.type, layout.columns)
+    out.cols = fitted[0]
+    out.rows = fitted[1]
+  }
+
   // Clamped so a widget can never begin off the right of the grid; overlaps
   // are resolved later, once every widget's footprint is known.
   var maxCol = Math.max(0, layout.columns - out.cols)
@@ -955,7 +1245,9 @@ function normalizeInstance(raw, index, layout) {
   out.opacity = (raw.opacity === undefined || raw.opacity === null)
     ? null
     : Math.round(clampNumber(raw.opacity, 0, 1, DEFAULT_OPACITY) * 100) / 100
-  out.radius = Math.round(clampNumber(raw.radius, -1, 400, out.radius))
+  out.radius = (raw.radius === undefined || raw.radius === null)
+    ? null
+    : Math.round(clampNumber(raw.radius, -1, 400, DEFAULT_RADIUS))
   out.settings = normalizeSettings(entry, raw.settings)
   return out
 }
@@ -1407,11 +1699,9 @@ function setColumns(config, columns) {
   for (var i = 0; i < next.widgets.length; i++) {
     var w = next.widgets[i]
     if (w.cols > n) {
-      var sizes = sizesFor(w.type)
-      var best = sizes[0]
-      for (var s = 0; s < sizes.length; s++) if (sizes[s][0] <= n && sizes[s][0] >= best[0]) best = sizes[s]
-      w.cols = Math.min(n, best[0])
-      w.rows = best[1]
+      var fitted = fitSize(w.type, n)
+      w.cols = fitted[0]
+      w.rows = fitted[1]
     }
     if (w.col + w.cols > n) w.col = Math.max(0, n - w.cols)
   }
@@ -1446,14 +1736,33 @@ function dropOpacityOverrides(config) {
   for (var i = 0; i < config.widgets.length; i++) config.widgets[i].opacity = null
 }
 
-// Back to what the plugin ships with: the grid's default scale and opacity,
-// with no card keeping its own opacity. What was edited is lost — this is the
-// "I moved too many knobs" button.
+// The layout's global corner radius, same outline as `setLayoutOpacity`: it
+// writes over any per-card radius so the whole grid rounds together again.
+function setLayoutRadius(config, radius) {
+  var n = Number(radius)
+  if (!isFinite(n)) return normalizeConfig(config)
+  var next = normalizeConfig(config)
+  next.layout.radius = Math.round(clampNumber(n, MIN_RADIUS, MAX_RADIUS, DEFAULT_LAYOUT.radius))
+  dropRadiusOverrides(next)
+  return next
+}
+
+// With the global radius changed, a card that had its own keeps it no longer,
+// for the same reason the opacity overrides go.
+function dropRadiusOverrides(config) {
+  for (var i = 0; i < config.widgets.length; i++) config.widgets[i].radius = null
+}
+
+// Back to what the plugin ships with: the grid's default scale, opacity and
+// corner radius, with no card keeping its own of either. What was edited is
+// lost — this is the "I moved too many knobs" button.
 function resetAppearance(config) {
   var next = normalizeConfig(config)
   next.layout.scale = DEFAULT_LAYOUT.scale
   next.layout.opacity = DEFAULT_LAYOUT.opacity
   dropOpacityOverrides(next)
+  next.layout.radius = DEFAULT_LAYOUT.radius
+  dropRadiusOverrides(next)
   return next
 }
 
@@ -1484,6 +1793,14 @@ function effectiveOpacity(config, instance) {
   if (instance && typeof instance.opacity === "number") return instance.opacity
   var global = config && config.layout ? config.layout.opacity : undefined
   return typeof global === "number" ? global : DEFAULT_LAYOUT.opacity
+}
+
+// What the card actually rounds: its own override when it set one, otherwise
+// the layout's global radius, else the built-in default.
+function effectiveRadius(config, instance) {
+  if (instance && typeof instance.radius === "number") return instance.radius
+  var global = config && config.layout ? config.layout.radius : undefined
+  return typeof global === "number" ? global : DEFAULT_LAYOUT.radius
 }
 
 // Instances that should be drawn on the output named `screenName`. An empty
@@ -2797,6 +3114,47 @@ function upcomingEvents(events, nowMs, limit, includeAllDay) {
   return out
 }
 
+// Everything that still has to end today, earliest first. The card used to
+// be an agenda for the whole week; a day's limit is not a filter bolted on
+// to that, because the shape is different -- an event that began yesterday
+// and is running now is still today's business, and an event that starts at
+// 1am is not. So the test is the day an event falls in, not the amount of
+// day left in it.
+function todayEvents(events, nowMs, limit, includeAllDay) {
+  var list = Array.isArray(events) ? events : []
+  var now = Number(nowMs)
+  var max = limit > 0 ? limit : 8
+  var out = []
+  if (!isFinite(now)) return out
+  var today = startOfDay(now)
+  for (var i = 0; i < list.length && out.length < max; i++) {
+    var ev = list[i]
+    if (!ev) continue
+    if (ev.allDay && includeAllDay === false) continue
+    var end = ev.end > ev.start ? ev.end : ev.start + 60000
+    if (end <= now) continue
+    if (startOfDay(ev.start) !== today && !(ev.start <= now && end > now)) continue
+    out.push(ev)
+  }
+  return out
+}
+
+// The earliest thing on a day that is not this one, for the small line the
+// card keeps under today's list. One event only: the rest of tomorrow can
+// wait until it is today.
+function nextDayEvent(events, nowMs, daysAhead, includeAllDay) {
+  var list = Array.isArray(events) ? events : []
+  var now = Number(nowMs)
+  if (!isFinite(now)) return null
+  for (var i = 0; i < list.length; i++) {
+    var ev = list[i]
+    if (!ev) continue
+    if (ev.allDay && includeAllDay === false) continue
+    if (daysApart(ev.start, now) === daysAhead) return ev
+  }
+  return null
+}
+
 function padTwo(n) { return n < 10 ? "0" + n : String(n) }
 
 // "14:30", or "2:30 PM" on a twelve-hour clock.
@@ -2941,7 +3299,7 @@ var DEFAULT_TODO_FILE = ".config/omarchy/todos.txt"
 // one place is refused in the other.
 function resolveHomePath(setting, home, fallback) {
   var base = String(home || "").replace(/\/+$/, "")
-  var raw = clampString(setting).replace(/^\s+|\s+$/g, "")
+  var raw = clampPath(setting).replace(/^\s+|\s+$/g, "")
   if (raw === "") return base ? base + "/" + fallback : ""
   if (raw.indexOf("~/") === 0) raw = base + raw.slice(1)
   else if (raw.charAt(0) !== "/") raw = base + "/" + raw
@@ -3348,6 +3706,721 @@ function todoistTitle(setting, filter) {
   return chosen ? chosen : todoistFilter(filter)
 }
 
+// ------------------------------------------------------------------ photos
+//
+// The photo card is handed one path and works the rest out. A path naming an
+// image file is that photograph; anything else is taken for a directory and
+// shown one picture at a time. Deciding it by asking the filesystem would
+// mean the card could draw nothing until a process came back, so it is
+// decided by the name -- and when the guess is wrong the folder listing
+// simply comes back empty, which is the same thing an empty folder does.
+
+var PHOTO_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif", "bmp"]
+
+// Ceiling on one folder's listing. Pointing this at a directory of ten
+// thousand photographs is an ordinary thing to do; holding all ten thousand
+// paths in the shell to show one of them at a time is not.
+var MAX_PHOTOS = 400
+
+// An absolute path from what the user typed or the chooser handed back.
+// Relative to home, "~" expanded, and any path walking upwards refused
+// outright -- the same shape `todoPath` uses, for the same reason: this
+// string becomes an argument to a process.
+function photoPath(setting, home) {
+  var base = String(home || "").replace(/\/+$/, "")
+  var raw = clampPath(setting).replace(/^\s+|\s+$/g, "")
+  if (raw === "") return ""
+  if (raw.indexOf("~/") === 0) raw = base + raw.slice(1)
+  else if (raw.charAt(0) !== "/") raw = base ? base + "/" + raw : ""
+  if (raw === "" || raw.charAt(0) !== "/") return ""
+  var parts = raw.split("/")
+  for (var i = 0; i < parts.length; i++) if (parts[i] === "..") return ""
+  return raw.replace(/\/+$/, "") || "/"
+}
+
+// The extension, lowercased and without the dot, or "" for a path that has
+// none in its last segment. A dot in a directory name is not an extension.
+function pathExtension(path) {
+  var p = String(path || "")
+  var name = p.slice(p.lastIndexOf("/") + 1)
+  var dot = name.lastIndexOf(".")
+  if (dot <= 0) return ""
+  return name.slice(dot + 1).toLowerCase()
+}
+
+function isPhotoFile(path) {
+  return PHOTO_EXTENSIONS.indexOf(pathExtension(path)) !== -1
+}
+
+// What a photo card's `path` setting points at: one picture, a folder of
+// them, or nothing yet. One answer, asked for by the card, by the folder
+// scanner and by the editor, so none of them can disagree about which of the
+// two a path is.
+function photoTarget(setting, home) {
+  var path = photoPath(setting, home)
+  if (!path) return { path: "", kind: "none" }
+  return { path: path, kind: isPhotoFile(path) ? "image" : "folder" }
+}
+
+// Every directory a photo card is pointed at, once each. What the service
+// scans; a card pointed at a single file asks for nothing.
+function photoFoldersInUse(config, home) {
+  var list = config && Array.isArray(config.widgets) ? config.widgets : []
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].type !== "photo") continue
+    var target = photoTarget(list[i].settings ? list[i].settings.path : "", home)
+    if (target.kind !== "folder" || seen[target.path]) continue
+    seen[target.path] = true
+    out.push(target.path)
+  }
+  return out
+}
+
+// One path per line, as `find` prints them. Sorted so the order a slideshow
+// walks is the order the folder reads in a file manager, rather than whatever
+// order the directory happens to be stored in -- a slideshow that reshuffles
+// itself every rescan is one you cannot ever leave on a picture.
+function parsePhotoList(raw) {
+  var text = typeof raw === "string" ? raw : ""
+  var lines = text.split("\n")
+  var out = []
+  for (var i = 0; i < lines.length && out.length < MAX_PHOTOS; i++) {
+    var line = lines[i].replace(/\s+$/, "")
+    if (line.charAt(0) !== "/") continue
+    if (!isPhotoFile(line)) continue
+    out.push(line)
+  }
+  out.sort()
+  return out
+}
+
+// Which picture comes next. `roll` is a number in [0, 1) -- the caller's
+// random -- so the shuffle is a decision this can be tested on rather than
+// one buried in a timer.
+//
+// Shuffle never lands on the picture already up, because a slideshow that
+// sometimes does nothing when it changes reads as broken. With one picture
+// there is nowhere else to go and it stays.
+function nextPhotoIndex(count, index, shuffle, roll) {
+  var n = Math.round(Number(count) || 0)
+  if (n <= 1) return 0
+  var current = Math.round(Number(index) || 0)
+  if (current < 0 || current >= n) current = 0
+  if (shuffle !== true) return (current + 1) % n
+  var r = Number(roll)
+  if (!isFinite(r) || r < 0 || r >= 1) r = 0
+  // Drawn from the n-1 pictures that are not the one on screen, so every
+  // change is a change.
+  var pick = Math.floor(r * (n - 1))
+  if (pick >= n - 1) pick = n - 2
+  return pick >= current ? pick + 1 : pick
+}
+
+// How long a picture stays up, in milliseconds. "0" is the setting's way of
+// saying never, and answers 0 -- the caller runs no timer at all rather than
+// one that fires immediately.
+function photoIntervalMs(setting) {
+  var seconds = Math.round(Number(setting))
+  if (!isFinite(seconds) || seconds <= 0) return 0
+  return Math.max(5, Math.min(86400, seconds)) * 1000
+}
+
+// The picture at an index, clamped rather than wrapped: a list that shrank
+// under a card mid-slideshow should show its last picture, not jump to the
+// front.
+function photoAt(files, index) {
+  if (!Array.isArray(files) || files.length === 0) return ""
+  var i = Math.round(Number(index) || 0)
+  if (i < 0) i = 0
+  if (i >= files.length) i = files.length - 1
+  return String(files[i])
+}
+
+// The file's own name, without the directory or the extension. Only ever
+// shown when the user has asked for a caption and given none of their own.
+function photoName(path) {
+  var p = String(path || "")
+  var name = p.slice(p.lastIndexOf("/") + 1)
+  var dot = name.lastIndexOf(".")
+  return dot > 0 ? name.slice(0, dot) : name
+}
+
+// ------------------------------------------------------------------- omate
+//
+// The pet lives in another plugin, so everything here is about talking to a
+// stranger: a path it hands back, a number it may not have written yet, a
+// cadence it holds in seconds. All of it is logic with a right answer, so it
+// is here rather than in the card.
+
+// A local filesystem path as a URL a Loader can take. The omate service hands
+// paths back already percent-decoded, so they are encoded again -- a plugin
+// installed under a directory with a space in it is otherwise a URL that
+// silently resolves to nothing. A value that is already a URL is passed
+// through; anything that is neither is refused rather than guessed at, and the
+// caller falls back to not drawing.
+function pluginFileUrl(path) {
+  var p = String(path === undefined || path === null ? "" : path)
+  if (p.length === 0) return ""
+  if (p.indexOf("://") !== -1) return p
+  if (p.charAt(0) !== "/") return ""
+  return "file://" + encodeURI(p).replace(/#/g, "%23").replace(/\?/g, "%3F")
+}
+
+// The chase cadences omate's own panel offers, in its own words. Seconds are
+// the unit omate stores, so they are the key here too.
+var CHASE_LABELS = {
+  10: "Playful",
+  60: "Now and then",
+  300: "Occasional",
+  1800: "Rare"
+}
+
+// What the chase row says it is doing. A cooldown set over the IPC is a
+// legitimate value with no chip of its own, so it is spelled out rather than
+// leaving the row looking unset.
+function chaseLabel(enabled, seconds) {
+  if (enabled !== true) return "Off"
+  var n = Number(seconds)
+  if (!isFinite(n)) return "Off"
+  var rounded = Math.round(n)
+  return CHASE_LABELS[rounded] ? CHASE_LABELS[rounded] : "Every " + rounded + "s"
+}
+
+// A number read out of another plugin's settings, clamped into the range the
+// control offers. A key that plugin has not written yet arrives as undefined,
+// and Math.round(undefined) is NaN -- which reaches an `int` property as a
+// type error and a zero. The fallback is the same default omate itself uses.
+function settingNumber(value, fallback, min, max) {
+  var n = numberOrNaN(value)
+  if (!isFinite(n)) n = numberOrNaN(fallback)
+  if (!isFinite(n)) n = min
+  return Math.max(min, Math.min(max, Math.round(n)))
+}
+
+// Number(null) and Number("") are both 0, which is a real value in every range
+// this card offers -- a nap cadence omate has not written yet would arrive as
+// "never nap" rather than as missing. Absence is checked before conversion.
+function numberOrNaN(value) {
+  if (value === undefined || value === null || value === "") return NaN
+  return Number(value)
+}
+
+// ------------------------------------------------------------------ crypto
+//
+// A holding, and what it is worth. With no address in the settings the same
+// card is a plain ticker instead, which costs nothing to support: only the
+// middle line changes, and it is the shape most people actually want.
+//
+// Four chains, two request shapes. Bitcoin and Litecoin are both read through
+// an Esplora API -- mempool.space and litecoinspace.org, which is its Litecoin
+// fork -- and answer identically, so they share a parser. Ethereum and Solana
+// each take a JSON-RPC POST. A fifth chain is a row in this table, not a new
+// code path.
+//
+// `decimals` is the offset of the chain's smallest unit: 1e8 for a satoshi or
+// a litoshi, 1e18 for wei, 1e9 for a lamport.
+//
+// None of these hosts wants an API key, which is the only reason a wallpaper
+// decoration can talk to them at all -- there is nowhere here to keep a
+// secret. It also means they can withdraw the courtesy, so a chain that stops
+// answering has to degrade to a card that says so, never to a wrong number.
+
+var CRYPTO_CHAINS = {
+  bitcoin: {
+    coin: "bitcoin",
+    symbol: "BTC",
+    decimals: 8,
+    kind: "esplora",
+    host: "mempool.space",
+    endpoint: "https://mempool.space/api/address/",
+    pattern: /^(bc1[02-9ac-hj-np-z]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/
+  },
+  litecoin: {
+    coin: "litecoin",
+    symbol: "LTC",
+    decimals: 8,
+    kind: "esplora",
+    host: "litecoinspace.org",
+    endpoint: "https://litecoinspace.org/api/address/",
+    pattern: /^(ltc1[02-9ac-hj-np-z]{11,71}|[LM3][a-km-zA-HJ-NP-Z1-9]{25,34})$/
+  },
+  ethereum: {
+    coin: "ethereum",
+    symbol: "ETH",
+    decimals: 18,
+    kind: "evm",
+    host: "ethereum-rpc.publicnode.com",
+    endpoint: "https://ethereum-rpc.publicnode.com",
+    pattern: /^0x[0-9a-fA-F]{40}$/
+  },
+  solana: {
+    coin: "solana",
+    symbol: "SOL",
+    decimals: 9,
+    kind: "solana",
+    host: "api.mainnet-beta.solana.com",
+    endpoint: "https://api.mainnet-beta.solana.com",
+    pattern: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
+  }
+}
+
+// Where the prices come from, for every chain at once. One call answers every
+// coin in every currency anybody has on screen, which is what keeps a desktop
+// of six of these cards down to a single request.
+var CRYPTO_PRICE_HOST = "api.coingecko.com"
+
+var CRYPTO_CURRENCIES = ["usd", "eur", "gbp", "inr", "jpy", "aud", "cad"]
+
+var CRYPTO_CURRENCY_SYMBOLS = {
+  usd: "$", eur: "€", gbp: "£", inr: "₹",
+  jpy: "¥", aud: "A$", cad: "C$"
+}
+
+var CRYPTO_DEFAULT_CHAIN = "bitcoin"
+var CRYPTO_DEFAULT_CURRENCY = "usd"
+
+// Ceilings on the two numbers that arrive from outside. Neither is a limit
+// anybody can reach: no coin is worth a trillion of anything, and no chain
+// here has 1e15 units to hold. They are here because a number this large
+// stops being written as digits -- String(1e21) is "1e+21", which the
+// thousands grouping would happily turn into "$1e+,300" on the wallpaper.
+// A figure past these is a response to disbelieve, not one to clamp.
+var MAX_CRYPTO_PRICE = 1e12
+var MAX_CRYPTO_AMOUNT = 1e15
+
+// Where `String` stops writing digits: String(1e21) is "1e+21", and the
+// thousands grouping would turn that into "$1e,+21" on the wallpaper. The two
+// ceilings above catch a figure on the way in, but a holding is a price times
+// an amount and the product of two numbers under their own bounds can still
+// land past this one -- so the labels refuse it here, at the last point
+// before it is drawn, which covers every caller rather than one path.
+var MAX_WRITABLE = 1e21
+
+function cryptoChain(name) {
+  var key = String(name || "")
+  return Object.prototype.hasOwnProperty.call(CRYPTO_CHAINS, key) ? CRYPTO_CHAINS[key] : null
+}
+
+function cryptoChainNames() {
+  var out = []
+  for (var key in CRYPTO_CHAINS) {
+    if (Object.prototype.hasOwnProperty.call(CRYPTO_CHAINS, key)) out.push(key)
+  }
+  return out
+}
+
+function cryptoSymbol(chain) {
+  var entry = cryptoChain(chain)
+  return entry ? entry.symbol : ""
+}
+
+// The address becomes a path segment or a JSON string sent to a node, so it
+// is an allowlist per chain rather than an attempt to escape what arrived.
+// Bech32 carries no b, i or o, which is why those two patterns are not the
+// obvious [a-z0-9].
+function isSafeCryptoAddress(chain, address) {
+  var entry = cryptoChain(chain)
+  if (!entry || typeof address !== "string") return false
+  if (address.length === 0 || address.length > 128) return false
+  return entry.pattern.test(address)
+}
+
+function isCryptoCurrency(value) {
+  var code = String(value || "").toLowerCase()
+  for (var i = 0; i < CRYPTO_CURRENCIES.length; i++) {
+    if (CRYPTO_CURRENCIES[i] === code) return true
+  }
+  return false
+}
+
+function cryptoCurrencyOf(settings) {
+  var code = isPlainObject(settings) ? String(settings.currency || "").toLowerCase() : ""
+  return isCryptoCurrency(code) ? code : CRYPTO_DEFAULT_CURRENCY
+}
+
+function cryptoChainOf(settings) {
+  var name = isPlainObject(settings) ? String(settings.chain || "") : ""
+  return cryptoChain(name) ? name : CRYPTO_DEFAULT_CHAIN
+}
+
+function cryptoWalletKey(chain, address) {
+  return String(chain) + ":" + String(address)
+}
+
+// Distinct wallets across every crypto card that is switched on. An address
+// typed into two cards is fetched once.
+function cryptoWalletsInUse(config) {
+  var list = config && Array.isArray(config.widgets) ? config.widgets : []
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].type !== "crypto" || !list[i].enabled) continue
+    var settings = list[i].settings || {}
+    var chain = cryptoChainOf(settings)
+    var address = clampString(settings.address)
+    if (!address || !isSafeCryptoAddress(chain, address)) continue
+    var key = cryptoWalletKey(chain, address)
+    if (seen[key]) continue
+    seen[key] = true
+    out.push({ chain: chain, address: address, key: key })
+  }
+  return out
+}
+
+// Every coin any crypto card wants a price for -- including the cards with no
+// address at all, which are tickers and want nothing else.
+function cryptoCoinsInUse(config) {
+  var list = config && Array.isArray(config.widgets) ? config.widgets : []
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].type !== "crypto" || !list[i].enabled) continue
+    var entry = cryptoChain(cryptoChainOf(list[i].settings || {}))
+    if (!entry || seen[entry.coin]) continue
+    seen[entry.coin] = true
+    out.push(entry.coin)
+  }
+  return out
+}
+
+function cryptoCurrenciesInUse(config) {
+  var list = config && Array.isArray(config.widgets) ? config.widgets : []
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].type !== "crypto" || !list[i].enabled) continue
+    var code = cryptoCurrencyOf(list[i].settings || {})
+    if (seen[code]) continue
+    seen[code] = true
+    out.push(code)
+  }
+  return out
+}
+
+// The command lines live here rather than in Service.qml, unlike the other
+// fetchers, for one reason: four chains times two request shapes is exactly
+// the kind of thing that is wrong in one branch and right in three, and here
+// it can be tested. Everything interpolated has already been through
+// `isSafeCryptoAddress`, and is checked again by the caller before it runs.
+// The flags every crypto fetch carries, and why each one is there.
+//
+// `--proto =https` and `--max-redirs 0` are the pair that keep the promise
+// this widget makes out loud: an address is only ever sent to its own chain's
+// node. Without them a courtesy endpoint could answer a balance lookup with a
+// redirect, and curl would happily carry the address -- which for Bitcoin and
+// Litecoin sits in the URL path -- to whatever host the redirect named. There
+// is no legitimate redirect on any of these five endpoints, so the number of
+// hops allowed is none.
+//
+// `--max-filesize` is the calendar's rule applied here: this body is about to
+// be turned into objects inside the process that draws the desktop, and a
+// courtesy endpoint that starts streaming is not a thing to find out about by
+// running out of memory. A balance or a price is a few hundred bytes; 256 KiB
+// is a ceiling nothing honest reaches.
+var CRYPTO_CURL_FLAGS = ["-fsS", "--proto", "=https", "--max-redirs", "0",
+  "--max-time", "15", "--max-filesize", "262144"]
+
+function cryptoBalanceCommand(chain, address) {
+  var entry = cryptoChain(chain)
+  if (!entry || !isSafeCryptoAddress(chain, address)) return null
+  var timeout = ["/usr/bin/timeout", "-k", "2", "20", "/usr/bin/curl"]
+  if (entry.kind === "esplora") {
+    return timeout.concat(CRYPTO_CURL_FLAGS, [entry.endpoint + address])
+  }
+  var body = entry.kind === "evm"
+    ? JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBalance", params: [address, "latest"] })
+    : JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [address] })
+  return timeout.concat(CRYPTO_CURL_FLAGS,
+    ["-X", "POST", "-H", "content-type: application/json", "-d", body, entry.endpoint])
+}
+
+// One request per currency, covering every coin anybody has on screen.
+//
+// `coins/markets` rather than `simple/price`, which is what this asked for
+// first: it answers with the price, the day's change and a week of hourly
+// closes in the same body, so the card's graph costs no extra request. The
+// trade is that it takes one currency at a time where `simple/price` took a
+// list -- the two-line change that bought a graph. A desktop in one currency,
+// which is nearly all of them, still makes exactly one call.
+//
+// The series is asked for in the card's own currency rather than fetched once
+// in dollars and drawn under every label: the shape is normalised to its own
+// range before it is drawn and the difference would rarely show, but a graph
+// captioned in euros should be a graph of euros.
+function cryptoPriceCommand(coins, currency) {
+  var ids = []
+  for (var i = 0; i < (coins || []).length; i++) {
+    var entry = null
+    for (var key in CRYPTO_CHAINS) {
+      if (CRYPTO_CHAINS[key].coin === coins[i]) { entry = CRYPTO_CHAINS[key]; break }
+    }
+    if (entry && ids.indexOf(entry.coin) === -1) ids.push(entry.coin)
+  }
+  if (ids.length === 0 || !isCryptoCurrency(currency)) return null
+  var code = String(currency).toLowerCase()
+  return ["/usr/bin/timeout", "-k", "2", "20", "/usr/bin/curl"].concat(
+    CRYPTO_CURL_FLAGS,
+    ["https://api.coingecko.com/api/v3/coins/markets?vs_currency=" + code
+      + "&ids=" + ids.join(",")
+      + "&sparkline=true&price_change_percentage=24h"])
+}
+
+// An Esplora address answers with confirmed totals and the mempool's delta on
+// top. Both are counted: a payment that arrived a minute ago is part of the
+// balance every wallet would show, and leaving it out reads as the card being
+// broken rather than as the card being careful.
+function parseEsploraBalance(data, decimals) {
+  if (!isPlainObject(data)) return null
+  var total = 0
+  var parts = [data.chain_stats, data.mempool_stats]
+  var sawOne = false
+  for (var i = 0; i < parts.length; i++) {
+    if (!isPlainObject(parts[i])) continue
+    var funded = Number(parts[i].funded_txo_sum)
+    var spent = Number(parts[i].spent_txo_sum)
+    if (!isFinite(funded) || !isFinite(spent)) continue
+    total += funded - spent
+    sawOne = true
+  }
+  if (!sawOne) return null
+  return total / Math.pow(10, decimals)
+}
+
+// Wei does not fit a double: 1e18 of them is well past the 2^53 that stays
+// exact. It does not matter here, because a double still carries fifteen
+// significant digits and this card shows at most eight -- the loss is below
+// the last figure anybody reads. Do not "fix" this into integer math; the QML
+// JS engine is not guaranteed to have BigInt.
+function parseHexBalance(data, decimals) {
+  if (!isPlainObject(data) || typeof data.result !== "string") return null
+  if (!/^0x[0-9a-fA-F]{1,64}$/.test(data.result)) return null
+  var wei = parseInt(data.result, 16)
+  if (!isFinite(wei)) return null
+  return wei / Math.pow(10, decimals)
+}
+
+function parseLamportBalance(data, decimals) {
+  if (!isPlainObject(data) || !isPlainObject(data.result)) return null
+  var lamports = Number(data.result.value)
+  if (!isFinite(lamports) || lamports < 0) return null
+  return lamports / Math.pow(10, decimals)
+}
+
+// A balance in whole coins, or null for anything that did not parse. Null is
+// the card saying it does not know, which is never the same as zero.
+function parseCryptoBalance(chain, raw) {
+  var entry = cryptoChain(chain)
+  if (!entry) return null
+  var data = raw
+  if (typeof raw === "string") {
+    try { data = JSON.parse(raw) } catch (e) { return null }
+  }
+  if (isPlainObject(data) && data.error !== undefined && data.error !== null) return null
+  var amount
+  if (entry.kind === "esplora") amount = parseEsploraBalance(data, entry.decimals)
+  else if (entry.kind === "evm") amount = parseHexBalance(data, entry.decimals)
+  else amount = parseLamportBalance(data, entry.decimals)
+  if (amount === null || amount < 0 || amount > MAX_CRYPTO_AMOUNT) return null
+  return amount
+}
+
+// One currency's worth of `coins/markets`, folded into { coin: { price,
+// change, series } }. A coin whose price arrived without a 24h figure keeps
+// the price and reports the change as null, and one that arrived without a
+// week behind it reports an empty series -- the card shows what it has rather
+// than nothing, which is the rule the whole file is written to.
+function parseCryptoMarket(raw) {
+  var data = raw
+  if (typeof raw === "string") {
+    try { data = JSON.parse(raw) } catch (e) { return null }
+  }
+  // The endpoint answers with a list, one entry per coin. An object here is
+  // an error body, which is not a price table however well formed it is.
+  if (!Array.isArray(data)) return null
+  var out = {}
+  var found = false
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i]
+    if (!isPlainObject(row)) continue
+    var coin = clampString(row.id)
+    if (!coin) continue
+    var price = numberOrNaN(row.current_price)
+    if (!isFinite(price) || price <= 0 || price > MAX_CRYPTO_PRICE) continue
+    var change = Number(row.price_change_percentage_24h_in_currency)
+    if (!isFinite(change)) change = Number(row.price_change_percentage_24h)
+    out[coin] = {
+      price: price,
+      change: isFinite(change) ? change : null,
+      series: cryptoSeries(isPlainObject(row.sparkline_in_7d)
+        ? row.sparkline_in_7d.price : null)
+    }
+    found = true
+  }
+  return found ? out : null
+}
+
+// The week behind the price, cleaned up: every finite positive close, in the
+// order it arrived, and nothing at all if there are too few to be a shape.
+// Two points is a line segment, not a graph, and a graph of one week that
+// happens to hold three readings would be a lie about how much is known.
+var CRYPTO_SERIES_MIN = 8
+
+function cryptoSeries(raw) {
+  if (!Array.isArray(raw)) return []
+  var out = []
+  for (var i = 0; i < raw.length; i++) {
+    var n = numberOrNaN(raw[i])
+    if (!isFinite(n) || n <= 0 || n > MAX_CRYPTO_PRICE) continue
+    out.push(n)
+  }
+  return out.length >= CRYPTO_SERIES_MIN ? out : []
+}
+
+// A week of hourly closes is 168 numbers and the card is about 180 pixels
+// wide, so drawing them all spends detail nobody can see. Reduced to a fixed
+// count of buckets, each the mean of the readings that fall in it, which
+// keeps the shape and drops the noise -- a mean rather than a sample because
+// a sample of one reading per bucket would let a single spike stand for six
+// hours that were nothing like it.
+//
+// The last bucket always ends on the last reading, so the right-hand end of
+// the line is where the price is now and lines up with the number above it.
+function cryptoSparkline(series, buckets) {
+  var list = Array.isArray(series) ? series : []
+  var count = Math.max(2, Math.round(Number(buckets) || 0))
+  if (list.length < CRYPTO_SERIES_MIN) return []
+  if (list.length <= count) return list.slice()
+  var out = []
+  for (var i = 0; i < count; i++) {
+    var from = Math.floor(i * list.length / count)
+    var to = Math.floor((i + 1) * list.length / count)
+    if (to <= from) to = from + 1
+    var sum = 0
+    for (var j = from; j < to; j++) sum += list[j]
+    out.push(sum / (to - from))
+  }
+  // Whatever the averaging did to the last bucket, the end of the line is the
+  // latest reading: the graph and the price above it are the same fact.
+  out[out.length - 1] = list[list.length - 1]
+  return out
+}
+
+// The low and the high of a drawn series, as the range a graph is plotted
+// against. A flat week has no range at all, and a zero-height plot would put
+// the line on the floor rather than through the middle, so a flat series is
+// given a nominal band around its own value.
+function cryptoSeriesRange(series) {
+  var list = Array.isArray(series) ? series : []
+  if (list.length === 0) return null
+  var low = list[0]
+  var high = list[0]
+  for (var i = 1; i < list.length; i++) {
+    if (list[i] < low) low = list[i]
+    if (list[i] > high) high = list[i]
+  }
+  if (high - low > 0) return { low: low, high: high }
+  var pad = Math.abs(low) * 0.01 || 1
+  return { low: low - pad, high: high + pad }
+}
+
+// The table is keyed by currency first, because one desktop can hold cards
+// priced in two, and each is a separate request with a separate answer.
+function cryptoQuote(prices, coin, currency) {
+  if (!isPlainObject(prices)) return null
+  var byCoin = prices[String(currency)]
+  if (!isPlainObject(byCoin)) return null
+  var quote = byCoin[String(coin)]
+  return isPlainObject(quote) ? quote : null
+}
+
+// A holding written the way somebody reads one off a wallpaper: about four
+// significant figures, never scientific notation, no trailing zeros. A
+// balance is not an audit -- what it has to answer is "roughly how much".
+function cryptoAmountLabel(amount) {
+  // numberOrNaN rather than Number: Number(null) is 0, and a balance that has
+  // not arrived must never format as a wallet holding nothing.
+  var n = numberOrNaN(amount)
+  if (!isFinite(n) || n < 0 || n >= MAX_WRITABLE) return ""
+  if (n === 0) return "0"
+  if (n >= 1000) return groupThousands(String(Math.round(n)))
+  var decimals
+  if (n >= 1) decimals = 3
+  else {
+    // The first significant digit's place, plus two more behind it.
+    var leadingZeros = Math.floor(-Math.log(n) / Math.LN10)
+    decimals = Math.min(8, leadingZeros + 3)
+  }
+  return n.toFixed(decimals).replace(/0+$/, "").replace(/\.$/, "")
+}
+
+function groupThousands(digits) {
+  var text = String(digits)
+  var out = ""
+  var count = 0
+  for (var i = text.length - 1; i >= 0; i--) {
+    out = text.charAt(i) + out
+    count++
+    if (count % 3 === 0 && i > 0) out = "," + out
+  }
+  return out
+}
+
+// "$3,295" or "$434.12". Money on a wallpaper wants a magnitude, so anything
+// over a thousand drops the cents nobody is reading from across a desk.
+function cryptoMoneyLabel(value, currency) {
+  var n = numberOrNaN(value)
+  if (!isFinite(n) || n < 0 || n >= MAX_WRITABLE) return ""
+  var symbol = CRYPTO_CURRENCY_SYMBOLS[String(currency)] || ""
+  if (n >= 1000) return symbol + groupThousands(String(Math.round(n)))
+  return symbol + n.toFixed(2)
+}
+
+// "+2.1%". The sign is the whole of it: DESIGN.md forbids tinting by meaning,
+// so this never gets a colour of its own and a fall is told apart from a rise
+// by reading it, the way every other number on these cards is.
+function cryptoChangeLabel(change) {
+  var n = Number(change)
+  if (change === null || change === undefined || !isFinite(n)) return ""
+  var rounded = Math.round(Math.abs(n) * 10) / 10
+  // A day that moved by less than a twentieth of a percent reads as "+0.0%",
+  // never "-0.0%": the sign is the whole of what this label says, and a minus
+  // in front of a zero says a fall that the number then denies.
+  return (n < 0 && rounded > 0 ? "-" : "+") + rounded.toFixed(1) + "%"
+}
+
+// What one holding is worth, or null when either half is missing. Not zero:
+// a price that has not arrived is not a wallet worth nothing.
+function cryptoHoldingValue(amount, quote) {
+  var n = numberOrNaN(amount)
+  if (!isFinite(n) || n < 0) return null
+  if (!isPlainObject(quote)) return null
+  var price = numberOrNaN(quote.price)
+  if (!isFinite(price)) return null
+  // No ceiling here: both halves already carry one, and what they make
+  // together is guarded where it is written rather than where it is worked
+  // out -- see MAX_WRITABLE.
+  return n * price
+}
+
+// "bc1qgd...jwvw97". Long enough to recognise your own, short enough that it
+// is not the loudest thing on the card.
+function cryptoAddressShort(address) {
+  var text = String(address || "")
+  if (text.length <= 13) return text
+  return text.slice(0, 6) + "…" + text.slice(-6)
+}
+
+// The label a crypto card wears: whatever was typed, else the ticker symbol.
+// The address is deliberately not the fallback -- a wallpaper that announces
+// which addresses you hold is not a default anyone opted into.
+function cryptoCardLabel(settings, chain) {
+  var typed = isPlainObject(settings) ? clampString(settings.label) : ""
+  if (typed) return typed
+  return cryptoSymbol(chain)
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     SCHEMA_VERSION: SCHEMA_VERSION,
@@ -3357,6 +4430,9 @@ if (typeof module !== "undefined" && module.exports) {
     MAX_ROWS: MAX_ROWS,
     MIN_SCALE: MIN_SCALE,
     MAX_SCALE: MAX_SCALE,
+    MIN_RADIUS: MIN_RADIUS,
+    MAX_RADIUS: MAX_RADIUS,
+    DEFAULT_RADIUS: DEFAULT_RADIUS,
     SIDES: SIDES,
     DEFAULT_LAYOUT: DEFAULT_LAYOUT,
     catalog: catalog,
@@ -3376,6 +4452,40 @@ if (typeof module !== "undefined" && module.exports) {
     repoUrl: repoUrl,
     compactCount: compactCount,
     sinceLabel: sinceLabel,
+    CRYPTO_CHAINS: CRYPTO_CHAINS,
+    CRYPTO_CURRENCIES: CRYPTO_CURRENCIES,
+    CRYPTO_PRICE_HOST: CRYPTO_PRICE_HOST,
+    CRYPTO_DEFAULT_CHAIN: CRYPTO_DEFAULT_CHAIN,
+    CRYPTO_DEFAULT_CURRENCY: CRYPTO_DEFAULT_CURRENCY,
+    MAX_CRYPTO_PRICE: MAX_CRYPTO_PRICE,
+    MAX_CRYPTO_AMOUNT: MAX_CRYPTO_AMOUNT,
+    MAX_WRITABLE: MAX_WRITABLE,
+    cryptoChain: cryptoChain,
+    cryptoChainNames: cryptoChainNames,
+    cryptoSymbol: cryptoSymbol,
+    isSafeCryptoAddress: isSafeCryptoAddress,
+    isCryptoCurrency: isCryptoCurrency,
+    cryptoCurrencyOf: cryptoCurrencyOf,
+    cryptoChainOf: cryptoChainOf,
+    cryptoWalletKey: cryptoWalletKey,
+    cryptoWalletsInUse: cryptoWalletsInUse,
+    cryptoCoinsInUse: cryptoCoinsInUse,
+    cryptoCurrenciesInUse: cryptoCurrenciesInUse,
+    cryptoBalanceCommand: cryptoBalanceCommand,
+    cryptoPriceCommand: cryptoPriceCommand,
+    parseCryptoBalance: parseCryptoBalance,
+    parseCryptoMarket: parseCryptoMarket,
+    cryptoSeries: cryptoSeries,
+    cryptoSparkline: cryptoSparkline,
+    cryptoSeriesRange: cryptoSeriesRange,
+    CRYPTO_SERIES_MIN: CRYPTO_SERIES_MIN,
+    cryptoQuote: cryptoQuote,
+    cryptoAmountLabel: cryptoAmountLabel,
+    cryptoMoneyLabel: cryptoMoneyLabel,
+    cryptoChangeLabel: cryptoChangeLabel,
+    cryptoHoldingValue: cryptoHoldingValue,
+    cryptoAddressShort: cryptoAddressShort,
+    cryptoCardLabel: cryptoCardLabel,
     trackTime: trackTime,
     trackFraction: trackFraction,
     isProxyPlayer: isProxyPlayer,
@@ -3402,11 +4512,16 @@ if (typeof module !== "undefined" && module.exports) {
     tempLabel: tempLabel,
     rangeLabel: rangeLabel,
     sizesFor: sizesFor,
+    sizesWithin: sizesWithin,
+    fitSize: fitSize,
+    sizeLabel: sizeLabel,
+    iconFor: iconFor,
     defaultSize: defaultSize,
     isAllowedSize: isAllowedSize,
     nextSize: nextSize,
     isPlainObject: isPlainObject,
     clampString: clampString,
+    clampPath: clampPath,
     clampNumber: clampNumber,
     normalizeLayout: normalizeLayout,
     scaledCell: scaledCell,
@@ -3464,9 +4579,11 @@ if (typeof module !== "undefined" && module.exports) {
     setColumns: setColumns,
     setScale: setScale,
     setLayoutOpacity: setLayoutOpacity,
+    setLayoutRadius: setLayoutRadius,
     setOpacity: setOpacity,
     clearOpacity: clearOpacity,
     effectiveOpacity: effectiveOpacity,
+    effectiveRadius: effectiveRadius,
     resetAppearance: resetAppearance,
     widgetsForScreen: widgetsForScreen,
     offWidgets: offWidgets,
@@ -3501,6 +4618,8 @@ if (typeof module !== "undefined" && module.exports) {
     icsExceptions: icsExceptions,
     parseCalendar: parseCalendar,
     upcomingEvents: upcomingEvents,
+    todayEvents: todayEvents,
+    nextDayEvent: nextDayEvent,
     clockLabel: clockLabel,
     eventTimeLabel: eventTimeLabel,
     untilLabel: untilLabel,
@@ -3535,6 +4654,22 @@ if (typeof module !== "undefined" && module.exports) {
     parseTodoistDue: parseTodoistDue,
     parseTodoist: parseTodoist,
     visibleTodoistTasks: visibleTodoistTasks,
-    todoistTitle: todoistTitle
+    todoistTitle: todoistTitle,
+    PHOTO_EXTENSIONS: PHOTO_EXTENSIONS,
+    MAX_PHOTOS: MAX_PHOTOS,
+    MAX_PATH: MAX_PATH,
+    photoPath: photoPath,
+    pathExtension: pathExtension,
+    isPhotoFile: isPhotoFile,
+    photoTarget: photoTarget,
+    photoFoldersInUse: photoFoldersInUse,
+    parsePhotoList: parsePhotoList,
+    nextPhotoIndex: nextPhotoIndex,
+    photoIntervalMs: photoIntervalMs,
+    photoAt: photoAt,
+    photoName: photoName,
+    pluginFileUrl: pluginFileUrl,
+    chaseLabel: chaseLabel,
+    settingNumber: settingNumber
   }
 }

@@ -14,6 +14,10 @@ Item {
 
   property var service: null
   property var instance: null
+  // The shell object, passed through so a widget can reach another plugin's
+  // service (shell.serviceFor). Most widgets never need it; the ones that
+  // drive a companion plugin cannot work without it.
+  property var shell: null
   // Source URL for the type's QML, resolved by the caller against the plugin
   // directory — this file lives beside Surface.qml, so a relative resolve here
   // would be right by accident rather than by contract.
@@ -24,8 +28,12 @@ Item {
       return Model.effectiveOpacity(service.config, instance)
     return instance && typeof instance.opacity === "number" ? instance.opacity : Model.DEFAULT_OPACITY
   }
-  readonly property int radius: instance && instance.radius !== undefined
-    ? instance.radius : 20
+  readonly property int radius: {
+    if (service && service.config)
+      return Model.effectiveRadius(service.config, instance)
+    return instance && typeof instance.radius === "number"
+      ? instance.radius : Model.DEFAULT_RADIUS
+  }
 
   readonly property alias card: card
 
@@ -46,6 +54,7 @@ Item {
         if ("service" in item) item.service = root.service
         if ("instance" in item) item.instance = root.instance
         if ("card" in item) item.card = card
+        if ("shell" in item) item.shell = root.shell
       }
 
       onLoaded: inject()

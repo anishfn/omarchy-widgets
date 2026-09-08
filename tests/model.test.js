@@ -189,10 +189,170 @@ test("a size the type does not offer is not allowed", () => {
   assert.equal(Model.isAllowedSize("nope", 1, 1), false)
 })
 
+test("every type wears a glyph, so a long list can be scanned", () => {
+  for (const entry of Model.catalog()) {
+    assert.equal(typeof entry.icon, "string", `${entry.type}: needs an icon`)
+    assert.equal([...entry.icon].length, 1, `${entry.type}: an icon is one glyph`)
+    assert.equal(Model.iconFor(entry.type), entry.icon)
+  }
+  assert.equal(Model.iconFor("nope"), "", "an unknown type draws no glyph rather than throwing")
+})
+
+test("only sizes the grid can hold are offered", () => {
+  // The photo card lists footprints three columns wide on purpose. On a
+  // narrower grid they are not choices, they are a card drawn off the edge.
+  const wide = Model.sizesWithin("photo", 3).map(String)
+  assert.ok(wide.includes("3,3"), "a three-column grid can hold a three-column card")
+  const narrow = Model.sizesWithin("photo", 2).map(String)
+  assert.equal(narrow.includes("3,3"), false)
+  assert.equal(narrow.includes("3,2"), false)
+  assert.ok(narrow.includes("2,2"))
+  for (const [cols] of Model.sizesWithin("photo", 1)) assert.ok(cols <= 1)
+})
+
+test("a type whose sizes are all too wide still answers with one of its own", () => {
+  // github's narrowest is 1x1, calendar's is 1x1; a type that offered only
+  // wide sizes would still have to answer something isAllowedSize accepts.
+  for (const type of Model.catalogTypes()) {
+    for (let columns = 1; columns <= Model.MAX_COLUMNS; columns++) {
+      const [cols, rows] = Model.fitSize(type, columns)
+      assert.equal(Model.isAllowedSize(type, cols, rows), true,
+        `${type} at ${columns} columns answered a size it does not offer`)
+    }
+  }
+})
+
+test("fitSize keeps a widget as large as the grid allows", () => {
+  assert.deepEqual(Model.fitSize("photo", 6), [3, 3])
+  assert.deepEqual(Model.fitSize("clock", 1), [1, 1])
+})
+
+test("a footprint wider than the grid is brought back inside it", () => {
+  // A hand-written config, or one carried over from a wider grid. Left as it
+  // was, the card would hang off the right of the grid and no free cell would
+  // ever be found for it, because there is no column it fits in.
+  const config = Model.normalizeConfig({
+    layout: { columns: 2 },
+    widgets: [{ id: "photo", type: "photo", col: 0, row: 0, cols: 3, rows: 3 }]
+  })
+  const photo = Model.findInstance(config, "photo")
+  assert.ok(photo.cols <= 2, "the card fits the grid")
+  assert.equal(Model.isAllowedSize("photo", photo.cols, photo.rows), true)
+})
+
+test("a size is written the way the editor says it", () => {
+  assert.equal(Model.sizeLabel(2, 1), "2 × 1")
+})
+
+// ------------------------------------------------------------------ photos
+
+test("a path pointing at an image is a picture, and anything else a folder", () => {
+  const home = "/home/someone"
+  assert.deepEqual(Model.photoTarget("~/Pictures/dog.JPG", home),
+    { path: "/home/someone/Pictures/dog.JPG", kind: "image" })
+  assert.deepEqual(Model.photoTarget("/srv/wallpapers", home),
+    { path: "/srv/wallpapers", kind: "folder" })
+  assert.deepEqual(Model.photoTarget("", home), { path: "", kind: "none" })
+  // A dot in a directory name is not an extension.
+  assert.equal(Model.photoTarget("/srv/my.photos", home).kind, "folder")
+})
+
+test("a photo path cannot walk out of anywhere or carry a newline", () => {
+  const home = "/home/someone"
+  assert.equal(Model.photoTarget("../../etc", home).path, "")
+  assert.equal(Model.photoTarget("~/Pictures/../../../etc/shadow", home).path, "")
+  // A newline is what turns one line of the folder listing into two.
+  assert.equal(Model.clampPath("/srv/a\nb"), "/srv/ab")
+  assert.equal(Model.coerceSetting({ type: "path", defaultValue: "" }, "/srv/a\nb"), "/srv/ab")
+})
+
+test("a path setting holds a path longer than a label may be", () => {
+  const long = "/" + "a".repeat(Model.MAX_STRING + 40)
+  assert.equal(Model.coerceSetting({ type: "path", defaultValue: "" }, long).length, long.length)
+  assert.equal(Model.clampPath("/" + "a".repeat(Model.MAX_PATH * 2)).length, Model.MAX_PATH)
+})
+
+test("only the folders photo cards point at are scanned, once each", () => {
+  const home = "/home/someone"
+  const config = Model.normalizeConfig({
+    widgets: [
+      { id: "a", type: "photo", settings: { path: "~/Pictures" } },
+      { id: "b", type: "photo", settings: { path: "~/Pictures" } },
+      { id: "c", type: "photo", settings: { path: "~/Pictures/one.png" } },
+      { id: "d", type: "photo", settings: { path: "/srv/art" } },
+      { id: "clock", type: "clock" }
+    ]
+  })
+  assert.deepEqual(Model.photoFoldersInUse(config, home),
+    ["/home/someone/Pictures", "/srv/art"])
+})
+
+test("a folder listing keeps the images, in a stable order", () => {
+  const listing = "/p/b.JPG\n/p/a.png\n/p/notes.txt\n/p/c.webp\nrelative.png\n\n"
+  assert.deepEqual(Model.parsePhotoList(listing), ["/p/a.png", "/p/b.JPG", "/p/c.webp"])
+  assert.deepEqual(Model.parsePhotoList(""), [])
+  assert.deepEqual(Model.parsePhotoList(null), [])
+})
+
+test("a folder listing is capped, however many photographs are in it", () => {
+  const many = Array.from({ length: Model.MAX_PHOTOS + 50 },
+    (_, i) => `/p/${String(i).padStart(6, "0")}.jpg`).join("\n")
+  assert.equal(Model.parsePhotoList(many).length, Model.MAX_PHOTOS)
+})
+
+test("a slideshow walks in order, and shuffled never stands still", () => {
+  assert.equal(Model.nextPhotoIndex(3, 0, false), 1)
+  assert.equal(Model.nextPhotoIndex(3, 2, false), 0, "it wraps")
+  assert.equal(Model.nextPhotoIndex(1, 0, false), 0, "one picture has nowhere to go")
+  assert.equal(Model.nextPhotoIndex(0, 0, false), 0)
+
+  // Every roll picks something, and never the picture already up: a change
+  // that changes nothing reads as a broken slideshow.
+  for (const count of [2, 3, 7]) {
+    for (let index = 0; index < count; index++) {
+      for (const roll of [0, 0.1, 0.5, 0.9, 0.999999]) {
+        const next = Model.nextPhotoIndex(count, index, true, roll)
+        assert.notEqual(next, index, `${count}/${index}/${roll}`)
+        assert.ok(next >= 0 && next < count)
+      }
+    }
+  }
+})
+
+test("a shuffle reaches every other picture", () => {
+  const seen = new Set()
+  for (let r = 0; r < 1; r += 0.001) seen.add(Model.nextPhotoIndex(4, 1, true, r))
+  assert.deepEqual([...seen].sort(), [0, 2, 3])
+})
+
+test("never means no timer at all, not a timer that fires at once", () => {
+  assert.equal(Model.photoIntervalMs("0"), 0)
+  assert.equal(Model.photoIntervalMs(""), 0)
+  assert.equal(Model.photoIntervalMs("nonsense"), 0)
+  assert.equal(Model.photoIntervalMs("300"), 300000)
+  assert.equal(Model.photoIntervalMs("99999999"), 86400000, "clamped to a day")
+})
+
+test("a list that shrank under a card shows its last picture, not its first", () => {
+  const files = ["/p/a.jpg", "/p/b.jpg"]
+  assert.equal(Model.photoAt(files, 0), "/p/a.jpg")
+  assert.equal(Model.photoAt(files, 5), "/p/b.jpg")
+  assert.equal(Model.photoAt(files, -1), "/p/a.jpg")
+  assert.equal(Model.photoAt([], 0), "")
+  assert.equal(Model.photoAt(null, 0), "")
+})
+
+test("a picture names itself by its file, without the directory or the type", () => {
+  assert.equal(Model.photoName("/p/holiday 2019.jpeg"), "holiday 2019")
+  assert.equal(Model.photoName("/p/noext"), "noext")
+  assert.equal(Model.photoName(""), "")
+})
+
 // ---------------------------------------------------------------- settings
 
 test("every setting a type declares is usable by the editor", () => {
-  const kinds = ["text", "boolean", "choice", "timezone", "number"]
+  const kinds = ["text", "boolean", "choice", "timezone", "number", "path"]
+  const pathKinds = ["file", "image", "folder"]
   for (const entry of Model.catalog()) {
     assert.ok(Array.isArray(entry.settings), `${entry.type}: settings must be a schema`)
     const keys = new Set()
@@ -203,6 +363,14 @@ test("every setting a type declares is usable by the editor", () => {
       assert.ok(kinds.includes(spec.type), `${entry.type}.${spec.key}: unknown type ${spec.type}`)
       assert.ok(spec.label, `${entry.type}.${spec.key}: needs a label to render`)
       assert.notEqual(spec.defaultValue, undefined, `${entry.type}.${spec.key}: needs a default`)
+      if (spec.type === "path") {
+        assert.ok(Array.isArray(spec.pathKinds) && spec.pathKinds.length > 0,
+          `${entry.type}.${spec.key}: a path needs the kinds its chooser may return`)
+        for (const kind of spec.pathKinds) {
+          assert.ok(pathKinds.includes(kind),
+            `${entry.type}.${spec.key}: unknown path kind ${kind}`)
+        }
+      }
       if (spec.type === "choice") {
         assert.ok(Array.isArray(spec.options) && spec.options.length > 0,
           `${entry.type}.${spec.key}: a choice needs options`)
@@ -487,6 +655,27 @@ test("setOpacity is per widget and clamps into range", () => {
   assert.equal(Model.findInstance(Model.setOpacity(cfg, "clock", 0.456), "clock").opacity, 0.46)
   // Only the named widget moves; the change never leaks into the layout.
   assert.equal(Model.setOpacity(cfg, "clock", 0.4).layout.opacity, 0.72)
+})
+
+test("a card with no radius of its own resolves to the grid's, never to null", () => {
+  const cfg = Model.defaultConfig()
+  const clock = Model.findInstance(cfg, "clock")
+  // A fresh card carries null there, the way it does for opacity -- "follow
+  // the grid" rather than a number of its own.
+  assert.equal(clock.radius, null)
+  // So nothing may read the instance raw. `null < 0` is false and `null + 3`
+  // is 3, which is how the editor came to draw a square-ish selection ring
+  // around a card rounded twenty.
+  assert.equal(Model.effectiveRadius(cfg, clock), Model.DEFAULT_RADIUS)
+  assert.equal(typeof Model.effectiveRadius(cfg, clock), "number")
+
+  // The grid's own number is what a card with none of its own follows.
+  const rounder = Model.setLayoutRadius(cfg, 44)
+  assert.equal(rounder.layout.radius, 44)
+  assert.equal(Model.effectiveRadius(rounder, Model.findInstance(rounder, "clock")), 44)
+
+  // And with no config to read at all it still answers with a number.
+  assert.equal(Model.effectiveRadius(null, null), Model.DEFAULT_RADIUS)
 })
 
 test("moving the global opacity re-applies it to every card", () => {
@@ -2387,6 +2576,45 @@ test("upcoming is what has not ended, not what has not started", () => {
   assert.deepEqual(Model.upcomingEvents(events, NaN, 4, true), [])
 })
 
+test("today's list holds what the day has left, not the week's", () => {
+  const midnight = Model.startOfDay(NOW)
+  const at = (off) => midnight + off * 3600000
+  const events = [
+    // Began yesterday and is running now: still today's business.
+    { start: at(-2), end: at(14), allDay: false, summary: "ran across midnight" },
+    { start: at(0), end: at(24), allDay: true, summary: "all-day today" },
+    { start: at(8), end: at(9), allDay: false, summary: "itself over" },
+    { start: at(14), end: at(15), allDay: false, summary: "afternoon" },
+    { start: at(24 + 1), end: at(24 + 2), allDay: false, summary: "tomorrow" }
+  ]
+  assert.deepEqual(summaries(Model.todayEvents(events, NOW, 8, true)),
+    ["ran across midnight", "all-day today", "afternoon"])
+  assert.deepEqual(summaries(Model.todayEvents(events, NOW, 1, true)),
+    ["ran across midnight"])
+  assert.deepEqual(summaries(Model.todayEvents(events, NOW, 8, false)),
+    ["ran across midnight", "afternoon"], "all-day events can be left out")
+  assert.deepEqual(Model.todayEvents(null, NOW, 4, true), [])
+  assert.deepEqual(Model.todayEvents(events, NaN, 4, true), [])
+})
+
+test("the small line under the card reaches exactly one day ahead", () => {
+  const midnight = Model.startOfDay(NOW)
+  const at = (off) => midnight + off * 3600000
+  const events = [
+    { start: at(2) + 7200000, end: at(3) + 7200000, allDay: false, summary: "later today" },
+    { start: at(24), end: at(48), allDay: true, summary: "all-day tomorrow" },
+    { start: at(26), end: at(27), allDay: false, summary: "tomorrow morning" },
+    { start: at(34), end: at(35), allDay: false, summary: "tomorrow evening" },
+    { start: at(50), end: at(51), allDay: false, summary: "day after" }
+  ]
+  assert.equal(Model.nextDayEvent(events, NOW, 1, true).summary, "all-day tomorrow")
+  assert.equal(Model.nextDayEvent(events, NOW, 1, false).summary, "tomorrow morning",
+    "all-day events can be skipped over")
+  assert.equal(Model.nextDayEvent(events, NOW, 2, true).summary, "day after")
+  assert.equal(Model.nextDayEvent(null, NOW, 1, true), null)
+  assert.equal(Model.nextDayEvent(events, NaN, 1, true), null)
+})
+
 test("a time is written the way the card's clock setting asks for it", () => {
   const at = (h, m) => new Date(2026, 8, 5, h, m).getTime()
   assert.equal(Model.clockLabel(at(14, 30), false), "14:30")
@@ -2693,7 +2921,7 @@ test("the types that take clicks are exactly the ones that say so", () => {
   // turns its own rectangle into an input region on the desktop, so one added
   // by accident is a card silently swallowing clicks meant for a window.
   const interactive = Model.catalogTypes().filter((t) => Model.isInteractiveType(t))
-  assert.deepEqual(interactive.sort(), ["music", "repo-pulse", "todoist", "todos"])
+  assert.deepEqual(interactive.sort(), ["music", "omate", "repo-pulse", "todoist", "todos"])
   for (const quiet of ["clock", "weather", "github", "calendar"]) {
     assert.equal(Model.isInteractiveType(quiet), false, `${quiet} should stay click-through`)
   }
@@ -2711,10 +2939,12 @@ test("ticking can be switched off without switching the widget off", () => {
 test("a type says for itself whether a second one makes sense", () => {
   // Several clocks is the point of a clock widget; several music cards would
   // be the same player twice, and several weather cards the same location.
+  // One omate card: every control on it writes through to the one pet's
+  // global settings, so a second card would fight the first mid-drag.
   for (const many of ["clock", "github", "repo-pulse", "calendar", "todos"]) {
     assert.equal(Model.allowsMultiple(many), true, `${many} should allow several`)
   }
-  for (const one of ["weather", "music"]) {
+  for (const one of ["weather", "music", "omate"]) {
     assert.equal(Model.allowsMultiple(one), false, `${one} reads one source`)
   }
   assert.equal(Model.allowsMultiple("nope"), false)
@@ -3096,4 +3326,525 @@ test("no todoist token can become the name of a widget", () => {
   const shown = Model.displayName(config, Model.findInstance(config, "todoist"))
   assert.equal(shown.indexOf("very-secret"), -1, shown)
   assert.equal(shown, "Todoist")
+})
+
+test("a path from another plugin becomes a URL a Loader can take", () => {
+  // omate hands its paths back percent-decoded, so a plugin installed under a
+  // directory with a space in it has to be encoded again -- an unencoded space
+  // is a url that resolves to nothing, silently, and a skin row of empty boxes.
+  assert.equal(Model.pluginFileUrl("/home/a/plugins/palccod.omate/PetSprite.qml"),
+    "file:///home/a/plugins/palccod.omate/PetSprite.qml")
+  assert.equal(Model.pluginFileUrl("/home/a b/omate/PetSprite.qml"),
+    "file:///home/a%20b/omate/PetSprite.qml")
+  assert.equal(Model.pluginFileUrl("/home/a#b?c/PetSprite.qml"),
+    "file:///home/a%23b%3Fc/PetSprite.qml")
+
+  // Already a URL: passed through rather than prefixed twice.
+  assert.equal(Model.pluginFileUrl("file:///home/a/PetSprite.qml"),
+    "file:///home/a/PetSprite.qml")
+
+  // Anything that is neither is refused rather than guessed at. The caller
+  // reads the empty string as "do not draw a preview" and shows the name.
+  for (const nothing of ["", "relative/PetSprite.qml", undefined, null, "qrc:/x"]) {
+    assert.equal(Model.pluginFileUrl(nothing), "", String(nothing))
+  }
+})
+
+test("the chase row says what it is doing, including cadences it has no chip for", () => {
+  assert.equal(Model.chaseLabel(true, 10), "Playful")
+  assert.equal(Model.chaseLabel(true, 60), "Now and then")
+  assert.equal(Model.chaseLabel(true, 300), "Occasional")
+  assert.equal(Model.chaseLabel(true, 1800), "Rare")
+
+  // A cooldown set over omate's IPC is a legitimate value with no chip of its
+  // own. Spelled out, so the row reads as a setting rather than as unset.
+  assert.equal(Model.chaseLabel(true, 42), "Every 42s")
+  assert.equal(Model.chaseLabel(true, 41.6), "Every 42s")
+
+  // Off is off whatever the cooldown says, and a cooldown nobody has written
+  // yet is not a number to put in a sentence.
+  assert.equal(Model.chaseLabel(false, 10), "Off")
+  assert.equal(Model.chaseLabel(true, undefined), "Off")
+  assert.equal(Model.chaseLabel(true, "nonsense"), "Off")
+})
+
+test("a number read from another plugin never reaches a control as NaN", () => {
+  // Math.round(undefined) is NaN, and NaN assigned to an `int` property is a
+  // type error and a silent zero -- a nap cadence of zero minutes, from a key
+  // omate simply had not written yet.
+  assert.equal(Model.settingNumber(undefined, 10, 0, 120), 10)
+  assert.equal(Model.settingNumber(null, 10, 0, 120), 10)
+  assert.equal(Model.settingNumber("nonsense", 4, 1, 60), 4)
+  assert.equal(Model.settingNumber("", 4, 1, 60), 4)
+
+  assert.equal(Model.settingNumber(30, 10, 0, 120), 30)
+  assert.equal(Model.settingNumber("30", 10, 0, 120), 30)
+  assert.equal(Model.settingNumber(29.6, 10, 0, 120), 30)
+
+  // Clamped to what the control actually offers, both ends.
+  assert.equal(Model.settingNumber(9000, 10, 0, 120), 120)
+  assert.equal(Model.settingNumber(-5, 4, 1, 60), 1)
+
+  // A fallback outside the range is still clamped: the floor wins over a
+  // default that no longer makes sense.
+  assert.equal(Model.settingNumber(undefined, undefined, 1, 6), 1)
+})
+
+// ------------------------------------------------------------------ crypto
+//
+// Responses captured from the four live endpoints while writing the parsers,
+// trimmed to the fields the card reads. The Litecoin body is a real answer
+// for a real address, kept because it is the one that caught the mempool
+// delta being dropped; the address it names is a public one and holds the
+// balance these numbers describe.
+
+const ESPLORA_BODY = {
+  address: "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw",
+  chain_stats: {
+    funded_txo_count: 50, funded_txo_sum: 1680555983,
+    spent_txo_count: 41, spent_txo_sum: 884256859, tx_count: 50
+  },
+  mempool_stats: {
+    funded_txo_count: 0, funded_txo_sum: 0,
+    spent_txo_count: 0, spent_txo_sum: 0, tx_count: 0
+  }
+}
+
+const EVM_BODY = { jsonrpc: "2.0", id: 1, result: "0x5d2659027b0b8043" }
+
+const SOLANA_BODY = {
+  jsonrpc: "2.0", id: 1,
+  result: { context: { apiVersion: "4.2.2", slot: 444795353 }, value: 9188448313401106 }
+}
+
+// A week of hourly closes is 168 of these; eight is the fewest that counts as
+// a shape, so the fixtures use a round twelve.
+const WEEK = [51.1, 52.4, 53.9, 52.2, 50.8, 51.6, 53.3, 54.8, 55.2, 54.1, 53.7, 54.52]
+
+const PRICE_BODY = [
+  { id: "bitcoin", current_price: 79982, price_change_percentage_24h_in_currency: 0.3395,
+    sparkline_in_7d: { price: WEEK.map((n) => n * 1466) } },
+  { id: "ethereum", current_price: 2502.74, price_change_percentage_24h_in_currency: 1.783,
+    sparkline_in_7d: { price: WEEK.map((n) => n * 46) } },
+  { id: "litecoin", current_price: 54.52, price_change_percentage_24h_in_currency: -1.97,
+    sparkline_in_7d: { price: WEEK.slice() } }
+]
+
+function cryptoConfig(settings, extra) {
+  return Model.normalizeConfig({
+    widgets: [Object.assign(
+      { id: "c1", type: "crypto", enabled: true, col: 0, row: 0, settings },
+      extra || {})]
+  })
+}
+
+test("an address that could escape a path or a JSON body is refused", () => {
+  // Each chain's own shape, and nothing else. These become a path segment on
+  // the Esplora hosts and a JSON string sent to a node.
+  assert.equal(Model.isSafeCryptoAddress("litecoin", "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw"), true)
+  assert.equal(Model.isSafeCryptoAddress("bitcoin",
+    "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97"), true)
+  assert.equal(Model.isSafeCryptoAddress("bitcoin", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), true)
+  assert.equal(Model.isSafeCryptoAddress("ethereum",
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"), true)
+  assert.equal(Model.isSafeCryptoAddress("solana",
+    "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"), true)
+
+  for (const bad of [
+    "../../etc/passwd",
+    "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw/../x",
+    "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw?x=1",
+    "bc1q\"; rm -rf /",
+    "0xdeadbeef",
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045extra",
+    "",
+    "   "
+  ]) {
+    for (const chain of Model.cryptoChainNames()) {
+      assert.equal(Model.isSafeCryptoAddress(chain, bad), false,
+        `${chain} accepted ${JSON.stringify(bad)}`)
+    }
+  }
+
+  // An address is only ever valid for the chain it belongs to: a Bitcoin
+  // address pointed at Ethereum is a typo, not a lookup worth making.
+  assert.equal(Model.isSafeCryptoAddress("ethereum", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), false)
+  assert.equal(Model.isSafeCryptoAddress("nonsense", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), false)
+
+  // Bech32 has no b, i or o, so an address carrying one never reaches a host.
+  assert.equal(Model.isSafeCryptoAddress("bitcoin", "bc1bbbbbbbbbbbbbbbbbbbb"), false)
+})
+
+test("each chain's own answer shape becomes a balance in whole coins", () => {
+  // 1680555983 - 884256859 litoshi, at 1e8.
+  assert.equal(Model.parseCryptoBalance("litecoin", ESPLORA_BODY), 7.96299124)
+  // The same body is what mempool.space answers for Bitcoin.
+  assert.equal(Model.parseCryptoBalance("bitcoin", ESPLORA_BODY), 7.96299124)
+  // Wei, via hex, at 1e18.
+  assert.equal(Model.parseCryptoBalance("ethereum", EVM_BODY).toFixed(6), "6.712150")
+  // Lamports at 1e9.
+  assert.equal(Model.parseCryptoBalance("solana", SOLANA_BODY), 9188448.313401107)
+
+  // The raw text is what the process actually hands over.
+  assert.equal(Model.parseCryptoBalance("litecoin", JSON.stringify(ESPLORA_BODY)), 7.96299124)
+})
+
+test("an unconfirmed payment counts towards the balance", () => {
+  // A wallet shows it, so a card that left it out would read as broken rather
+  // than as careful.
+  const pending = JSON.parse(JSON.stringify(ESPLORA_BODY))
+  pending.mempool_stats.funded_txo_sum = 100000000
+  assert.equal(Model.parseCryptoBalance("litecoin", pending), 8.96299124)
+
+  // And a spend that has not confirmed comes back off it.
+  const leaving = JSON.parse(JSON.stringify(ESPLORA_BODY))
+  leaving.mempool_stats.spent_txo_sum = 96299124
+  assert.equal(Model.parseCryptoBalance("litecoin", leaving), 7)
+})
+
+test("a balance that did not arrive is null, never zero", () => {
+  // Zero is a wallet that holds nothing. Null is a wallet we cannot see.
+  // Confusing the two is the one failure on this card that costs money.
+  for (const raw of ["", "not json", "<html>rate limited</html>", "null", "[]", "{}"]) {
+    assert.equal(Model.parseCryptoBalance("bitcoin", raw), null, `bitcoin took ${raw}`)
+    assert.equal(Model.parseCryptoBalance("ethereum", raw), null, `ethereum took ${raw}`)
+    assert.equal(Model.parseCryptoBalance("solana", raw), null, `solana took ${raw}`)
+  }
+
+  // A node answering with an error is not a balance of zero.
+  assert.equal(Model.parseCryptoBalance("ethereum",
+    { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "Unauthorized" } }), null)
+  assert.equal(Model.parseCryptoBalance("solana",
+    { jsonrpc: "2.0", id: 1, error: { code: -32601, message: "Method not found" } }), null)
+
+  // Nor is a result that is not the shape it should be.
+  assert.equal(Model.parseCryptoBalance("ethereum", { result: "deadbeef" }), null)
+  assert.equal(Model.parseCryptoBalance("ethereum", { result: "0xnothex" }), null)
+  assert.equal(Model.parseCryptoBalance("solana", { result: { value: "lots" } }), null)
+  assert.equal(Model.parseCryptoBalance("solana", { result: { value: -1 } }), null)
+
+  // An empty wallet, on the other hand, really is zero.
+  assert.equal(Model.parseCryptoBalance("ethereum", { result: "0x0" }), 0)
+  assert.equal(Model.parseCryptoBalance("solana", { result: { value: 0 } }), 0)
+})
+
+test("a market answer becomes a price, a day's change and a week's shape", () => {
+  const usd = Model.parseCryptoMarket(PRICE_BODY)
+  const prices = { usd: usd }
+  assert.equal(Model.cryptoQuote(prices, "bitcoin", "usd").price, 79982)
+  assert.equal(Model.cryptoQuote(prices, "litecoin", "usd").change, -1.97)
+  assert.deepEqual(Model.cryptoQuote(prices, "litecoin", "usd").series, WEEK)
+  // A coin nobody asked about, and a currency that was not fetched.
+  assert.equal(Model.cryptoQuote(prices, "dogecoin", "usd"), null)
+  assert.equal(Model.cryptoQuote(prices, "bitcoin", "eur"), null)
+  assert.equal(Model.cryptoQuote(null, "bitcoin", "usd"), null)
+
+  // The plain 24h field is taken when the per-currency one is absent, which
+  // is what the endpoint answers with if it is not asked for one.
+  const plain = Model.parseCryptoMarket([
+    { id: "bitcoin", current_price: 100, price_change_percentage_24h: -2.5 }])
+  assert.equal(plain.bitcoin.change, -2.5)
+
+  // A price without its 24h figure is still a price, and a price without a
+  // week behind it is still a price: the card shows what it has rather than
+  // nothing.
+  const bare = Model.parseCryptoMarket([{ id: "bitcoin", current_price: 79982 }])
+  assert.equal(bare.bitcoin.price, 79982)
+  assert.equal(bare.bitcoin.change, null)
+  assert.deepEqual(bare.bitcoin.series, [])
+
+  // Nothing usable is null rather than an empty table, so the card can tell
+  // "not fetched" from "fetched and empty".
+  assert.equal(Model.parseCryptoMarket("rate limited"), null)
+  assert.equal(Model.parseCryptoMarket([]), null)
+  assert.equal(Model.parseCryptoMarket([{ id: "bitcoin", current_price: 0 }]), null)
+  assert.equal(Model.parseCryptoMarket([{ id: "bitcoin", current_price: -5 }]), null)
+  assert.equal(Model.parseCryptoMarket([{ current_price: 79982 }]), null)
+  // An object is an error body however well formed; the endpoint answers
+  // with a list.
+  assert.equal(Model.parseCryptoMarket({ bitcoin: { usd: 79982 } }), null)
+  assert.equal(Model.parseCryptoMarket({ status: { error_code: 429 } }), null)
+})
+
+test("a week of closes becomes a shape a card can draw", () => {
+  // Too few readings is not a graph. A card would rather draw nothing than a
+  // line implying it knows a week it does not.
+  assert.deepEqual(Model.cryptoSeries([1, 2, 3]), [])
+  assert.deepEqual(Model.cryptoSeries(null), [])
+  assert.deepEqual(Model.cryptoSeries("nope"), [])
+  assert.equal(Model.cryptoSeries(WEEK).length, WEEK.length)
+
+  // Nonsense in the middle of a real week is dropped, not drawn as zero.
+  const holed = Model.cryptoSeries([51, 52, null, 53, "x", 54, -1, 55, 56, 57, 58, 59])
+  assert.equal(holed.length, 9)
+  assert.equal(holed.includes(0), false)
+
+  // 168 hourly closes reduce to the count asked for, and the last point is
+  // the latest reading rather than the mean of the last bucket -- the end of
+  // the line has to be the price printed above it.
+  const week = Array.from({ length: 168 }, (_, i) => 100 + Math.sin(i / 8) * 10)
+  const line = Model.cryptoSparkline(week, 48)
+  assert.equal(line.length, 48)
+  assert.equal(line[line.length - 1], week[week.length - 1])
+  // Every bucket is a mean of real readings, so nothing escapes the range.
+  const low = Math.min(...week)
+  const high = Math.max(...week)
+  for (const point of line) assert.ok(point >= low && point <= high)
+
+  // Asked for more buckets than there are readings, it hands back what it has
+  // rather than inventing points between them.
+  assert.deepEqual(Model.cryptoSparkline(WEEK, 200), WEEK)
+  assert.deepEqual(Model.cryptoSparkline([1, 2, 3], 8), [])
+
+  // The range a graph is plotted against, and the flat week that would
+  // otherwise be plotted against no range at all.
+  assert.deepEqual(Model.cryptoSeriesRange([3, 1, 2]), { low: 1, high: 3 })
+  const flat = Model.cryptoSeriesRange([50, 50, 50])
+  assert.ok(flat.low < 50 && flat.high > 50, "a flat week still has a middle to sit on")
+  assert.equal(Model.cryptoSeriesRange([]), null)
+})
+
+test("the balance request is built to each chain's shape, or not at all", () => {
+  const btc = Model.cryptoBalanceCommand("bitcoin",
+    "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97")
+  // Through timeout, with an absolute path, the way every other fetcher here
+  // shells out.
+  assert.equal(btc[0], "/usr/bin/timeout")
+  assert.ok(btc.includes("/usr/bin/curl"))
+  assert.equal(btc[btc.length - 1],
+    "https://mempool.space/api/address/bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97")
+
+  // Litecoin is the same shape at its own host.
+  const ltc = Model.cryptoBalanceCommand("litecoin", "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw")
+  assert.equal(ltc[ltc.length - 1],
+    "https://litecoinspace.org/api/address/LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw")
+
+  // The two RPC chains POST a body instead.
+  const eth = Model.cryptoBalanceCommand("ethereum", "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
+  assert.equal(eth[eth.length - 1], "https://ethereum-rpc.publicnode.com")
+  const ethBody = JSON.parse(eth[eth.indexOf("-d") + 1])
+  assert.equal(ethBody.method, "eth_getBalance")
+  assert.deepEqual(ethBody.params, ["0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "latest"])
+
+  const sol = Model.cryptoBalanceCommand("solana", "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+  const solBody = JSON.parse(sol[sol.indexOf("-d") + 1])
+  assert.equal(solBody.method, "getBalance")
+  assert.deepEqual(solBody.params, ["9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"])
+
+  // An address that did not pass gets no command at all, so there is nothing
+  // for the caller to run by accident.
+  assert.equal(Model.cryptoBalanceCommand("bitcoin", "../../etc/passwd"), null)
+  assert.equal(Model.cryptoBalanceCommand("bitcoin", ""), null)
+  assert.equal(Model.cryptoBalanceCommand("nonsense", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), null)
+})
+
+test("an address is only ever sent to its own chain's node", () => {
+  // The card promises this out loud, in the catalogue and in the README, so
+  // the flags that keep the promise are pinned here. Without them a courtesy
+  // endpoint could answer with a redirect and curl would carry the address --
+  // which for Bitcoin and Litecoin sits in the URL path -- wherever the
+  // redirect pointed.
+  const every = [
+    Model.cryptoBalanceCommand("bitcoin",
+      "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97"),
+    Model.cryptoBalanceCommand("litecoin", "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw"),
+    Model.cryptoBalanceCommand("ethereum", "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
+    Model.cryptoBalanceCommand("solana", "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"),
+    Model.cryptoPriceCommand(["bitcoin"], ["usd"])
+  ]
+  for (const command of every) {
+    assert.ok(command, "every one of these builds a command")
+    assert.equal(command[command.indexOf("--max-redirs") + 1], "0",
+      "no hop is a hop that could carry the address somewhere else")
+    assert.equal(command[command.indexOf("--proto") + 1], "=https",
+      "and never off https on the way")
+    assert.equal(command.includes("-L"), false, "no follow flag anywhere")
+    // The calendar's rule: this body becomes objects inside the process that
+    // draws the desktop, so it has a ceiling.
+    assert.ok(command.includes("--max-filesize"))
+    assert.equal(command[command.indexOf("--max-filesize") + 1], "262144")
+    // Still through timeout, with absolute paths, like every other fetcher.
+    assert.equal(command[0], "/usr/bin/timeout")
+    assert.ok(command.includes("/usr/bin/curl"))
+  }
+
+  // The price host is asked for prices and is never told whose they are.
+  const price = Model.cryptoPriceCommand(["bitcoin"], ["usd"])
+  assert.equal(price.join(" ").includes("bc1q"), false)
+})
+
+
+test("one price request covers every coin on the desktop, per currency", () => {
+  const command = Model.cryptoPriceCommand(["bitcoin", "ethereum"], "usd")
+  const url = command[command.length - 1]
+  assert.ok(url.startsWith("https://api.coingecko.com/api/v3/coins/markets?"))
+  assert.ok(url.includes("vs_currency=usd"))
+  assert.ok(url.includes("ids=bitcoin,ethereum"))
+  // The week behind the price rides along in the same body, which is the
+  // whole reason this endpoint is worth one request per currency.
+  assert.ok(url.includes("sparkline=true"))
+  assert.ok(url.includes("price_change_percentage=24h"))
+
+  // A coin asked for twice is asked for once.
+  const doubled = Model.cryptoPriceCommand(["bitcoin", "bitcoin"], "usd")
+  assert.ok(doubled[doubled.length - 1].includes("ids=bitcoin&"))
+
+  // Nothing to ask about is no request, not a malformed one.
+  assert.equal(Model.cryptoPriceCommand([], "usd"), null)
+  assert.equal(Model.cryptoPriceCommand(["bitcoin"], ""), null)
+  // And nothing unknown reaches the query string.
+  assert.equal(Model.cryptoPriceCommand(["bitcoin"], "doubloons"), null)
+  assert.equal(Model.cryptoPriceCommand(["not-a-coin"], "usd"), null)
+})
+
+test("only the wallets actually on the desktop are fetched, once each", () => {
+  const config = Model.normalizeConfig({
+    widgets: [
+      { id: "a", type: "crypto", enabled: true, col: 0, row: 0,
+        settings: { chain: "litecoin", address: "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw" } },
+      // The same address twice is one request.
+      { id: "b", type: "crypto", enabled: true, col: 1, row: 0,
+        settings: { chain: "litecoin", address: "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw" } },
+      // Switched off fetches nothing.
+      { id: "c", type: "crypto", enabled: false, col: 0, row: 1,
+        settings: { chain: "bitcoin", address: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa" } },
+      // A ticker has no address and still wants its price.
+      { id: "d", type: "crypto", enabled: true, col: 0, row: 2,
+        settings: { chain: "ethereum", address: "" } },
+      // A typo never becomes a request.
+      { id: "e", type: "crypto", enabled: true, col: 1, row: 2,
+        settings: { chain: "solana", address: "not an address" } }
+    ]
+  })
+
+  assert.deepEqual(Model.cryptoWalletsInUse(config).map((w) => w.key),
+    ["litecoin:LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw"])
+  // Solana is in the coin list because its card is on and wants a price, even
+  // though its address is junk and no balance will be asked for.
+  assert.deepEqual(Model.cryptoCoinsInUse(config).sort(), ["ethereum", "litecoin", "solana"])
+  assert.deepEqual(Model.cryptoCurrenciesInUse(config), ["usd"])
+
+  // Nothing on the desktop is nothing fetched.
+  assert.deepEqual(Model.cryptoWalletsInUse(Model.normalizeConfig({ widgets: [] })), [])
+  assert.deepEqual(Model.cryptoCoinsInUse(null), [])
+})
+
+test("a holding reads as a magnitude, not as an audit", () => {
+  assert.equal(Model.cryptoAmountLabel(7.96299124), "7.963")
+  assert.equal(Model.cryptoAmountLabel(0.0412), "0.0412")
+  assert.equal(Model.cryptoAmountLabel(0.00001234), "0.0000123")
+  assert.equal(Model.cryptoAmountLabel(0.5), "0.5")
+  assert.equal(Model.cryptoAmountLabel(1204.5), "1,205")
+  assert.equal(Model.cryptoAmountLabel(9188448.313401107), "9,188,448")
+  assert.equal(Model.cryptoAmountLabel(0), "0")
+
+  // Never scientific notation: a card reading "1.2e-7 BTC" has failed at the
+  // one thing it does.
+  assert.ok(!Model.cryptoAmountLabel(0.00000012).includes("e"))
+  assert.equal(Model.cryptoAmountLabel(0.00000012), "0.00000012")
+
+  assert.equal(Model.cryptoAmountLabel(null), "")
+  assert.equal(Model.cryptoAmountLabel(-1), "")
+  assert.equal(Model.cryptoAmountLabel("lots"), "")
+})
+
+test("money keeps the cents only while they are worth reading", () => {
+  assert.equal(Model.cryptoMoneyLabel(434.1409, "usd"), "$434.14")
+  assert.equal(Model.cryptoMoneyLabel(3295.4, "usd"), "$3,295")
+  assert.equal(Model.cryptoMoneyLabel(79982, "usd"), "$79,982")
+  assert.equal(Model.cryptoMoneyLabel(1200, "inr"), "₹1,200")
+  assert.equal(Model.cryptoMoneyLabel(12.5, "eur"), "€12.50")
+  assert.equal(Model.cryptoMoneyLabel(0, "usd"), "$0.00")
+  assert.equal(Model.cryptoMoneyLabel(null, "usd"), "")
+  // A currency with no symbol still prints its number rather than nothing.
+  assert.equal(Model.cryptoMoneyLabel(10, "xyz"), "10.00")
+})
+
+test("the day's change is told by its sign and never by a colour", () => {
+  // DESIGN.md forbids tinting by meaning, so the sign is the whole of it and
+  // the label has to carry one in both directions.
+  assert.equal(Model.cryptoChangeLabel(2.14), "+2.1%")
+  assert.equal(Model.cryptoChangeLabel(-1.97), "-2.0%")
+  assert.equal(Model.cryptoChangeLabel(0), "+0.0%")
+  assert.equal(Model.cryptoChangeLabel(0.3395), "+0.3%")
+  // Missing is empty rather than a confident zero.
+  assert.equal(Model.cryptoChangeLabel(null), "")
+  assert.equal(Model.cryptoChangeLabel(undefined), "")
+  assert.equal(Model.cryptoChangeLabel("up a bit"), "")
+})
+
+test("a holding is worth nothing only when it holds nothing", () => {
+  const quote = { price: 54.52, change: 1.97 }
+  assert.equal(Model.cryptoHoldingValue(7.96299124, quote).toFixed(2), "434.14")
+  assert.equal(Model.cryptoHoldingValue(0, quote), 0)
+  // A price that has not arrived is not a wallet worth zero.
+  assert.equal(Model.cryptoHoldingValue(7.96, null), null)
+  assert.equal(Model.cryptoHoldingValue(null, quote), null)
+})
+
+test("a wallet address never becomes the name of a widget", () => {
+  // The same promise the calendar makes about its secret address: a label
+  // nobody typed must not announce what you hold. The symbol is the fallback.
+  const address = "LYEe8FaGPsvTtwjQzfLguSFZLCZscpYAcw"
+  assert.equal(Model.cryptoCardLabel({ address }, "litecoin"), "LTC")
+  assert.equal(Model.cryptoCardLabel({ address, label: "Savings" }, "litecoin"), "Savings")
+  assert.equal(Model.cryptoCardLabel({}, "ethereum"), "ETH")
+
+  // And where one is shown on purpose, it is shortened.
+  assert.equal(Model.cryptoAddressShort(address), "LYEe8F…cpYAcw")
+  assert.equal(Model.cryptoAddressShort("short"), "short")
+  assert.equal(Model.cryptoAddressShort(""), "")
+})
+
+test("a setting that arrived as nonsense falls back rather than reaching a host", () => {
+  assert.equal(Model.cryptoChainOf({ chain: "dogecoin" }), "bitcoin")
+  assert.equal(Model.cryptoChainOf({}), "bitcoin")
+  assert.equal(Model.cryptoChainOf({ chain: "solana" }), "solana")
+  assert.equal(Model.cryptoCurrencyOf({ currency: "doubloons" }), "usd")
+  assert.equal(Model.cryptoCurrencyOf({ currency: "EUR" }), "eur")
+  assert.equal(Model.cryptoCurrencyOf(null), "usd")
+})
+
+test("the crypto card declares every host it can reach", () => {
+  const entry = Model.catalogEntry("crypto")
+  // More than one host, so this one declares a list. An address only ever
+  // goes to its own chain; the price host never sees one.
+  assert.ok(Array.isArray(entry.network), "a widget with several hosts lists them")
+  assert.ok(entry.network.includes(Model.CRYPTO_PRICE_HOST))
+  for (const name of Model.cryptoChainNames()) {
+    assert.ok(entry.network.includes(Model.cryptoChain(name).host),
+      `${name} reaches a host the catalogue does not declare`)
+  }
+  // Every declared host is one of those two kinds and not something stray.
+  const known = [Model.CRYPTO_PRICE_HOST].concat(
+    Model.cryptoChainNames().map((n) => Model.cryptoChain(n).host))
+  for (const host of entry.network) {
+    assert.ok(known.includes(host), `${host} is declared but nothing reaches it`)
+  }
+})
+
+test("a crypto card with no address is a ticker, not a broken wallet", () => {
+  const config = cryptoConfig({ chain: "bitcoin", address: "" })
+  assert.deepEqual(Model.cryptoWalletsInUse(config), [], "no address, no balance request")
+  assert.deepEqual(Model.cryptoCoinsInUse(config), ["bitcoin"], "but it still wants a price")
+})
+
+test("a number too large to write as digits never reaches the card", () => {
+  // String(1e21) is "1e+21", and the thousands grouping would turn that into
+  // "$1e+,300" on somebody's wallpaper. Neither ceiling is reachable by a
+  // real price or a real balance, so a figure past one is a response to
+  // disbelieve rather than one to clamp.
+  assert.equal(Model.parseCryptoMarket([{ id: "bitcoin", current_price: 1e300 }]), null)
+  assert.equal(Model.parseCryptoMarket([{ id: "bitcoin", current_price: Infinity }]), null)
+  assert.equal(Model.parseCryptoBalance("ethereum", { result: "0x" + "f".repeat(60) }), null)
+  assert.equal(Model.parseCryptoBalance("solana", { result: { value: 1e30 } }), null)
+
+  // And the real ones still go through untouched.
+  assert.equal(Model.cryptoQuote(
+    { usd: Model.parseCryptoMarket([{ id: "bitcoin", current_price: 79982 }]) },
+    "bitcoin", "usd").price, 79982)
+  assert.equal(Model.parseCryptoBalance("ethereum", EVM_BODY).toFixed(6), "6.712150")
+
+  // A holding worth billions is a number, not an exponent.
+  assert.equal(Model.cryptoMoneyLabel(10393516000, "usd"), "$10,393,516,000")
 })

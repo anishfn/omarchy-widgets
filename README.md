@@ -479,11 +479,9 @@ Today's list, read from a text file.
 
 The file is the interface. There is no todo service worth making a wallpaper
 depend on, and the thing every editor, every dotfiles repo and every sync tool
-already handles is a file with a line in it per thing to do. So the card
-reads, and ticking something off is a keystroke in the editor you already have
-open — which is also why this widget takes no clicks. A checkbox on a card
-that lives under your windows is a checkbox you have to clear the screen to
-reach.
+already handles is a file with a line in it per thing to do. So the card reads
+that file, and ticking a row writes the line back to it. The title opens the
+file in your editor, for everything a tick cannot say.
 
 ### The file
 

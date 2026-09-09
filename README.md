@@ -39,19 +39,23 @@ before it runs; `enable` puts the **Widgets** button in your bar and the clock
 on your desktop.
 
 The plugin ships a script that does the three things a bare `add` leaves you to
-find out on your own: it offers the companion plugin the Omate card needs,
-restarts the shell so what you installed is what you can see, and picks `add`
-or `update` for you on a re-run. It runs from the copy you already have:
+find out on your own: it names the companion plugin the Omate card needs and
+prints the line that installs it, restarts the shell so what you installed is
+what you can see, and picks `add` or `update` for you on a re-run. It runs from
+the copy you already have:
 
 ```bash
 ~/.config/omarchy/plugins/anishfn.widgets/install --yes
 ```
 
-**Nothing is fetched and piped into a shell.** Streaming a script off a branch
-and executing it reads from a mutable ref, so a later repository or account
-compromise would become arbitrary code execution on your machine at install
-time. This script is in the checkout you already made, and can be read before
-it runs — which is the same reason plugins land disabled.
+**Nothing is fetched and piped into a shell, and nothing installs somebody
+else's plugin for you.** Fetching code off a branch and executing it reads from
+a mutable ref, so a later repository or account compromise would become
+arbitrary code execution on your machine at install time — and that is as true
+of a companion's clone url as it is of an install one-liner. This script is in
+the checkout you already made and can be read before it runs; the companion is
+printed as a command for you to read and run yourself. Which is the same reason
+plugins land disabled.
 
 | | |
 |---|---|
@@ -208,8 +212,8 @@ Two scripts ship with the plugin. Neither replaces `omarchy plugin` — both
 call it — and both are safe to run twice.
 
 ```bash
-./install            # add or update, offer companions, restart the shell
-./update             # update this and its companions, restart if anything moved
+./install            # add or update, name the companion, restart the shell
+./update             # update this plugin, restart if anything moved
 ```
 
 `install` does four things a bare `omarchy plugin add` does not:
@@ -217,10 +221,13 @@ call it — and both are safe to run twice.
 - **Picks `add` or `update` for you.** `add` *refuses* when the plugin is
   already installed — a second clone over a checkout is not an upgrade — so
   re-running the install line to upgrade reports an error and pulls nothing.
-- **Offers the companion plugin.** The Omate card is inert without
+- **Names the companion plugin.** The Omate card is inert without
   [`palccod.omate`](https://github.com/Palccod/Omate), and nothing in `add`
   knows that, so a fresh install draws a card that says "not loaded" without
-  saying what would load it.
+  saying what would load it. `install` prints the one line that adds it and
+  stops there: it is a third party's code, so running it is your decision to
+  make with the repository open, not a `[Y/n]` in the middle of somebody
+  else's script.
 - **Restarts the shell.** A rescan tells the registry about new files; it does
   not re-instantiate a panel that is already mounted, and this plugin is
   `keepLoaded`. Without a restart the install appears to have done nothing.
@@ -231,9 +238,9 @@ call it — and both are safe to run twice.
 
 | Flag | |
 |---|---|
-| `--yes` | answer every prompt; required when piping to `bash` |
-| `--no-companions` | this plugin only, leave the Omate card inert |
-| `--this-only` | (`update`) skip the companions |
+| `--yes` | answer every prompt; required when there is no terminal to ask on |
+| `--no-companions` | say nothing about the companion plugin |
+| `--this-only` | (`update`) accepted and ignored; companions are never updated for you |
 
 Both skip the restart when nothing actually changed — a restart you did not
 need costs you every panel you had open. Both end by printing the manifest
@@ -242,7 +249,6 @@ version and the commit each plugin is on:
 ```
 Updated
   anishfn.widgets              0.1.0 → 0.2.0         3374b22 → 5b634fe
-  palccod.omate                0.4.0 (unchanged)     742a67b → 9c1d004
 ```
 
 A version that stayed put while the commits moved is shown as `(unchanged)`
@@ -255,7 +261,11 @@ manifest, which is a thing worth knowing about a plugin you just pulled.
 ~/.config/omarchy/plugins/anishfn.widgets/update
 ```
 
-Or by hand, which is the same thing without the companions or the restart:
+`update` ends by printing where the companion is, if you have it, and the one
+line that updates it — it does not run that line, for the same reason `install`
+does not run the line that adds it.
+
+Or by hand, which is the same thing without the restart:
 
 ```bash
 omarchy plugin update anishfn.widgets

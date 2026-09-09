@@ -1,15 +1,19 @@
 #!/bin/bash
 
-# Update the Widgets plugin and the plugins its cards talk to, then restart
-# the shell so the update is one you can see.
+# Update the Widgets plugin, then restart the shell so the update is one you
+# can see -- and say where the plugins its cards talk to have got to.
 #
 # `omarchy plugin update <id>` already does the careful part: it fetches,
 # shows you the diff, fast-forwards only, validates the result and rolls back
 # if validation fails. This wraps it for the two things it leaves out.
 #
-#   - It updates one plugin. The Omate card is only as current as the Omate
-#     plugin underneath it, and a card and a service that disagree about an
-#     API is the failure this repo has already had once.
+#   - It updates one plugin, and the Omate card is only as current as the
+#     Omate plugin underneath it -- a card and a service that disagree about
+#     an API is the failure this repo has already had once. So this script
+#     ends by saying where the companion is and printing the line that
+#     updates it -- but does not run that line: pulling somebody else's code
+#     is a decision to make with their repository open, not a side effect of
+#     updating this one.
 #   - It rescans, which is not the same as reloading. `keepLoaded` panels are
 #     mounted once and outlive the file they came from, so an update lands on
 #     disk and changes nothing on screen until the shell restarts. Restarting
@@ -19,17 +23,18 @@
 # Usage: update [--yes] [--this-only] [--help]
 #
 #   --yes         take every prompt as answered, and skip the diffs
-#   --this-only   the Widgets plugin, not its companions
+#   --this-only   accepted and ignored; companions are never updated for you
 
 set -uo pipefail
 
 ID="anishfn.widgets"
 PLUGINS_DIR="$HOME/.config/omarchy/plugins"
 
+# Named so the run can end by saying where each one is. Nothing here is ever
+# passed to `omarchy plugin update` -- see the note at the top of this file.
 COMPANIONS=(palccod.omate)
 
 ASSUME_YES=0
-THIS_ONLY=0
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -39,8 +44,10 @@ fail() { printf 'update: %s\n' "$*" >&2; exit 1; }
 while (( $# > 0 )); do
   case "$1" in
     --yes|-y)     ASSUME_YES=1; shift ;;
-    --this-only)  THIS_ONLY=1; shift ;;
-    -h|--help)    sed -n '3,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # Kept so an existing habit or script does not start failing; the
+    # behaviour it used to switch off is simply gone.
+    --this-only)  shift ;;
+    -h|--help)    sed -n '3,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)            fail "unknown option: $1 (try --help)" ;;
   esac
 done
@@ -92,10 +99,16 @@ update_one() {
 step "Widgets"
 update_one "$ID"
 
-if (( ! THIS_ONLY )); then
-  step "Companions"
-  for cid in "${COMPANIONS[@]}"; do update_one "$cid"; done
-fi
+step "Companions"
+for cid in "${COMPANIONS[@]}"; do
+  if [[ -d "$PLUGINS_DIR/$cid" ]]; then
+    printf '  %-28s %-22s %s\n' "$cid" "$(version_of "$cid")" "$(head_of "$cid")"
+    say "  update it yourself when you want to, with:"
+    say "      omarchy plugin update $cid"
+  else
+    say "  $cid is not installed — the Omate card stays inert"
+  fi
+done
 
 report() {
   local line id ver where

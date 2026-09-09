@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Install the Widgets plugin, and the plugins its cards can talk to.
+# Install the Widgets plugin, and name the plugins its cards can talk to.
 #
 # `omarchy plugin add` is still the whole install, and this script does not
 # replace it -- it calls it. What it adds is the four things a bare `add`
@@ -13,7 +13,8 @@
 #     `update` for you.
 #   - The Omate card is inert unless a *second* plugin is installed. Nothing
 #     in `add` knows that, so a fresh install draws a card that says "not
-#     loaded" without saying what would load it.
+#     loaded" without saying what would load it. This script names it and
+#     prints the one line that installs it; it does not run that line for you.
 #   - A plugin the shell already has mounted is not re-instantiated by a
 #     rescan -- `keepLoaded` means the panel outlives the file it came from --
 #     so what you just installed is not what you can see until a restart.
@@ -23,19 +24,21 @@
 #
 # Usage: install [--yes] [--no-companions] [--help]
 #
-#   --yes             take every prompt as answered, for scripts and pipes
-#   --no-companions   this plugin only; leave the Omate card inert
+#   --yes             take every prompt as answered, for scripts and cron
+#   --no-companions   say nothing about the companion plugin
 #
 # From a terminal, after `omarchy plugin add` has put this file on your disk:
 #
 #   ~/.config/omarchy/plugins/anishfn.widgets/install --yes
 #
-# It is deliberately not offered as a one-liner that streams this file from
-# a branch into a shell. A branch is a mutable ref: a later
-# repository or account compromise would become arbitrary code execution on
-# somebody else's machine at install time, with no immutable identity or
-# integrity check anywhere in the path. Running the copy already in the
-# checkout costs one more command and removes that entirely.
+# Two things this script will not do, for the same reason. It is not offered
+# as a one-liner that streams this file from a branch into a shell, and it
+# does not install anybody else's plugin on your behalf. A branch is a mutable
+# ref: whoever controls that repository later controls what runs here, and
+# neither an install line nor a companion clone url carries an immutable
+# identity or an integrity check. So this file is run from the checkout `add`
+# already made, and the companion is printed as a command for you to read and
+# run rather than fetched and executed by a script you are part-way through.
 
 set -uo pipefail
 
@@ -45,7 +48,8 @@ PLUGINS_DIR="$HOME/.config/omarchy/plugins"
 
 # Plugins this one talks to, and what you lose without each. Nothing here is
 # required: every companion is one card degrading to a line of text, never the
-# plugin failing to load.
+# plugin failing to load. These urls are printed, never passed to anything --
+# see the note at the top of this file.
 #
 #   id | clone url | the card it powers | what that card is
 COMPANIONS=(
@@ -69,7 +73,7 @@ while (( $# > 0 )); do
   case "$1" in
     --yes|-y)         ASSUME_YES=1; shift ;;
     --no-companions)  COMPANIONS_WANTED=0; shift ;;
-    -h|--help)        sed -n '3,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '3,41p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                fail "unknown option: $1 (try --help)" ;;
   esac
 done
@@ -188,15 +192,12 @@ if (( COMPANIONS_WANTED )); then
 
     say "  $cid is not installed, so $card stays inert."
     say "  It is $what."
-    if ask "Install $cid?"; then
-      if (( ASSUME_YES )); then
-        omarchy plugin add "$clone_url" --enable --yes && CHANGED=1 || warn "could not add $cid"
-      else
-        omarchy plugin add "$clone_url" --enable && CHANGED=1 || warn "could not add $cid"
-      fi
-    else
-      say "  skipped — the card stays inert and says so on the desktop"
-    fi
+    say "  It is somebody else's plugin, so installing it is your call and"
+    say "  your reading, not a prompt in the middle of this one:"
+    say ""
+    say "      omarchy plugin add $clone_url --enable"
+    say ""
+    say "  The card stays inert until you do, and says so on the desktop."
   done
 fi
 

@@ -1135,8 +1135,16 @@ Item {
     todoistProc.secret = token
     // `--max-filesize` bounds a document that arrives from outside and is
     // turned into objects inside the process that draws the desktop.
+    //
+    // `--proto =https` and `--max-redirs 0` are the pair every fetch in this
+    // plugin carries, and they matter more here than anywhere else: this
+    // request has an Authorization header on it. curl follows no redirect
+    // without -L and there is none here, so this is the belt to that
+    // braces -- a bearer token is not a thing to leave one flag away from
+    // travelling to a host nobody named.
     todoistProc.command = ["/usr/bin/timeout", "-k", "2", "20",
-      "/usr/bin/curl", "-fsS", "--max-time", "15",
+      "/usr/bin/curl", "-fsS", "--proto", "=https", "--max-redirs", "0",
+      "--max-time", "15",
       "--max-filesize", "2097152",
       "-H", "Accept: application/json",
       "-K", "-",
@@ -1197,8 +1205,11 @@ Item {
 
     todoistCloseProc.task = key
     todoistCloseProc.secret = token
+    // Same two flags as the fetch above, and for the same reason: this one
+    // carries the token too.
     todoistCloseProc.command = ["/usr/bin/timeout", "-k", "2", "20",
-      "/usr/bin/curl", "-fsS", "--max-time", "15", "-X", "POST",
+      "/usr/bin/curl", "-fsS", "--proto", "=https", "--max-redirs", "0",
+      "--max-time", "15", "-X", "POST",
       "-K", "-",
       "https://" + Model.TODOIST_HOST + "/api/v1/tasks/" + key + "/close"]
     todoistCloseProc.stdinEnabled = true

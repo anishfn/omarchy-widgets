@@ -31,7 +31,33 @@ Column {
   readonly property string kind: spec ? String(spec.type) : "text"
   readonly property string text: value === undefined || value === null ? "" : String(value)
 
+  // Set by the editor when this field is the question the last answer raised
+  // -- picking USDT makes "which chain" the next thing to say, and a dropdown
+  // that opens itself says it without a second click at the far end of a
+  // panel. Only choices can honour it; a text field opening itself would mean
+  // nothing.
+  property bool autoOpen: false
+
   signal committed(var value)
+  // Raised once the field has opened, so the editor can put the flag down.
+  // Without it the picker would reopen every time this delegate is rebuilt,
+  // which is every keystroke in any other field on the panel.
+  signal autoOpened()
+
+  function openIfAsked() {
+    if (!root.autoOpen || root.kind !== "choice") return
+    // Deferred by a frame: openPopup measures where it is on screen to decide
+    // whether to open upward, and a delegate created this instant has not
+    // been positioned yet. Asking now would ask about the wrong place.
+    Qt.callLater(function () {
+      if (!root.autoOpen) return
+      choicePicker.openPopup()
+      root.autoOpened()
+    })
+  }
+
+  onAutoOpenChanged: openIfAsked()
+  Component.onCompleted: openIfAsked()
   // Which chooser to open, "file" / "image" / "folder". The editor runs it,
   // because opening one means closing the editor and only the editor knows
   // that.
@@ -129,6 +155,7 @@ Column {
   }
 
   PickerField {
+    id: choicePicker
     visible: root.kind === "choice"
     width: root.width
     height: Style.spacing.controlHeight

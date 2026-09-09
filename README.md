@@ -641,6 +641,11 @@ Litecoin or Tether USD — then paste an **Address**. **Currency** picks the
 money it is valued in, and **Label** overrides the ticker symbol above the
 number.
 
+**Pick a coin that is on several chains and the Network dropdown opens by
+itself.** Choosing USDT makes "which chain" the next thing you have to say, so
+the card says it rather than leaving a row to be found at the other end of the
+panel. Pick Bitcoin and nothing opens, because there is nothing to ask.
+
 **A Network row sits under the coin, and says where the holding is.** For
 Bitcoin, Ethereum, Solana and Litecoin it holds one entry, because that is how
 many chains those coins live on — it reads as a statement rather than a

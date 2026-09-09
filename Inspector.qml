@@ -72,8 +72,28 @@ BorderSurface {
     return out
   }
 
+  // Which field, if any, should open itself now. One answer can make another
+  // question worth asking -- picking a coin that is on five chains makes
+  // "which chain" the next thing to say -- and the alternative to opening the
+  // picker is the reader hunting for a row that appeared while they were
+  // looking at the one they just used.
+  property string autoOpenKey: ""
+
+  // A request to open belongs to the widget it was made on. Select something
+  // else before the picker got its chance and the request is stale, not
+  // pending -- a dropdown opening on a card you have moved on from is the
+  // panel arguing with you.
+  onSelectedIdChanged: root.autoOpenKey = ""
+
   function commit(key, value) {
     if (service && selectedId) service.setSetting(selectedId, key, value)
+
+    // The only chained question in the catalogue so far, and it is named here
+    // rather than declared in the schema because one instance of a thing is
+    // not a pattern yet. When there is a second, this earns a key on the spec.
+    if (root.type === "crypto" && String(key) === "coin") {
+      root.autoOpenKey = Model.cryptoNetworksFor(value).length > 1 ? "network" : ""
+    }
   }
 
   height: Math.min(root.maxHeight, column.implicitHeight + Style.spacing.panelPadding * 2)
@@ -305,6 +325,8 @@ BorderSurface {
             fontFamily: root.fontFamily
             windowHeight: root.windowHeight
             timezoneOptions: root.timezoneOptions
+            autoOpen: root.autoOpenKey !== "" && root.autoOpenKey === modelData.key
+            onAutoOpened: root.autoOpenKey = ""
             onCommitted: function(v) { root.commit(modelData.key, v) }
             onChooseRequested: function(pathKind) {
               if (!root.service || !root.selectedId) return

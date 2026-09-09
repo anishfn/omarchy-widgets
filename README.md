@@ -97,7 +97,7 @@ plugins land disabled.
 | **Weather** | Now, today's range, and the condition | `wttr.in` |
 | **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
 | **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
-| **Crypto** | A wallet's balance and what it is worth, or just the coin's price | four chains, `api.coingecko.com` |
+| **Crypto** | A wallet's balance and what it is worth, or just the coin's price | five coins over seven networks, `api.coingecko.com` |
 | **Calendar** | What is next, how long you have, and where it falls in the day | `calendar.google.com` |
 | **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
 | **Music** | What is playing, how far in, and the transport for it | local (MPRIS) |
@@ -614,9 +614,34 @@ per address, two per repository every half hour.
 
 What a wallet holds, and what that is worth.
 
-Click it in the editor and pick a **Chain** — Bitcoin, Ethereum, Solana or
-Litecoin — then paste an **Address**. **Currency** picks the money it is
-valued in, and **Label** overrides the ticker symbol above the number.
+Click it in the editor and pick a **Coin** — Bitcoin, Ethereum, Solana,
+Litecoin or Tether USD — then paste an **Address**. **Currency** picks the
+money it is valued in, and **Label** overrides the ticker symbol above the
+number.
+
+**A coin that lives on more than one chain also asks where.** USDT is the same
+token on five networks and the balance is a different number on each, so
+picking it adds a **Network** row: Ethereum, Tron, Solana, Polygon or BNB
+Chain. The four coins that live in one place do not ask a question with one
+answer — the row is not there at all.
+
+| Coin | Networks |
+|---|---|
+| Bitcoin | Bitcoin |
+| Ethereum | Ethereum |
+| Solana | Solana |
+| Litecoin | Litecoin |
+| Tether USD | Ethereum, Tron, Solana, Polygon, BNB Chain |
+
+The address is checked against the **network**, never the coin: your USDT on
+BNB Chain sits at an ordinary `0x` account, indistinguishable from the one
+holding your ether, because it is the same kind of account. Paste an address
+of the wrong shape for the network and the card says **Check the address**
+rather than asking a node about it.
+
+Two USDT cards on two networks name themselves apart — `USDT · BNB Chain` —
+because otherwise they are the same card drawn twice. A coin on one network
+just says its ticker.
 
 ```
    ┌────────────────┐        ┌────────────────────────────┐
@@ -668,8 +693,18 @@ Two kinds of request, to different places, for different reasons.
 | Price, 24h change and the week | `api.coingecko.com` | every 5 minutes |
 | Bitcoin balance | `mempool.space` | every 10 minutes |
 | Litecoin balance | `litecoinspace.org` | every 10 minutes |
-| Ethereum balance | `ethereum-rpc.publicnode.com` | every 10 minutes |
-| Solana balance | `api.mainnet-beta.solana.com` | every 10 minutes |
+| Ethereum balance, and USDT on Ethereum | `ethereum-rpc.publicnode.com` | every 10 minutes |
+| Solana balance, and USDT on Solana | `api.mainnet-beta.solana.com` | every 10 minutes |
+| USDT on Polygon | `polygon-bor-rpc.publicnode.com` | every 10 minutes |
+| USDT on BNB Chain | `bsc-rpc.publicnode.com` | every 10 minutes |
+| USDT on Tron | `api.trongrid.io` | every 10 minutes |
+
+A token is not read the same way as the chain's own coin. Ether is a question
+for the account; tether is a question for the contract, so those go out as an
+`eth_call` to the token rather than an `eth_getBalance` on the wallet. On
+Solana the tokens sit in accounts the wallet owns — sometimes more than one
+for the same mint — so the card asks for those and adds them up. Tron answers
+with the whole account at once, and the card reads its own contract out of it.
 
 **Prices are one request per currency, for the whole desktop.** Six crypto
 cards priced in dollars is a single call, not six — the service asks for every
@@ -691,9 +726,10 @@ seen a balance says so rather than showing a zero.
 
 Worth reading before you paste an address.
 
-- **The chain node learns that your IP watches that address.** That is the
+- **The network's node learns that your IP watches that address.** That is the
   price of reading a balance without running your own node. An address is only
-  ever sent to its own chain's host — the price host never sees one.
+  ever sent to its own network's host — the price host never sees one, and a
+  card set to USDT on BNB Chain tells BNB Chain and nobody else.
 - **The card shows your money to whoever can see your screen.** Turn
   **Value in money** off and the card keeps the holding and drops what it is
   worth.

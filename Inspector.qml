@@ -42,6 +42,17 @@ BorderSurface {
   readonly property color dim: Qt.darker(foreground, 1.5)
   readonly property string type: selected ? String(selected.type) : ""
 
+  // The one setting the settings *schema* depends on, as a string. Only the
+  // crypto card has one -- how many networks it offers is a fact about which
+  // coin it is holding -- and a string is the point: it is compared by value,
+  // so a commit that did not change it changes nothing here.
+  readonly property string schemaKey: selected && selected.settings
+    ? String(selected.settings.coin || "") : ""
+
+  readonly property var fieldSchema: root.type
+    ? Model.settingsSchema(root.type, { coin: root.schemaKey })
+    : []
+
   // One column of the flow. Wide enough for a path and narrow enough that a
   // toolbar-width panel holds four of them.
   readonly property real fieldWidth: Style.space(210)
@@ -270,7 +281,18 @@ BorderSurface {
         }
 
         Repeater {
-          model: root.selected ? Model.settingsSchema(root.type) : []
+          // Deliberately not `root.selected.settings`, which is a new object
+          // after every commit -- and a commit is every keystroke in a text
+          // field. A model that is a new array each time rebuilds every
+          // delegate under it, which takes the focus out of the field you are
+          // typing in and leaves one character behind.
+          //
+          // So the schema is bound to `root.schemaKey`, a string holding only
+          // what the schema can actually depend on. Typing an address leaves
+          // it unchanged, the binding does not re-run, and the fields stand
+          // still; picking a different coin changes it, and the network row
+          // appears or goes.
+          model: root.fieldSchema
 
           delegate: SettingField {
             required property var modelData

@@ -267,17 +267,42 @@ function catalog() {
       // the chain itself. An address is only ever sent to its own chain's
       // node, and never to the price host.
       network: ["api.coingecko.com", "mempool.space", "litecoinspace.org",
-        "ethereum-rpc.publicnode.com", "api.mainnet-beta.solana.com"],
+        "ethereum-rpc.publicnode.com", "api.mainnet-beta.solana.com",
+        "polygon-bor-rpc.publicnode.com", "bsc-rpc.publicnode.com",
+        "api.trongrid.io"],
       settings: [
         {
-          key: "chain",
+          key: "coin",
           type: "choice",
-          label: "Chain",
+          label: "Coin",
           defaultValue: "bitcoin",
           options: [
             { value: "bitcoin", label: "Bitcoin" },
             { value: "ethereum", label: "Ethereum" },
             { value: "solana", label: "Solana" },
+            { value: "litecoin", label: "Litecoin" },
+            { value: "tether", label: "Tether USD" }
+          ]
+        },
+        {
+          // Every network any coin here is on. The editor narrows this to the
+          // ones the chosen coin is actually on, and hides the row when that
+          // is one -- see refineCryptoSchema. The full list stays here
+          // because this is also what a hand-edited config is checked
+          // against, and a coercion that only knew about today's coin would
+          // throw away a network the file is right about.
+          key: "network",
+          type: "choice",
+          label: "Network",
+          help: "Where the holding is",
+          defaultValue: "bitcoin",
+          options: [
+            { value: "bitcoin", label: "Bitcoin" },
+            { value: "ethereum", label: "Ethereum" },
+            { value: "tron", label: "Tron" },
+            { value: "solana", label: "Solana" },
+            { value: "polygon", label: "Polygon" },
+            { value: "bsc", label: "BNB Chain" },
             { value: "litecoin", label: "Litecoin" }
           ]
         },
@@ -582,9 +607,52 @@ function catalog() {
 }
 
 // The settings schema for a type, always an array.
-function settingsSchema(type) {
+// The settings a type offers, and — given an instance's current settings —
+// the ones it offers *now*.
+//
+// Only the crypto card needs the second argument so far, and it needs it for
+// one reason: USDT is on five networks and bitcoin is on one, so a fixed list
+// of networks is either wrong for bitcoin or missing for tether. The editor
+// passes what the widget is currently set to and gets back a schema that
+// matches it.
+//
+// The narrowing is a display concern and only a display concern. Nothing
+// downstream trusts it: `coerceSetting` still checks against the full list,
+// and `cryptoNetworkOf` still falls back when a saved pair does not exist. A
+// config edited by hand to say bitcoin-on-BNB-Chain is answered by the reader,
+// not by the absence of a row in a panel.
+function settingsSchema(type, settings) {
   var entry = catalogEntry(type)
-  return entry && Array.isArray(entry.settings) ? entry.settings : []
+  var schema = entry && Array.isArray(entry.settings) ? entry.settings : []
+  if (type !== "crypto" || !isPlainObject(settings)) return schema
+  return refineCryptoSchema(schema, settings)
+}
+
+function refineCryptoSchema(schema, settings) {
+  var networks = cryptoNetworksFor(cryptoCoinOf(settings))
+  var out = []
+  for (var i = 0; i < schema.length; i++) {
+    if (schema[i].key !== "network") { out.push(schema[i]); continue }
+    // A coin on one network has nothing to ask about, and a picker with one
+    // entry is a control that cannot be worked. The row goes rather than
+    // sitting there greyed: the answer is not hidden, it is on the coin.
+    if (networks.length < 2) continue
+    var options = []
+    for (var n = 0; n < networks.length; n++) {
+      options.push({ value: networks[n], label: cryptoNetworkLabel(networks[n]) })
+    }
+    // A copy, because the catalogue is shared and this is one widget's view
+    // of it.
+    out.push({
+      key: schema[i].key,
+      type: schema[i].type,
+      label: schema[i].label,
+      help: schema[i].help,
+      defaultValue: networks[0],
+      options: options
+    })
+  }
+  return out
 }
 
 function settingSpec(type, key) {
@@ -1104,6 +1172,30 @@ function defaultConfig() {
   return { version: SCHEMA_VERSION, layout: layout, widgets: [clock] }
 }
 
+// What a file written against an older shape of the same widget meant, said
+// in the current one. Runs before normalizeSettings, which drops keys the
+// schema does not know -- so anything that needs to survive a rename has to
+// be renamed here, on the way in.
+//
+// Crypto is the only one so far. It had a single `chain`, which conflated
+// two things the moment a coin turned out to live on more than one network:
+// every old value names both a coin and the network it is on, so it is read
+// as both and neither answer is a guess.
+function migrateSettings(entry, raw) {
+  if (!isPlainObject(raw)) return raw
+  if (!entry || entry.type !== "crypto") return raw
+  if (raw.coin !== undefined || raw.network !== undefined) return raw
+  var chain = clampString(raw.chain)
+  if (!cryptoCoin(chain)) return raw
+  var out = {}
+  for (var key in raw) {
+    if (Object.prototype.hasOwnProperty.call(raw, key)) out[key] = raw[key]
+  }
+  out.coin = chain
+  out.network = chain
+  return out
+}
+
 function normalizeSettings(entry, raw) {
   var source = isPlainObject(raw) ? raw : {}
   var schema = Array.isArray(entry.settings) ? entry.settings : []
@@ -1203,7 +1295,7 @@ function normalizeInstance(raw, index, layout) {
   out.radius = (raw.radius === undefined || raw.radius === null)
     ? null
     : Math.round(clampNumber(raw.radius, -1, 400, DEFAULT_RADIUS))
-  out.settings = normalizeSettings(entry, raw.settings)
+  out.settings = normalizeSettings(entry, migrateSettings(entry, raw.settings))
   return out
 }
 
@@ -3656,56 +3748,154 @@ function numberOrNaN(value) {
 // card is a plain ticker instead, which costs nothing to support: only the
 // middle line changes, and it is the shape most people actually want.
 //
-// Four chains, two request shapes. Bitcoin and Litecoin are both read through
-// an Esplora API -- mempool.space and litecoinspace.org, which is its Litecoin
-// fork -- and answer identically, so they share a parser. Ethereum and Solana
-// each take a JSON-RPC POST. A fifth chain is a row in this table, not a new
-// code path.
+// A card holds one coin on one network, and those are two different questions
+// once a coin is on more than one. Everything below is arranged around that
+// split: the coin decides what a unit is worth and what it is called, the
+// network decides where the balance is read from and what an address there
+// looks like. Five coins over seven networks is two tables and one list of
+// placements, not thirty-five branches.
+
+// The networks a balance can be read from, and how each one answers. A
+// network is a place, not a coin: USDT is one asset that lives on five of
+// these, and the address you hold it at is the network's shape, never the
+// coin's. That is why the address pattern hangs here rather than on the coin
+// -- an 0x address is an 0x address whether it is holding ether or tether.
 //
-// `decimals` is the offset of the chain's smallest unit: 1e8 for a satoshi or
-// a litoshi, 1e18 for wei, 1e9 for a lamport.
+// Bitcoin and Litecoin are read through an Esplora API -- mempool.space and
+// litecoinspace.org, which is its Litecoin fork -- and answer identically, so
+// they share a parser. The EVM networks and Solana each take a JSON-RPC POST.
+// Tron is the odd one: a plain GET that answers with every token the account
+// holds at once.
 //
 // None of these hosts wants an API key, which is the only reason a wallpaper
 // decoration can talk to them at all -- there is nowhere here to keep a
-// secret. It also means they can withdraw the courtesy, so a chain that stops
-// answering has to degrade to a card that says so, never to a wrong number.
+// secret. It also means they can withdraw the courtesy, so a network that
+// stops answering has to degrade to a card that says so, never to a wrong
+// number.
 
-var CRYPTO_CHAINS = {
+// The address shapes, one per family rather than one per network. Bech32
+// carries no b, i or o, which is why the first two are not the obvious
+// [a-z0-9]; base58 drops 0, O, I and l for the same reason.
+var CRYPTO_ADDRESS_SHAPES = {
+  bitcoin: /^(bc1[02-9ac-hj-np-z]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/,
+  litecoin: /^(ltc1[02-9ac-hj-np-z]{11,71}|[LM3][a-km-zA-HJ-NP-Z1-9]{25,34})$/,
+  evm: /^0x[0-9a-fA-F]{40}$/,
+  solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
+  tron: /^T[1-9A-HJ-NP-Za-km-z]{33}$/
+}
+
+var CRYPTO_NETWORKS = {
   bitcoin: {
-    coin: "bitcoin",
-    symbol: "BTC",
-    decimals: 8,
+    label: "Bitcoin",
+    shape: "bitcoin",
     kind: "esplora",
     host: "mempool.space",
-    endpoint: "https://mempool.space/api/address/",
-    pattern: /^(bc1[02-9ac-hj-np-z]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/
+    endpoint: "https://mempool.space/api/address/"
   },
   litecoin: {
-    coin: "litecoin",
-    symbol: "LTC",
-    decimals: 8,
+    label: "Litecoin",
+    shape: "litecoin",
     kind: "esplora",
     host: "litecoinspace.org",
-    endpoint: "https://litecoinspace.org/api/address/",
-    pattern: /^(ltc1[02-9ac-hj-np-z]{11,71}|[LM3][a-km-zA-HJ-NP-Z1-9]{25,34})$/
+    endpoint: "https://litecoinspace.org/api/address/"
   },
   ethereum: {
-    coin: "ethereum",
-    symbol: "ETH",
-    decimals: 18,
+    label: "Ethereum",
+    shape: "evm",
     kind: "evm",
     host: "ethereum-rpc.publicnode.com",
-    endpoint: "https://ethereum-rpc.publicnode.com",
-    pattern: /^0x[0-9a-fA-F]{40}$/
+    endpoint: "https://ethereum-rpc.publicnode.com"
+  },
+  polygon: {
+    label: "Polygon",
+    shape: "evm",
+    kind: "evm",
+    host: "polygon-bor-rpc.publicnode.com",
+    endpoint: "https://polygon-bor-rpc.publicnode.com"
+  },
+  bsc: {
+    label: "BNB Chain",
+    shape: "evm",
+    kind: "evm",
+    host: "bsc-rpc.publicnode.com",
+    endpoint: "https://bsc-rpc.publicnode.com"
   },
   solana: {
-    coin: "solana",
-    symbol: "SOL",
-    decimals: 9,
+    label: "Solana",
+    shape: "solana",
     kind: "solana",
     host: "api.mainnet-beta.solana.com",
-    endpoint: "https://api.mainnet-beta.solana.com",
-    pattern: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
+    endpoint: "https://api.mainnet-beta.solana.com"
+  },
+  tron: {
+    label: "Tron",
+    shape: "tron",
+    kind: "tron",
+    host: "api.trongrid.io",
+    endpoint: "https://api.trongrid.io/v1/accounts/"
+  }
+}
+
+// The coins, and where each one lives. `coin` is CoinGecko's id, which is what
+// the price call asks for and what the price table is keyed by; one price
+// answers for every network the coin is on, because one tether is one tether
+// wherever it is held.
+//
+// `networks` is an ordered list, and the order is the order of the picker.
+// The first entry is what a card falls back to when its saved network is not
+// one this coin is on -- which is what happens the moment somebody switches a
+// card from USDT to Bitcoin.
+//
+// `decimals` is the offset of the smallest unit at that placement: 1e8 for a
+// satoshi or a litoshi, 1e18 for wei, 1e9 for a lamport, 1e6 for tether
+// nearly everywhere. Nearly: Binance-Peg USDT on BNB Chain is an 18-decimal
+// token, which is exactly the sort of thing that is right in four branches and
+// wrong in the fifth, so it is a number in a table rather than a constant.
+//
+// `contract` and `mint` are the token's address on that network. Their
+// presence is also what says "this is a token here, not the network's own
+// coin", which is the difference between an eth_getBalance and an eth_call.
+var CRYPTO_COINS = {
+  bitcoin: {
+    symbol: "BTC",
+    label: "Bitcoin",
+    coin: "bitcoin",
+    networks: [{ network: "bitcoin", decimals: 8 }]
+  },
+  ethereum: {
+    symbol: "ETH",
+    label: "Ethereum",
+    coin: "ethereum",
+    networks: [{ network: "ethereum", decimals: 18 }]
+  },
+  solana: {
+    symbol: "SOL",
+    label: "Solana",
+    coin: "solana",
+    networks: [{ network: "solana", decimals: 9 }]
+  },
+  litecoin: {
+    symbol: "LTC",
+    label: "Litecoin",
+    coin: "litecoin",
+    networks: [{ network: "litecoin", decimals: 8 }]
+  },
+  tether: {
+    symbol: "USDT",
+    label: "Tether USD",
+    coin: "tether",
+    networks: [
+      { network: "ethereum", decimals: 6,
+        contract: "0xdAC17F958D2ee523a2206206994597C13D831ec7" },
+      { network: "tron", decimals: 6,
+        contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" },
+      { network: "solana", decimals: 6,
+        mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" },
+      { network: "polygon", decimals: 6,
+        contract: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F" },
+      { network: "bsc", decimals: 18,
+        contract: "0x55d398326f99059fF775485246999027B3197955" }
+    ]
   }
 }
 
@@ -3721,7 +3911,7 @@ var CRYPTO_CURRENCY_SYMBOLS = {
   jpy: "¥", aud: "A$", cad: "C$"
 }
 
-var CRYPTO_DEFAULT_CHAIN = "bitcoin"
+var CRYPTO_DEFAULT_COIN = "bitcoin"
 var CRYPTO_DEFAULT_CURRENCY = "usd"
 
 // Ceilings on the two numbers that arrive from outside. Neither is a limit
@@ -3741,33 +3931,79 @@ var MAX_CRYPTO_AMOUNT = 1e15
 // before it is drawn, which covers every caller rather than one path.
 var MAX_WRITABLE = 1e21
 
-function cryptoChain(name) {
+function cryptoCoin(name) {
   var key = String(name || "")
-  return Object.prototype.hasOwnProperty.call(CRYPTO_CHAINS, key) ? CRYPTO_CHAINS[key] : null
+  return Object.prototype.hasOwnProperty.call(CRYPTO_COINS, key) ? CRYPTO_COINS[key] : null
 }
 
-function cryptoChainNames() {
+function cryptoNetwork(name) {
+  var key = String(name || "")
+  return Object.prototype.hasOwnProperty.call(CRYPTO_NETWORKS, key) ? CRYPTO_NETWORKS[key] : null
+}
+
+function cryptoCoinNames() {
   var out = []
-  for (var key in CRYPTO_CHAINS) {
-    if (Object.prototype.hasOwnProperty.call(CRYPTO_CHAINS, key)) out.push(key)
+  for (var key in CRYPTO_COINS) {
+    if (Object.prototype.hasOwnProperty.call(CRYPTO_COINS, key)) out.push(key)
   }
   return out
 }
 
-function cryptoSymbol(chain) {
-  var entry = cryptoChain(chain)
+function cryptoNetworkNames() {
+  var out = []
+  for (var key in CRYPTO_NETWORKS) {
+    if (Object.prototype.hasOwnProperty.call(CRYPTO_NETWORKS, key)) out.push(key)
+  }
+  return out
+}
+
+// One coin on one network: the decimals, and the contract if it is a token
+// there. Null for a pair that does not exist, which is the answer to every
+// "is this even a thing" question below.
+function cryptoPlacement(coin, network) {
+  var entry = cryptoCoin(coin)
+  if (!entry) return null
+  var wanted = String(network || "")
+  for (var i = 0; i < entry.networks.length; i++) {
+    if (entry.networks[i].network === wanted) return entry.networks[i]
+  }
+  return null
+}
+
+// The networks a coin is actually on, in picker order. The first is the one a
+// card falls back to.
+function cryptoNetworksFor(coin) {
+  var entry = cryptoCoin(coin)
+  if (!entry) return []
+  var out = []
+  for (var i = 0; i < entry.networks.length; i++) out.push(entry.networks[i].network)
+  return out
+}
+
+function cryptoSymbol(coin) {
+  var entry = cryptoCoin(coin)
   return entry ? entry.symbol : ""
 }
 
+function cryptoNetworkLabel(network) {
+  var entry = cryptoNetwork(network)
+  return entry ? entry.label : ""
+}
+
 // The address becomes a path segment or a JSON string sent to a node, so it
-// is an allowlist per chain rather than an attempt to escape what arrived.
-// Bech32 carries no b, i or o, which is why those two patterns are not the
-// obvious [a-z0-9].
-function isSafeCryptoAddress(chain, address) {
-  var entry = cryptoChain(chain)
+// is an allowlist per network rather than an attempt to escape what arrived.
+//
+// Per *network*, not per coin, and that is the whole reason the shapes live
+// where they do: the address holding your tether on BNB Chain is an ordinary
+// 0x address, indistinguishable from the one holding your ether, because it
+// is the same kind of account. A coin cannot narrow this and must not widen
+// it.
+function isSafeCryptoAddress(network, address) {
+  var entry = cryptoNetwork(network)
   if (!entry || typeof address !== "string") return false
   if (address.length === 0 || address.length > 128) return false
-  return entry.pattern.test(address)
+  var shape = CRYPTO_ADDRESS_SHAPES[entry.shape]
+  return shape ? shape.test(address) : false
 }
 
 function isCryptoCurrency(value) {
@@ -3783,13 +4019,31 @@ function cryptoCurrencyOf(settings) {
   return isCryptoCurrency(code) ? code : CRYPTO_DEFAULT_CURRENCY
 }
 
-function cryptoChainOf(settings) {
-  var name = isPlainObject(settings) ? String(settings.chain || "") : ""
-  return cryptoChain(name) ? name : CRYPTO_DEFAULT_CHAIN
+function cryptoCoinOf(settings) {
+  var name = isPlainObject(settings) ? String(settings.coin || "") : ""
+  return cryptoCoin(name) ? name : CRYPTO_DEFAULT_COIN
 }
 
-function cryptoWalletKey(chain, address) {
-  return String(chain) + ":" + String(address)
+// The saved network, if the coin is on it, and the coin's first otherwise.
+//
+// Read rather than written, so switching a card from USDT to Bitcoin needs no
+// second write and no cross-field rule in the editor: "bsc" simply stops
+// being an answer to "where is this bitcoin", and the card reads Bitcoin. The
+// stale value stays in the file and comes back if you switch back, which is
+// the behaviour anybody flipping between two coins actually wants.
+function cryptoNetworkOf(settings) {
+  var coin = cryptoCoinOf(settings)
+  var name = isPlainObject(settings) ? String(settings.network || "") : ""
+  if (cryptoPlacement(coin, name)) return name
+  var available = cryptoNetworksFor(coin)
+  return available.length > 0 ? available[0] : ""
+}
+
+// One holding is one coin, on one network, at one address. All three, because
+// the same 0x address holds ether and tether at once and they are two cards
+// with two balances.
+function cryptoWalletKey(coin, network, address) {
+  return String(coin) + ":" + String(network) + ":" + String(address)
 }
 
 // Distinct wallets across every crypto card that is switched on. An address
@@ -3801,13 +4055,14 @@ function cryptoWalletsInUse(config) {
   for (var i = 0; i < list.length; i++) {
     if (list[i].type !== "crypto" || !list[i].enabled) continue
     var settings = list[i].settings || {}
-    var chain = cryptoChainOf(settings)
+    var coin = cryptoCoinOf(settings)
+    var network = cryptoNetworkOf(settings)
     var address = clampString(settings.address)
-    if (!address || !isSafeCryptoAddress(chain, address)) continue
-    var key = cryptoWalletKey(chain, address)
+    if (!address || !isSafeCryptoAddress(network, address)) continue
+    var key = cryptoWalletKey(coin, network, address)
     if (seen[key]) continue
     seen[key] = true
-    out.push({ chain: chain, address: address, key: key })
+    out.push({ coin: coin, network: network, address: address, key: key })
   }
   return out
 }
@@ -3820,7 +4075,7 @@ function cryptoCoinsInUse(config) {
   var out = []
   for (var i = 0; i < list.length; i++) {
     if (list[i].type !== "crypto" || !list[i].enabled) continue
-    var entry = cryptoChain(cryptoChainOf(list[i].settings || {}))
+    var entry = cryptoCoin(cryptoCoinOf(list[i].settings || {}))
     if (!entry || seen[entry.coin]) continue
     seen[entry.coin] = true
     out.push(entry.coin)
@@ -3865,18 +4120,69 @@ function cryptoCurrenciesInUse(config) {
 var CRYPTO_CURL_FLAGS = ["-fsS", "--proto", "=https", "--max-redirs", "0",
   "--max-time", "15", "--max-filesize", "262144"]
 
-function cryptoBalanceCommand(chain, address) {
-  var entry = cryptoChain(chain)
-  if (!entry || !isSafeCryptoAddress(chain, address)) return null
+// An ERC-20 `balanceOf(address)` call, hand-assembled. The selector is the
+// first four bytes of the hash of the signature, which is a constant for this
+// one function and does not need a hashing library to be a constant; the
+// argument is the address, without its 0x, right-aligned in a 32-byte word.
+//
+// Padded here rather than with padStart: this file runs in QML's JS engine as
+// well as in node, and the engine's ES level is the shell's business, not
+// this file's.
+function erc20BalanceOfData(address) {
+  var bare = String(address).slice(2).toLowerCase()
+  var padding = ""
+  for (var i = bare.length; i < 64; i++) padding += "0"
+  return "0x70a08231" + padding + bare
+}
+
+// The one request that reads a balance, in whichever of the five shapes the
+// coin and the network between them ask for.
+//
+// The shape is decided by the placement, not by the network alone: the same
+// Ethereum node answers `eth_getBalance` for ether and an `eth_call` for
+// tether, and which one is right is a fact about what the card is holding.
+// A sixth shape is a branch here and a row in the tables above; a sixth
+// *network* of a shape already here is only the row.
+function cryptoBalanceCommand(coin, network, address) {
+  var placement = cryptoPlacement(coin, network)
+  var host = cryptoNetwork(network)
+  if (!placement || !host || !isSafeCryptoAddress(network, address)) return null
+
   var timeout = ["/usr/bin/timeout", "-k", "2", "20", "/usr/bin/curl"]
-  if (entry.kind === "esplora") {
-    return timeout.concat(CRYPTO_CURL_FLAGS, [entry.endpoint + address])
+  var token = placement.contract || placement.mint || ""
+
+  // Two GETs, where the address is a path segment. Nothing else about the
+  // request says who is asking, and --max-redirs 0 is what stops the answer
+  // carrying that path anywhere else.
+  if (host.kind === "esplora") {
+    return timeout.concat(CRYPTO_CURL_FLAGS, [host.endpoint + address])
   }
-  var body = entry.kind === "evm"
-    ? JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBalance", params: [address, "latest"] })
-    : JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [address] })
+  if (host.kind === "tron") {
+    // TronGrid answers with every token the account holds, so there is no
+    // contract in the request at all -- the filtering happens in the parser,
+    // where a contract that is not ours is simply not the number we read.
+    return timeout.concat(CRYPTO_CURL_FLAGS, [host.endpoint + address])
+  }
+
+  var body
+  if (host.kind === "evm") {
+    body = token
+      ? JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call",
+          params: [{ to: token, data: erc20BalanceOfData(address) }, "latest"] })
+      : JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBalance",
+          params: [address, "latest"] })
+  } else {
+    // A token on Solana is not held at the wallet address: it sits in one or
+    // more token accounts the wallet owns, and a wallet can own several for
+    // the same mint. So this asks for the accounts and the parser adds them
+    // up, where the native call could just ask for the number.
+    body = token
+      ? JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+          params: [address, { mint: token }, { encoding: "jsonParsed" }] })
+      : JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [address] })
+  }
   return timeout.concat(CRYPTO_CURL_FLAGS,
-    ["-X", "POST", "-H", "content-type: application/json", "-d", body, entry.endpoint])
+    ["-X", "POST", "-H", "content-type: application/json", "-d", body, host.endpoint])
 }
 
 // One request per currency, covering every coin anybody has on screen.
@@ -3896,8 +4202,8 @@ function cryptoPriceCommand(coins, currency) {
   var ids = []
   for (var i = 0; i < (coins || []).length; i++) {
     var entry = null
-    for (var key in CRYPTO_CHAINS) {
-      if (CRYPTO_CHAINS[key].coin === coins[i]) { entry = CRYPTO_CHAINS[key]; break }
+    for (var key in CRYPTO_COINS) {
+      if (CRYPTO_COINS[key].coin === coins[i]) { entry = CRYPTO_COINS[key]; break }
     }
     if (entry && ids.indexOf(entry.coin) === -1) ids.push(entry.coin)
   }
@@ -3951,20 +4257,80 @@ function parseLamportBalance(data, decimals) {
   return lamports / Math.pow(10, decimals)
 }
 
+// A wallet can own more than one token account for the same mint, so the
+// holding is their sum. The raw amount is used with the decimals from our own
+// table rather than the ones in the response: the response's are a fact about
+// the mint that we already know, and a number scaled by a figure the network
+// chose is a number the network can move.
+function parseSplBalance(data, decimals) {
+  if (!isPlainObject(data) || !isPlainObject(data.result)) return null
+  var accounts = data.result.value
+  if (!Array.isArray(accounts)) return null
+  var total = 0
+  for (var i = 0; i < accounts.length; i++) {
+    var account = accounts[i]
+    if (!isPlainObject(account) || !isPlainObject(account.account)) continue
+    var info = account.account.data
+    if (!isPlainObject(info) || !isPlainObject(info.parsed)) continue
+    var parsed = info.parsed.info
+    if (!isPlainObject(parsed) || !isPlainObject(parsed.tokenAmount)) continue
+    var raw = Number(parsed.tokenAmount.amount)
+    if (!isFinite(raw) || raw < 0) return null
+    total += raw
+  }
+  // No token account is not a broken answer: it is a wallet that has never
+  // held this token, which holds none of it.
+  return total / Math.pow(10, decimals)
+}
+
+// TronGrid answers the whole account, and its TRC-20 holdings arrive as a
+// list of one-key objects -- { contract: "amount" } -- rather than a table.
+// A contract that is not the one this card is about is not this card's
+// number, so an account full of other tokens reads as zero of ours.
+function parseTronBalance(data, contract, decimals) {
+  if (!isPlainObject(data) || data.success !== true) return null
+  var accounts = data.data
+  if (!Array.isArray(accounts)) return null
+  // An account that has never been activated is absent from Tron entirely,
+  // which is a truthful zero rather than a failure to answer.
+  if (accounts.length === 0) return 0
+  var account = accounts[0]
+  if (!isPlainObject(account)) return null
+  var held = account.trc20
+  if (!Array.isArray(held)) return 0
+  var total = 0
+  for (var i = 0; i < held.length; i++) {
+    var row = held[i]
+    if (!isPlainObject(row)) continue
+    for (var key in row) {
+      if (!Object.prototype.hasOwnProperty.call(row, key)) continue
+      if (key !== contract) continue
+      var raw = Number(row[key])
+      if (!isFinite(raw) || raw < 0) return null
+      total += raw
+    }
+  }
+  return total / Math.pow(10, decimals)
+}
+
 // A balance in whole coins, or null for anything that did not parse. Null is
 // the card saying it does not know, which is never the same as zero.
-function parseCryptoBalance(chain, raw) {
-  var entry = cryptoChain(chain)
-  if (!entry) return null
+function parseCryptoBalance(coin, network, raw) {
+  var placement = cryptoPlacement(coin, network)
+  var host = cryptoNetwork(network)
+  if (!placement || !host) return null
   var data = raw
   if (typeof raw === "string") {
     try { data = JSON.parse(raw) } catch (e) { return null }
   }
   if (isPlainObject(data) && data.error !== undefined && data.error !== null) return null
+  var token = placement.contract || placement.mint || ""
   var amount
-  if (entry.kind === "esplora") amount = parseEsploraBalance(data, entry.decimals)
-  else if (entry.kind === "evm") amount = parseHexBalance(data, entry.decimals)
-  else amount = parseLamportBalance(data, entry.decimals)
+  if (host.kind === "esplora") amount = parseEsploraBalance(data, placement.decimals)
+  else if (host.kind === "evm") amount = parseHexBalance(data, placement.decimals)
+  else if (host.kind === "tron") amount = parseTronBalance(data, token, placement.decimals)
+  else if (token) amount = parseSplBalance(data, placement.decimals)
+  else amount = parseLamportBalance(data, placement.decimals)
   if (amount === null || amount < 0 || amount > MAX_CRYPTO_AMOUNT) return null
   return amount
 }
@@ -4158,10 +4524,19 @@ function cryptoAddressShort(address) {
 // The label a crypto card wears: whatever was typed, else the ticker symbol.
 // The address is deliberately not the fallback -- a wallpaper that announces
 // which addresses you hold is not a default anyone opted into.
-function cryptoCardLabel(settings, chain) {
+// The name on the card. Yours if you gave it one, and otherwise the ticker --
+// plus the network, but only for a coin that is on more than one.
+//
+// That condition is the whole point: "BTC · Bitcoin" says nothing twice, but
+// two USDT cards at two addresses on two chains are otherwise the same card
+// drawn twice, and which one is which is the first thing you want to know.
+function cryptoCardLabel(settings, coin, network) {
   var typed = isPlainObject(settings) ? clampString(settings.label) : ""
   if (typed) return typed
-  return cryptoSymbol(chain)
+  var symbol = cryptoSymbol(coin)
+  if (cryptoNetworksFor(coin).length < 2) return symbol
+  var where = cryptoNetworkLabel(network)
+  return where ? symbol + " · " + where : symbol
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -4182,6 +4557,7 @@ if (typeof module !== "undefined" && module.exports) {
     catalogEntry: catalogEntry,
     catalogTypes: catalogTypes,
     settingsSchema: settingsSchema,
+    migrateSettings: migrateSettings,
     settingSpec: settingSpec,
     defaultsFor: defaultsFor,
     coerceSetting: coerceSetting,
@@ -4195,21 +4571,28 @@ if (typeof module !== "undefined" && module.exports) {
     repoUrl: repoUrl,
     compactCount: compactCount,
     sinceLabel: sinceLabel,
-    CRYPTO_CHAINS: CRYPTO_CHAINS,
+    CRYPTO_COINS: CRYPTO_COINS,
+    CRYPTO_NETWORKS: CRYPTO_NETWORKS,
     CRYPTO_CURRENCIES: CRYPTO_CURRENCIES,
     CRYPTO_PRICE_HOST: CRYPTO_PRICE_HOST,
-    CRYPTO_DEFAULT_CHAIN: CRYPTO_DEFAULT_CHAIN,
+    CRYPTO_DEFAULT_COIN: CRYPTO_DEFAULT_COIN,
     CRYPTO_DEFAULT_CURRENCY: CRYPTO_DEFAULT_CURRENCY,
     MAX_CRYPTO_PRICE: MAX_CRYPTO_PRICE,
     MAX_CRYPTO_AMOUNT: MAX_CRYPTO_AMOUNT,
     MAX_WRITABLE: MAX_WRITABLE,
-    cryptoChain: cryptoChain,
-    cryptoChainNames: cryptoChainNames,
+    cryptoCoin: cryptoCoin,
+    cryptoNetwork: cryptoNetwork,
+    cryptoCoinNames: cryptoCoinNames,
+    cryptoNetworkNames: cryptoNetworkNames,
+    cryptoPlacement: cryptoPlacement,
+    cryptoNetworksFor: cryptoNetworksFor,
     cryptoSymbol: cryptoSymbol,
+    cryptoNetworkLabel: cryptoNetworkLabel,
     isSafeCryptoAddress: isSafeCryptoAddress,
     isCryptoCurrency: isCryptoCurrency,
     cryptoCurrencyOf: cryptoCurrencyOf,
-    cryptoChainOf: cryptoChainOf,
+    cryptoCoinOf: cryptoCoinOf,
+    cryptoNetworkOf: cryptoNetworkOf,
     cryptoWalletKey: cryptoWalletKey,
     cryptoWalletsInUse: cryptoWalletsInUse,
     cryptoCoinsInUse: cryptoCoinsInUse,

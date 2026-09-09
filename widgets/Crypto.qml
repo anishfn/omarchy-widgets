@@ -48,18 +48,28 @@ Item {
 
   // ------------------------------------------------------------- settings
 
-  readonly property string chain: Model.cryptoChainOf(settings)
+  // The coin is what the card is about; the network is where the holding is.
+  // A coin on one network still has one, because everything below asks the
+  // pair rather than the coin -- there is no "no network" case to write.
+  readonly property string coin: Model.cryptoCoinOf(settings)
+  readonly property string network: Model.cryptoNetworkOf(settings)
   readonly property string currency: Model.cryptoCurrencyOf(settings)
   readonly property string address: String(settings.address || "")
   readonly property bool showFiat: settings.showFiat !== false
-  readonly property string label: Model.cryptoCardLabel(settings, chain)
-  readonly property string coin: {
-    var entry = Model.cryptoChain(chain)
+  readonly property string label: Model.cryptoCardLabel(settings, coin, network)
+
+  // CoinGecko's id for the coin, which is what the price table is keyed by.
+  // One tether is one tether wherever it is held, so five networks share a
+  // price and cost one lookup between them.
+  readonly property string priceId: {
+    var entry = Model.cryptoCoin(coin)
     return entry ? entry.coin : ""
   }
 
   readonly property bool wantsWallet: address.length > 0
-  readonly property bool addressUsable: wantsWallet && Model.isSafeCryptoAddress(chain, address)
+  // Checked against the network, not the coin: the address is an account on a
+  // chain, and what it is holding has no say in what it looks like.
+  readonly property bool addressUsable: wantsWallet && Model.isSafeCryptoAddress(network, address)
 
   // ------------------------------------------------------------- the data
 
@@ -71,10 +81,10 @@ Item {
   // balance has not arrived is not a wallet holding nothing.
   readonly property var balance: {
     if (!addressUsable) return null
-    var held = balances[Model.cryptoWalletKey(chain, address)]
+    var held = balances[Model.cryptoWalletKey(coin, network, address)]
     return held === undefined || held === null ? null : held
   }
-  readonly property var quote: Model.cryptoQuote(prices, coin, currency)
+  readonly property var quote: Model.cryptoQuote(prices, priceId, currency)
 
   // A wallet card is ready when the balance is in; a ticker when the price
   // is. Deliberately not both for the wallet: a balance with no price yet is

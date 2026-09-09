@@ -644,7 +644,7 @@ Item {
   //
   // Prices go to CoinGecko in a single call for every coin and every currency
   // anybody has on screen, which is what keeps a desktop of six of these
-  // cards down to one request. Balances go to each chain's own node, one
+  // cards down to one request. Balances go to each network's own node, one
   // wallet at a time through a queue, the way the repositories do -- there is
   // no batch endpoint for "these four addresses on three chains", and firing
   // them together would be four processes at once for a wallpaper.
@@ -656,7 +656,7 @@ Item {
 
   // currency -> coingecko coin id -> { price, change, series }
   property var cryptoPrices: ({})
-  // "chain:address" -> the balance in whole coins
+  // "coin:network:address" -> the balance in whole coins
   property var cryptoBalances: ({})
   property string cryptoError: ""
   property var cryptoQueue: []
@@ -735,10 +735,11 @@ Item {
     service.cryptoQueue = queue.slice(1)
     // Built again here rather than trusted from the queue: the address
     // becomes a path segment or the body of a POST, and cryptoBalanceCommand
-    // refuses one that does not match its chain's own shape.
-    var command = Model.cryptoBalanceCommand(wallet.chain, wallet.address)
+    // refuses one that does not match its network's own shape.
+    var command = Model.cryptoBalanceCommand(wallet.coin, wallet.network, wallet.address)
     if (!command) { Qt.callLater(service.startNextCryptoBalance); return }
-    cryptoBalanceProc.chain = wallet.chain
+    cryptoBalanceProc.coin = wallet.coin
+    cryptoBalanceProc.network = wallet.network
     cryptoBalanceProc.key = wallet.key
     cryptoBalanceProc.command = command
     cryptoBalanceProc.running = true
@@ -776,12 +777,14 @@ Item {
   Process {
     id: cryptoBalanceProc
     running: false
-    property string chain: ""
+    property string coin: ""
+    property string network: ""
     property string key: ""
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var amount = Model.parseCryptoBalance(cryptoBalanceProc.chain, text)
+        var amount = Model.parseCryptoBalance(cryptoBalanceProc.coin,
+          cryptoBalanceProc.network, text)
         if (amount !== null) {
           service.storeCryptoBalance(cryptoBalanceProc.key, amount)
           service.cryptoError = ""
@@ -1432,7 +1435,8 @@ Item {
         // Shortened, the way the calendar withholds its address: this answer
         // goes wherever the caller sends it, and a wallet is not a thing to
         // print in full for the convenience of a debug command.
-        out.push(Model.cryptoSymbol(wallets[w].chain) + " "
+        out.push(Model.cryptoSymbol(wallets[w].coin) + " on "
+          + Model.cryptoNetworkLabel(wallets[w].network) + " "
           + Model.cryptoAddressShort(wallets[w].address) + ": "
           + (held === undefined || held === null
             ? (service.cryptoError || "not fetched yet")

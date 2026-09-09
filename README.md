@@ -97,7 +97,7 @@ plugins land disabled.
 | **Weather** | Now, today's range, and the condition | `wttr.in` |
 | **GitHub** | A year of contributions, as many weeks as the card holds | `github.com` |
 | **Repo pulse** | Stars, forks, issues and open PRs; the name opens the repo | `api.github.com` |
-| **Crypto** | A wallet's balance and what it is worth, or just the coin's price | five coins over seven networks, `api.coingecko.com` |
+| **Crypto** | A wallet's balance and what it is worth, or just the coin's price | five coins over ten networks, `api.coingecko.com` |
 | **Calendar** | What is next, how long you have, and where it falls in the day | `calendar.google.com` |
 | **Todos** | Today's list, from a text file. Tick things off; the title opens it | local (a file) |
 | **Todoist** | What is due, from Todoist. Tick things off | `api.todoist.com` |
@@ -657,10 +657,22 @@ Ethereum, Tron, Solana, Polygon or BNB Chain.
 | Coin | Networks |
 |---|---|
 | Bitcoin | Bitcoin |
-| Ethereum | Ethereum |
-| Solana | Solana |
 | Litecoin | Litecoin |
+| Ethereum | Ethereum, Arbitrum, Optimism, Base |
+| Solana | Solana, Ethereum, BNB Chain |
 | Tether USD | Ethereum, Tron, Solana, Polygon, BNB Chain |
+
+**Ether on a rollup is still ether** — the same asset at the same account with
+the same eighteen decimals, and the only thing that differs is which node is
+asked. Arbitrum, Optimism and Base are rows in a table here rather than
+anything new.
+
+**SOL off Solana is a bridged token**, and worth knowing as one: the Ethereum
+entry is Wormhole's SOL and the BNB Chain entry is Binance-Peg SOL. Both are
+what a portfolio counts as your SOL and both are read from the token contract
+rather than from an account. Their decimals differ — nine on Ethereum, eighteen
+on BNB Chain — which is why decimals belong to the coin-and-network pair rather
+than to the coin, the same trap Binance-Peg USDT sets.
 
 The address is checked against the **network**, never the coin: your USDT on
 BNB Chain sits at an ordinary `0x` account, indistinguishable from the one
@@ -725,8 +737,11 @@ Two kinds of request, to different places, for different reasons.
 | Ethereum balance, and USDT on Ethereum | `ethereum-rpc.publicnode.com` | every 10 minutes |
 | Solana balance, and USDT on Solana | `api.mainnet-beta.solana.com` | every 10 minutes |
 | USDT on Polygon | `polygon-bor-rpc.publicnode.com` | every 10 minutes |
-| USDT on BNB Chain | `bsc-rpc.publicnode.com` | every 10 minutes |
+| USDT on BNB Chain, and SOL on it | `bsc-rpc.publicnode.com` | every 10 minutes |
 | USDT on Tron | `api.trongrid.io` | every 10 minutes |
+| ETH on Arbitrum | `arbitrum-one-rpc.publicnode.com` | every 10 minutes |
+| ETH on Optimism | `optimism-rpc.publicnode.com` | every 10 minutes |
+| ETH on Base | `base-rpc.publicnode.com` | every 10 minutes |
 
 A token is not read the same way as the chain's own coin. Ether is a question
 for the account; tether is a question for the contract, so those go out as an

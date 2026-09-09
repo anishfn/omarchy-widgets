@@ -3680,11 +3680,15 @@ test("the editor is offered the networks the chosen coin is actually on", () => 
   assert.deepEqual(keys({ coin: "bitcoin" }),
     ["coin", "network", "address", "label", "currency", "showFiat"])
   assert.deepEqual(networks({ coin: "bitcoin" }), ["bitcoin"])
-  assert.deepEqual(networks({ coin: "solana" }), ["solana"])
+  assert.deepEqual(networks({ coin: "litecoin" }), ["litecoin"])
 
-  // And for the one that is on five, it holds five, in picker order.
+  // And a coin on several holds them all, in picker order, with the one it is
+  // native to first.
   assert.deepEqual(networks({ coin: "tether" }),
     ["ethereum", "tron", "solana", "polygon", "bsc"])
+  assert.deepEqual(networks({ coin: "ethereum" }),
+    ["ethereum", "arbitrum", "optimism", "base"])
+  assert.deepEqual(networks({ coin: "solana" }), ["solana", "ethereum", "bsc"])
 
   // The narrowing is a display concern only. The catalogue still carries the
   // full list, because that is what a hand-edited config is coerced against
@@ -4010,7 +4014,11 @@ test("a wallet address never becomes the name of a widget", () => {
   assert.equal(Model.cryptoCardLabel({ address }, "litecoin", "litecoin"), "LTC")
   assert.equal(Model.cryptoCardLabel({ address, label: "Savings" }, "litecoin", "litecoin"),
     "Savings")
-  assert.equal(Model.cryptoCardLabel({}, "ethereum", "ethereum"), "ETH")
+  // Ether is on four networks now, so its cards name which one they are --
+  // the same rule USDT's do, applied by the same count rather than by a list
+  // of coins somebody has to remember to update.
+  assert.equal(Model.cryptoCardLabel({}, "ethereum", "ethereum"), "ETH · Ethereum")
+  assert.equal(Model.cryptoCardLabel({}, "ethereum", "base"), "ETH · Base")
 
   // A coin on one network says only its ticker; a coin on five says which of
   // them this card is, because otherwise two USDT cards are the same card.

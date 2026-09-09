@@ -269,7 +269,8 @@ function catalog() {
       network: ["api.coingecko.com", "mempool.space", "litecoinspace.org",
         "ethereum-rpc.publicnode.com", "api.mainnet-beta.solana.com",
         "polygon-bor-rpc.publicnode.com", "bsc-rpc.publicnode.com",
-        "api.trongrid.io"],
+        "api.trongrid.io", "arbitrum-one-rpc.publicnode.com",
+        "optimism-rpc.publicnode.com", "base-rpc.publicnode.com"],
       settings: [
         {
           key: "coin",
@@ -303,6 +304,9 @@ function catalog() {
             { value: "solana", label: "Solana" },
             { value: "polygon", label: "Polygon" },
             { value: "bsc", label: "BNB Chain" },
+            { value: "arbitrum", label: "Arbitrum" },
+            { value: "optimism", label: "Optimism" },
+            { value: "base", label: "Base" },
             { value: "litecoin", label: "Litecoin" }
           ]
         },
@@ -4079,6 +4083,27 @@ var CRYPTO_NETWORKS = {
     host: "bsc-rpc.publicnode.com",
     endpoint: "https://bsc-rpc.publicnode.com"
   },
+  arbitrum: {
+    label: "Arbitrum",
+    shape: "evm",
+    kind: "evm",
+    host: "arbitrum-one-rpc.publicnode.com",
+    endpoint: "https://arbitrum-one-rpc.publicnode.com"
+  },
+  optimism: {
+    label: "Optimism",
+    shape: "evm",
+    kind: "evm",
+    host: "optimism-rpc.publicnode.com",
+    endpoint: "https://optimism-rpc.publicnode.com"
+  },
+  base: {
+    label: "Base",
+    shape: "evm",
+    kind: "evm",
+    host: "base-rpc.publicnode.com",
+    endpoint: "https://base-rpc.publicnode.com"
+  },
   solana: {
     label: "Solana",
     shape: "solana",
@@ -4121,17 +4146,38 @@ var CRYPTO_COINS = {
     coin: "bitcoin",
     networks: [{ network: "bitcoin", decimals: 8 }]
   },
+  // Ether on the rollups is still ether: the same asset, the same 18
+  // decimals, held at the same account, read with the same eth_getBalance --
+  // the only thing that differs is which node is asked. So these are rows
+  // rather than anything new, which is the table doing its job.
   ethereum: {
     symbol: "ETH",
     label: "Ethereum",
     coin: "ethereum",
-    networks: [{ network: "ethereum", decimals: 18 }]
+    networks: [
+      { network: "ethereum", decimals: 18 },
+      { network: "arbitrum", decimals: 18 },
+      { network: "optimism", decimals: 18 },
+      { network: "base", decimals: 18 }
+    ]
   },
+  // Native SOL exists on exactly one chain. The other two entries are the
+  // bridged tokens people actually hold and expect a portfolio to count --
+  // Wormhole's SOL on Ethereum and Binance-Peg SOL on BNB Chain -- and both
+  // were read off the contracts rather than off a webpage: symbol SOL,
+  // 9 decimals on Ethereum and 18 on BNB Chain, which is the same trap
+  // Binance-Peg USDT sets and the same reason decimals live in this table.
   solana: {
     symbol: "SOL",
     label: "Solana",
     coin: "solana",
-    networks: [{ network: "solana", decimals: 9 }]
+    networks: [
+      { network: "solana", decimals: 9 },
+      { network: "ethereum", decimals: 9,
+        contract: "0xD31a59c85aE9D8edEFeC411D448f90841571b89c" },
+      { network: "bsc", decimals: 18,
+        contract: "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF" }
+    ]
   },
   litecoin: {
     symbol: "LTC",

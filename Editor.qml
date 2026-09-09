@@ -60,7 +60,31 @@ Item {
     return out
   }
 
-  function close() { if (service) service.editing = false }
+  // Whether the "leave?" prompt is up. On the root rather than per window, so
+  // Escape on one screen puts the same question on all of them and answering
+  // it anywhere answers it everywhere.
+  property bool confirming: false
+
+  readonly property bool dirty: service ? service.editDirty === true : false
+
+  function close() {
+    root.confirming = false
+    if (service) service.editing = false
+  }
+
+  // Escape, and the Done button, both come here. A prompt is only worth
+  // showing when there is something to decide: leave the editor without having
+  // moved anything and the question "keep or discard?" has no answer that
+  // means anything, so it is not asked.
+  function leave() {
+    if (root.dirty) root.confirming = true
+    else root.close()
+  }
+
+  function discard() {
+    if (service) service.discardEdits()
+    root.close()
+  }
 
   Variants {
     model: Quickshell.screens
@@ -228,10 +252,26 @@ Item {
           id: keyCatcher
           anchors.fill: parent
           focus: true
-          Keys.onEscapePressed: win.dragging ? win.dragCancel() : root.close()
+          // Escape reads as "back out of the innermost thing that is open",
+          // so it unwinds in that order: the drag first, then the question,
+          // then the editor.
+          //
+          // While the question is up it answers for itself -- it owns Escape
+          // and Enter, and the arrows and Tab that move between its two
+          // buttons -- so nothing here second-guesses it. Its Escape keeps the
+          // changes and leaves, which is what pressing Escape asked for in the
+          // first place.
           Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-              root.close()
+            if (root.confirming && leaveDialog.handleKey(event)) {
+              event.accepted = true
+              return
+            }
+            if (event.key === Qt.Key_Escape) {
+              if (win.dragging) win.dragCancel()
+              else root.leave()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+              root.leave()
               event.accepted = true
             }
           }
@@ -828,7 +868,7 @@ Item {
                 Button {
                   anchors.bottom: parent.bottom
                   text: "Done"
-                  tooltipText: "Leave the editor. Nothing here needs saving."
+                  tooltipText: "Leave the editor"
                   bordered: true
                   selected: true
                   foreground: root.foreground
@@ -837,7 +877,7 @@ Item {
                   fontSize: Style.font.bodySmall
                   horizontalPadding: Style.space(12)
                   verticalPadding: Style.space(7)
-                  onClicked: root.close()
+                  onClicked: root.leave()
                 }
               }
 
@@ -888,6 +928,36 @@ Item {
               return inst ? root.sourceFor(inst.type) : ""
             }
           }
+        }
+
+        // ---------------------------------------------------- leaving
+
+        // The shell's own confirm dialog rather than one of this plugin's
+        // making: it is themed with everything else on the desktop, it already
+        // knows arrows, Tab and Enter, and it paints the second button as the
+        // destructive one -- which is exactly what discarding is.
+        //
+        // Last in the file, so it is last in the stacking order and sits over
+        // the grid, the toolbar and the inspector alike. A question you can
+        // click behind is not one.
+        //
+        // Every accidental way out of this -- Escape, a click on the scrim,
+        // Enter on the default -- keeps the changes. Putting the desktop back
+        // is a thing you have to mean, and the only edit here that cannot be
+        // undone by doing it again.
+        ConfirmDialog {
+          id: leaveDialog
+          anchors.fill: parent
+          z: 100
+          opened: root.confirming
+          message: "Keep the changes you made?\n\nThey are already on your desktop. "
+            + "Discarding puts it back the way it was when you opened the editor."
+          cancelText: "Keep"
+          confirmText: "Discard"
+          // The safe one, so Enter and Escape agree with each other.
+          selectedIndex: 0
+          onCanceled: root.close()
+          onConfirmed: root.discard()
         }
       }
     }

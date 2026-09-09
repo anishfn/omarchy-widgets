@@ -678,10 +678,12 @@ function refineCryptoSchema(schema, settings) {
   var out = []
   for (var i = 0; i < schema.length; i++) {
     if (schema[i].key !== "network") { out.push(schema[i]); continue }
-    // A coin on one network has nothing to ask about, and a picker with one
-    // entry is a control that cannot be worked. The row goes rather than
-    // sitting there greyed: the answer is not hidden, it is on the coin.
-    if (networks.length < 2) continue
+    // A coin on one network still shows the row, with that one network in it.
+    // It reads as a statement rather than a question -- which is the useful
+    // thing: "this card is on Bitcoin" is worth being able to see without
+    // opening a picker to find out, and a row that comes and goes as you try
+    // coins is a panel that moves under the cursor.
+    if (networks.length === 0) continue
     var options = []
     for (var n = 0; n < networks.length; n++) {
       options.push({ value: networks[n], label: cryptoNetworkLabel(networks[n]) })

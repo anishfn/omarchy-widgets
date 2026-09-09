@@ -3638,6 +3638,67 @@ test("the balance request is built to each chain's shape, or not at all", () => 
   assert.equal(Model.cryptoBalanceCommand("nonsense", "nonsense", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), null)
 })
 
+test("a config survives the round trip the editor's discard depends on", () => {
+  // Discarding an edit puts back a string the service took when the editor
+  // opened, by parsing and normalizing it. That is only a restore if the trip
+  // out and back is lossless -- otherwise "put it back the way it was" quietly
+  // means "put back something near it", which is worse than not offering.
+  //
+  // Serialized exactly the way Service.qml does it, including the one key it
+  // deliberately drops: a widget's `opacity` is null when it follows the
+  // layout, and absent is the honest way to write that.
+  const serialize = (config) => JSON.stringify(config,
+    (key, value) => (key === "opacity" && value === null) ? undefined : value, 2) + "\n"
+
+  const before = Model.normalizeConfig({
+    layout: { side: "right", columns: 3, cellSize: 180, opacity: 0.6 },
+    widgets: [
+      { id: "clock", type: "clock", enabled: true, col: 0, row: 0,
+        settings: { timezone: "Asia/Kolkata", format: "HH:mm", ticks: true } },
+      // One with an override and one without, because the override is the
+      // key that is dropped when it is null.
+      { id: "c1", type: "crypto", enabled: true, col: 1, row: 0, opacity: 0.4,
+        settings: { coin: "tether", network: "bsc", address: "", currency: "usd" } },
+      { id: "t1", type: "todos", enabled: false, col: 0, row: 1 }
+    ]
+  })
+
+  const after = Model.normalizeConfig(JSON.parse(serialize(before)))
+  assert.deepEqual(after, before)
+  // And the trip is stable rather than merely reversible once: a restore that
+  // drifted on the second pass would drift on the tenth.
+  assert.equal(serialize(after), serialize(before))
+})
+
+test("the editor is offered the networks the chosen coin is actually on", () => {
+  const keys = (settings) => Model.settingsSchema("crypto", settings).map((s) => s.key)
+  const networks = (settings) => Model.settingsSchema("crypto", settings)
+    .find((s) => s.key === "network").options.map((o) => o.value)
+
+  // Every coin shows the row. For four of them it holds one entry and reads
+  // as a statement rather than a question.
+  assert.deepEqual(keys({ coin: "bitcoin" }),
+    ["coin", "network", "address", "label", "currency", "showFiat"])
+  assert.deepEqual(networks({ coin: "bitcoin" }), ["bitcoin"])
+  assert.deepEqual(networks({ coin: "solana" }), ["solana"])
+
+  // And for the one that is on five, it holds five, in picker order.
+  assert.deepEqual(networks({ coin: "tether" }),
+    ["ethereum", "tron", "solana", "polygon", "bsc"])
+
+  // The narrowing is a display concern only. The catalogue still carries the
+  // full list, because that is what a hand-edited config is coerced against
+  // and a coercion that only knew about today's coin would throw away a
+  // network the file is right about.
+  const full = Model.catalogEntry("crypto").settings
+    .find((s) => s.key === "network").options.map((o) => o.value)
+  assert.equal(full.length, Model.cryptoNetworkNames().length)
+
+  // A type with nothing to refine is handed back untouched.
+  assert.deepEqual(Model.settingsSchema("clock", { coin: "tether" }),
+    Model.settingsSchema("clock"))
+})
+
 test("a token balance is read from the token, not from the account", () => {
   const evm = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 

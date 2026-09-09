@@ -50,6 +50,39 @@ Item {
   // it is.
   property bool editing: false
 
+  // What the desktop looked like when the editor opened, as text.
+  //
+  // Every edit is applied and written as it is made -- that is deliberate and
+  // it is what makes the editor feel like arranging a desk rather than filling
+  // in a form. The cost is that there is no unsaved state to throw away, so
+  // "discard" has to mean "put back", and putting back needs something kept.
+  // One serialised string, taken once at the door.
+  property string editBaseline: ""
+
+  // Whether anything has actually changed since then. Compared as text rather
+  // than by tracking edits: dragging a card away and back again is not a
+  // change, and a prompt that asks about one is a prompt that trains people to
+  // dismiss it.
+  readonly property bool editDirty: service.editing
+    && service.editBaseline !== ""
+    && service.editBaseline !== serialize()
+
+  // Put the desktop back the way it was when the editor opened, and write that
+  // immediately rather than on the save timer -- this is the one edit whose
+  // whole point is that it is the last one.
+  function discardEdits() {
+    if (!service.editBaseline) return
+    var restored
+    try {
+      restored = Model.normalizeConfig(JSON.parse(service.editBaseline))
+    } catch (e) {
+      // Nothing to put back is better than putting back nonsense.
+      return
+    }
+    apply(restored)
+    service.save()
+  }
+
   // Which widget the editor's controls act on. It lives here rather than in
   // the editor so it survives the editor being closed and reopened — you come
   // back to the widget you were working on — and so anything else that wants
@@ -296,7 +329,19 @@ Item {
     zoneListProc.running = true
   }
 
-  onEditingChanged: if (service.editing) service.loadTimezones()
+  // Everything that happens at the editor's door, in one handler because an
+  // object can only have the one.
+  onEditingChanged: {
+    if (service.editing) {
+      service.loadTimezones()
+      // Taken before the first edit can land, and only when there is
+      // something true to take: a baseline read off a config that has not
+      // loaded yet would offer to "put back" an empty desktop.
+      service.editBaseline = service.configLoaded ? serialize() : ""
+    } else {
+      service.editBaseline = ""
+    }
+  }
 
   Process {
     id: zoneListProc

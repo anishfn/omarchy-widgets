@@ -345,7 +345,24 @@ including on the command line.
 
 **Arrange…** in the same popup opens the layout editor: the desktop dims, the
 grid appears under your widgets, and you can drag them around. Escape or
-**Done** closes it.
+**Done** takes you back to the desktop.
+
+**If you changed anything, it asks on the way out.** Not because there is
+something unsaved — every edit here lands on your desktop and in the config
+file as you make it, which is what lets you arrange by eye rather than by
+filling in a form. The question is the other one: **Keep** leaves as you are,
+and **Discard** puts the desktop back the way it looked when you opened the
+editor.
+
+Change nothing and it does not ask. Dragging a card away and back again counts
+as nothing, because the check compares the config rather than counting edits —
+a prompt that fires when the answer does not matter is a prompt people learn
+to dismiss without reading.
+
+Every accidental way out keeps your changes: Escape at the question, a click
+outside it, or Enter on the button it starts on. Putting the desktop back is
+the one thing here you have to mean, because it is the one edit you cannot
+undo by doing it again.
 
 <p align="center">
   <img src="assets/editor.jpg" alt="The layout editor: the grid under the widgets, and the chrome in one bottom-centred column — the inspector for the selected widget with its settings flowing four to a line, the tray of switched-off widgets, and the bar of layout controls" width="880">
@@ -624,11 +641,13 @@ Litecoin or Tether USD — then paste an **Address**. **Currency** picks the
 money it is valued in, and **Label** overrides the ticker symbol above the
 number.
 
-**A coin that lives on more than one chain also asks where.** USDT is the same
-token on five networks and the balance is a different number on each, so
-picking it adds a **Network** row: Ethereum, Tron, Solana, Polygon or BNB
-Chain. The four coins that live in one place do not ask a question with one
-answer — the row is not there at all.
+**A Network row sits under the coin, and says where the holding is.** For
+Bitcoin, Ethereum, Solana and Litecoin it holds one entry, because that is how
+many chains those coins live on — it reads as a statement rather than a
+question, which is the useful thing: you can see what a card is on without
+opening a picker to find out. USDT is the same token on five networks and the
+balance is a different number on each, so for USDT the row is a real choice:
+Ethereum, Tron, Solana, Polygon or BNB Chain.
 
 | Coin | Networks |
 |---|---|

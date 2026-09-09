@@ -707,15 +707,45 @@ Item {
   // The not-loaded state, where the rest of the card would be. Said in
   // place rather than hidden: a card that vanishes because a plugin is off
   // is a hole in the grid with no explanation.
-  Text {
+  //
+  // The header already says "not loaded", so this does not say it twice. It
+  // says the part the header cannot: which plugin, and the line that gets it.
+  // Nothing installs that plugin on your behalf -- not this card and not the
+  // install script -- so this is the only place the name is ever offered, and
+  // an empty square repeating a word you have already read is a dead end.
+  Column {
     anchors.centerIn: parent
+    width: parent.width - root.pad * 4
+    spacing: Math.round(root.unit * 0.05)
     visible: !root.live
-    text: "Omate is not loaded"
-    textFormat: Text.PlainText
-    color: root.faint
-    font.family: root.fontFamily
-    font.pixelSize: root.bodySize
-    renderType: Text.NativeRendering
+
+    Text {
+      width: parent.width
+      horizontalAlignment: Text.AlignHCenter
+      wrapMode: Text.Wrap
+      text: "The pet lives in a plugin of its own."
+      textFormat: Text.PlainText
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: root.bodySize
+      renderType: Text.NativeRendering
+    }
+
+    // The command, whole and copyable by eye. Wrapped anywhere rather than at
+    // word boundaries: a url that breaks mid-token still reads as one line to
+    // retype, where one that overflows the card reads as a shorter url than
+    // it is.
+    Text {
+      width: parent.width
+      horizontalAlignment: Text.AlignHCenter
+      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+      text: "omarchy plugin add\nhttps://github.com/Palccod/Omate.git"
+      textFormat: Text.PlainText
+      color: root.faint
+      font.family: root.fontFamily
+      font.pixelSize: root.smallSize
+      renderType: Text.NativeRendering
+    }
   }
 
   // ------------------------------------------------------------------ stepper

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "anishfn.widgets",
   "name": "Widgets",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "author": "anishfn",
   "license": "MIT",
   "description": "Desktop widgets that sit on your wallpaper and take their colors from your Omarchy theme. Choose which ones are on screen from the bar.",

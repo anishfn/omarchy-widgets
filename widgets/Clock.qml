@@ -28,6 +28,10 @@ Item {
   // than it is tall does not get a headline taller than it has room for.
   readonly property real unit: Math.min(width, height)
 
+  // The same pad the weather card uses, so a headline that rows up with the
+  // weather's temperature stands on the same geometry.
+  readonly property real pad: Math.round(unit * 0.115)
+
   // A label the user wrote wins; otherwise the zone names itself, so picking
   // "Asia/Kolkata" is the only thing anyone has to do to get a labelled world
   // clock. Your own clock stays unlabelled — you know where you are.
@@ -106,27 +110,54 @@ Item {
   }
 
   Column {
-    anchors.centerIn: parent
-    spacing: Math.round(root.unit * 0.02)
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: parent.top
+    anchors.topMargin: root.pad
+    // The weather card's eyebrow-to-headline gap, so the two headlines land
+    // on the same row.
+    spacing: Math.round(root.unit * 0.04)
 
-    Text {
-      anchors.horizontalCenter: parent.horizontalCenter
-      // Same fit-to-card guard as the time: a label is user-written and can
-      // be any length. A Text given a width aligns left unless told
-      // otherwise, so the centring has to be said out loud once the line
-      // stops being exactly as wide as its glyphs.
-      width: Math.round(root.width * 0.72)
-      horizontalAlignment: Text.AlignHCenter
-      visible: root.label.length > 0
-      text: root.label
-      textFormat: Text.PlainText
-      color: root.dim
-      font.family: root.fontFamily
-      font.pixelSize: Math.max(8, Math.round(root.unit * 0.075))
-      minimumPixelSize: Math.max(7, Math.round(root.unit * 0.05))
-      fontSizeMode: Text.HorizontalFit
-      font.letterSpacing: Math.round(root.unit * 0.075) * 0.12
-      renderType: Text.NativeRendering
+    // The eyebrow, where the weather card keeps its place: the slot the
+    // label fills when there is one, and the space that stays so the
+    // headline below rows up with the weather card's either way.
+    Item {
+      width: parent.width
+      height: measure.implicitHeight
+
+      // The weather card's place line, measured rather than copied, so the
+      // headline below lands on the exact same pixels the weather card's
+      // temperature does. It never draws; it just holds the slot open.
+      Text {
+        id: measure
+        visible: false
+        text: " "
+        textFormat: Text.PlainText
+        font.family: root.fontFamily
+        font.pixelSize: Math.max(9, Math.round(root.unit * 0.085))
+        renderType: Text.NativeRendering
+      }
+
+      Text {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
+        // Same fit-to-card guard as the time: a label is user-written and
+        // can be any length. A Text given a width aligns left unless told
+        // otherwise, so the centring has to be said out loud once the line
+        // stops being exactly as wide as its glyphs.
+        width: Math.round(root.width * 0.72)
+        horizontalAlignment: Text.AlignHCenter
+        visible: root.label.length > 0
+        text: root.label
+        textFormat: Text.PlainText
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Math.max(8, Math.round(root.unit * 0.075))
+        minimumPixelSize: Math.max(7, Math.round(root.unit * 0.05))
+        fontSizeMode: Text.HorizontalFit
+        font.letterSpacing: Math.round(root.unit * 0.075) * 0.12
+        renderType: Text.NativeRendering
+      }
     }
 
     // The time with its meridian: the digits stay the headline of the card and
@@ -141,6 +172,10 @@ Item {
       anchors.horizontalCenter: parent.horizontalCenter
       width: Math.round(root.width * 0.72)
       height: timePart.height
+      // A few pixels lower, so the headline reads level with the weather
+      // card's at the eye rather than at its top edge. The shift is
+      // paint-only: nothing above or below the time moves with it.
+      transform: Translate { y: Math.round(root.unit * 0.025) }
 
       readonly property real gap: Math.max(2, Math.round(root.unit * 0.008))
       readonly property real pair: timePart.implicitWidth
@@ -160,11 +195,12 @@ Item {
         textFormat: Text.PlainText
         color: root.foreground
         font.family: root.fontFamily
-        // The weather card's headline size, so the two cards agree
-        // about what a headline is. Long times — wide by nature at 12 hours —
-        // shrink to fit rather than spill past the ring; formats that already
-        // fit are untouched.
-        font.pixelSize: Math.max(14, Math.round(root.unit * 0.24))
+        // The clock's headline leans toward the weather card's from the
+        // other side: the clock's a touch larger, the weather's a touch
+        // smaller, and the two land closer to the middle. A 12-hour time is
+        // wide by nature, so it still shrinks to fit rather than spill past
+        // the ring; formats that already fit are untouched.
+        font.pixelSize: Math.max(14, Math.round(root.unit * 0.27))
         minimumPixelSize: Math.max(10, Math.round(root.unit * 0.1))
         fontSizeMode: Text.HorizontalFit
         font.weight: Font.Bold

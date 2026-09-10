@@ -135,7 +135,9 @@ Item {
       text: root.temperature
       color: root.foreground
       font.family: root.fontFamily
-      font.pixelSize: Math.max(14, Math.round(root.unit * 0.24))
+      // One step under the clock's headline, so the two cards read as a
+      // ladder of one rather than two headlines disagreeing about size.
+      font.pixelSize: Math.max(14, Math.round(root.unit * 0.22))
       font.weight: Font.Bold
       renderType: Text.NativeRendering
     }

@@ -172,12 +172,12 @@ Item {
 
   // Which nothing the card is saying: unset, unreachable, still loading, or
   // a day that is genuinely clear. Events ending do not earn a sentence of
-  // their own -- the card says "Nothing scheduled today" whether the day
+  // their own -- the card says "Nothing scheduled" whether the day
   // never had a plan or simply ran out of one.
   readonly property string emptyText: {
     if (!configured) return icsUrl === "" ? "Add your calendar" : "That is not an iCal address"
     if (!ready) return error === "unavailable" ? "Calendar unavailable" : "Loading…"
-    return "Nothing scheduled today"
+    return "Nothing scheduled"
   }
 
   // ------------------------------------------------------------ the day bar
@@ -239,17 +239,47 @@ Item {
       renderType: Text.NativeRendering
     }
 
-    Text {
+    // A genuinely clear day gets the card's one accent: a vertical hairline
+    // the sentence leans on. A card that cannot answer yet -- unpublished,
+    // unreachable, still loading -- stays the plain sentence, because the
+    // hairline is the answer's, not the question's.
+    Item {
       width: parent.width
-      textFormat: Text.PlainText
-      text: root.emptyText
-      color: root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: Math.max(12, Math.round(root.unit * 0.13))
-      font.weight: Font.Bold
-      wrapMode: Text.Wrap
-      maximumLineCount: 2
-      renderType: Text.NativeRendering
+      height: emptyText.implicitHeight
+
+      Rectangle {
+        id: emptyBar
+
+        anchors.left: parent.left
+        anchors.verticalCenter: emptyText.verticalCenter
+        visible: root.ready
+        width: Math.max(4, Math.round(root.unit * 0.04))
+        // A couple of pixels taller than the sentence, so the hairline pokes out
+        // past it top and bottom instead of ending exactly where it does.
+        height: emptyText.height + Math.round(root.unit * 0.01)
+        radius: width / 2
+        color: root.accent
+      }
+
+      Text {
+        id: emptyText
+
+        anchors.left: parent.left
+        anchors.leftMargin: emptyBar.visible
+          ? emptyBar.width + Math.round(root.unit * 0.045) : 0
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: Math.round(root.unit * 0.03)
+        textFormat: Text.PlainText
+        text: root.emptyText
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Math.max(12, Math.round(root.unit * 0.13))
+        font.weight: Font.Bold
+        wrapMode: Text.Wrap
+        maximumLineCount: 2
+        renderType: Text.NativeRendering
+      }
     }
   }
 

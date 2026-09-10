@@ -171,11 +171,13 @@ Item {
   }
 
   // Which nothing the card is saying: unset, unreachable, still loading, or
-  // genuinely a clear day.
+  // a day that is genuinely clear. Events ending do not earn a sentence of
+  // their own -- the card says "Nothing scheduled today" whether the day
+  // never had a plan or simply ran out of one.
   readonly property string emptyText: {
     if (!configured) return icsUrl === "" ? "Add your calendar" : "That is not an iCal address"
     if (!ready) return error === "unavailable" ? "Calendar unavailable" : "Loading…"
-    return "Nothing left today"
+    return "Nothing scheduled today"
   }
 
   // ------------------------------------------------------------ the day bar

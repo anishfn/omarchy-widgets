@@ -2596,6 +2596,41 @@ test("today's list holds what the day has left, not the week's", () => {
   assert.deepEqual(Model.todayEvents(events, NaN, 4, true), [])
 })
 
+test("an ended event drops out and the next one takes its place", () => {
+  const midnight = Model.startOfDay(NOW)
+  const at = (off) => midnight + off * 3600000
+  const morning = { start: at(9), end: at(10), allDay: false, summary: "standup" }
+  const afternoon = { start: at(14), end: at(15), allDay: false, summary: "design" }
+  const evening = { start: at(17), end: at(18), allDay: false, summary: "review" }
+
+  // Both upcoming: both show.
+  assert.deepEqual(summaries(Model.todayEvents([morning, afternoon], at(9), 8, true)),
+    ["standup", "design"])
+  // Morning ended: afternoon is the first remaining event.
+  assert.deepEqual(summaries(Model.todayEvents([morning, afternoon], at(10), 8, true)),
+    ["design"])
+  // One millisecond after the end: still excluded.
+  assert.deepEqual(summaries(Model.todayEvents([morning, afternoon], at(10) + 1, 8, true)),
+    ["design"])
+  // One millisecond before the end: still included.
+  assert.deepEqual(summaries(Model.todayEvents([morning, afternoon], at(10) - 1, 8, true)),
+    ["standup", "design"])
+  // Sole event ended: empty — the no-event state should show.
+  assert.deepEqual(summaries(Model.todayEvents([morning], at(10), 8, true)), [])
+  // Two ended, third remains.
+  assert.deepEqual(summaries(Model.todayEvents([morning, afternoon, evening], at(15), 8, true)),
+    ["review"])
+  // All ended: empty.
+  assert.deepEqual(summaries(Model.todayEvents([morning, afternoon, evening], at(18), 8, true)), [])
+  // Event ending exactly at now: excluded.
+  assert.deepEqual(summaries(Model.todayEvents([morning, afternoon], at(10), 8, true)),
+    ["design"], "event ending at now is past")
+  // An all-day event plus an ended timed event: all-day survives.
+  const allDay = { start: at(0), end: at(24), allDay: true, summary: "holiday" }
+  assert.deepEqual(summaries(Model.todayEvents([morning, allDay], at(10), 8, true)),
+    ["holiday"])
+})
+
 test("the small line under the card reaches exactly one day ahead", () => {
   const midnight = Model.startOfDay(NOW)
   const at = (off) => midnight + off * 3600000
@@ -2625,6 +2660,78 @@ test("a time is written the way the card's clock setting asks for it", () => {
   // An all-day event has no clock to give.
   assert.equal(Model.eventTimeLabel({ allDay: true, start: at(9, 0) }, false), "all day")
   assert.equal(Model.eventTimeLabel(null, false), "")
+})
+
+test("the bottom line reads the next real event past a bare day", () => {
+  const midnight = Model.startOfDay(NOW)
+  const at = (off, mins) => midnight + off * 3600000 + (mins || 0) * 60000
+  const events = [
+    { start: at(13), end: at(14), allDay: false, summary: "Gym" },
+    { start: at(48), end: at(72), allDay: true, summary: "Holiday" }
+  ]
+  // Tomorrow (day+1) is bare, so the walk picks up day+2 instead.
+  const away = Model.nextAwayEvent(events, NOW, 60, true)
+  assert.equal(away.days, 2)
+  assert.equal(away.event.summary, "Holiday")
+  // When tomorrow has one, tomorrow wins and the walk does not go further.
+  const withTomorrow = [
+    { start: at(20), end: at(21), allDay: false, summary: "Gym" },
+    { start: at(24, 30), end: at(26), allDay: false, summary: "Standup" }
+  ]
+  const near = Model.nextAwayEvent(withTomorrow, NOW, 60, true)
+  assert.equal(near.days, 1)
+  assert.equal(near.event.summary, "Standup")
+  // A calendar with nothing ahead at all stays quiet.
+  assert.equal(Model.nextAwayEvent([{ start: at(20), end: at(21), allDay: false }], NOW, 60, true), null)
+  assert.equal(Model.nextAwayEvent(null, NOW, 60, true), null)
+  assert.equal(Model.nextAwayEvent(events, NaN, 60, true), null)
+})
+
+test("a twelve-hour clock never mixes 24-hour hours with a meridian", () => {
+  const d = (h, m, s) => new Date(2026, 8, 5, h, m, s || 0).getTime()
+  const face = (h, m, fmt) => {
+    const f = Model.clockFace(d(h, m), fmt)
+    return f.digits + (f.meridian ? " " + f.meridianText : "")
+  }
+  // The user's exact cases: twelve-hour hours run 1-12, no leading zero.
+  assert.equal(face(0, 0, "hh:mm AP"), "12:00 AM", "midnight is twelve")
+  assert.equal(face(7, 24, "hh:mm AP"), "7:24 AM")
+  assert.equal(face(12, 0, "hh:mm AP"), "12:00 PM", "noon is twelve")
+  assert.equal(face(19, 24, "hh:mm AP"), "7:24 PM")
+  assert.equal(face(23, 59, "hh:mm AP"), "11:59 PM")
+  // Twenty-four-hour stays 00-23 with no meridian.
+  assert.equal(face(0, 0, "HH:mm"), "00:00")
+  assert.equal(face(7, 24, "HH:mm"), "07:24")
+  assert.equal(face(12, 0, "HH:mm"), "12:00")
+  assert.equal(face(19, 24, "HH:mm"), "19:24")
+  // The other shapes keep their own separators and seconds.
+  assert.equal(face(19, 24, "HH:mm:ss"), "19:24:00")
+  assert.equal(face(19, 24, "HH mm"), "19 24")
+  // Even a format that asks for both a meridian and "HH" is read as 12-hour:
+  // the meridian wins, so "19:24 PM" is impossible.
+  assert.equal(face(23, 15, "HH:mm AP"), "11:15 PM")
+  // The calendar and the clock card read the same meridian decision.
+  assert.equal(Model.clockFormatMeridian("hh:mm AP"), true)
+  assert.equal(Model.clockFormatMeridian("HH:mm"), false)
+  assert.equal(Model.clockTwelveHour({ widgets: [{ type: "clock", settings: { format: "hh:mm AP" } }] }), true)
+  assert.equal(Model.clockTwelveHour({ widgets: [{ type: "clock", settings: { format: "HH:mm" } }] }), false)
+  assert.equal(Model.clockTwelveHour({ widgets: [{ type: "clock", enabled: false, settings: { format: "hh:mm AP" } }] }), false)
+  assert.equal(Model.clockTwelveHour(null), false)
+})
+
+test("today and tomorrow are found in the same feed", () => {
+  const midnight = Model.startOfDay(NOW)
+  const at = (off, mins) => midnight + off * 3600000 + (mins || 0) * 60000
+  const events = [
+    { start: at(13), end: at(14), allDay: false, summary: "Gym" },
+    { start: at(24, 30), end: at(26), allDay: false, summary: "Standup" },
+    { start: at(48), end: at(72), allDay: true, summary: "Holiday" }
+  ]
+  // The hero (today) and the tomorrow line come from one fetch's events.
+  assert.deepEqual(summaries(Model.todayEvents(events, NOW, 12, true)), ["Gym"])
+  assert.equal(Model.nextDayEvent(events, NOW, 1, true).summary, "Standup")
+  assert.equal(Model.nextDayEvent(events, NOW, 2, true).summary, "Holiday")
+  assert.equal(Model.nextDayEvent(events, NOW, 1, false).summary, "Standup")
 })
 
 test("how far off an event is, as the coarsest true thing", () => {

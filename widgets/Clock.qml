@@ -65,12 +65,14 @@ Item {
   // The display is split when the format asks for a meridian: the digits and
   // the "PM" become two pieces rather than one line, so the suffix can be
   // smaller and sit a few pixels off the digits instead of an entire
-  // space-width away at headline size. The only letters Qt's format language
-  // uses a or A for are the meridian, so stripping is unambiguous.
-  readonly property string timeFormat: format.replace(/\s?[Aa]P?/g, "").trim()
-  readonly property bool meridian: format !== timeFormat
-  readonly property string timeText: Qt.formatDateTime(shown, timeFormat)
-  readonly property string meridianText: meridian ? Qt.formatDateTime(shown, "AP") : ""
+  // space-width away at headline size. The split comes from the model, which
+  // also keeps the hour and the meridian agreeing -- Qt's format language
+  // draws "hh" as twenty-four-hour when it has no AP token in the same
+  // string, which is how "PM" once ended up glued to a 24-hour hour.
+  readonly property var face: Model.clockFace(shown.getTime(), format)
+  readonly property string timeText: root.face.digits
+  readonly property bool meridian: root.face.meridian
+  readonly property string meridianText: root.face.meridianText
 
   // Under the time: how far this zone is from yours when it is somewhere
   // else, and the date when it is here. A zone naming your own offset falls
@@ -105,9 +107,6 @@ Item {
 
   Column {
     anchors.centerIn: parent
-    // A few pixels below dead centre so the eye line of the time matches the
-    // weather card's headline rather than floating above it.
-    anchors.verticalCenterOffset: Math.round(root.unit * 0.02)
     spacing: Math.round(root.unit * 0.02)
 
     Text {
@@ -161,14 +160,14 @@ Item {
         textFormat: Text.PlainText
         color: root.foreground
         font.family: root.fontFamily
-        // The weather card's headline size, minus one, so the two cards agree
+        // The weather card's headline size, so the two cards agree
         // about what a headline is. Long times — wide by nature at 12 hours —
         // shrink to fit rather than spill past the ring; formats that already
         // fit are untouched.
-        font.pixelSize: Math.max(13, Math.round(root.unit * 0.24) - 1)
+        font.pixelSize: Math.max(14, Math.round(root.unit * 0.24))
         minimumPixelSize: Math.max(10, Math.round(root.unit * 0.1))
         fontSizeMode: Text.HorizontalFit
-        font.weight: Font.Light
+        font.weight: Font.Bold
         renderType: Text.NativeRendering
       }
 

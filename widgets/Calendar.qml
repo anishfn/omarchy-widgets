@@ -53,10 +53,9 @@ Item {
   readonly property real titleSize: Math.max(10, Math.round(unit * 0.085))
   readonly property real timeSize: Math.max(18, Math.round(unit * 0.24))
 
-  // Which composition this footprint gets. Both are questions about the
-  // card's own rectangle rather than about the numbers in the config, so a
-  // card resized in the editor changes drawing as you drag it.
-  readonly property bool wide: spanCols > 1
+  // Which composition this footprint gets -- a question about the card's own
+  // rectangle rather than about the numbers in the config, so a card resized
+  // in the editor changes drawing as you drag it.
   readonly property bool tall: spanRows > 1
 
   // --------------------------------------------------------------- the data
@@ -65,7 +64,11 @@ Item {
   readonly property bool configured: Model.isSafeIcsUrl(icsUrl)
   readonly property bool showAllDay: settings.showAllDay !== false
   readonly property bool showLocation: settings.showLocation === true
-  readonly property bool twelveHour: String(settings.format || "24h") === "12h"
+  // The clock widget owns the time format -- there is no calendar-specific
+  // choice left to make -- so the calendar reads whether it is a twelve-hour
+  // clock off the layout's clock, and switches the moment that clock does.
+  readonly property bool twelveHour: service && service.config
+    ? Model.clockTwelveHour(service.config) : false
 
   readonly property var calendar: service && service.calendars && configured
     ? service.calendars[icsUrl] : null
@@ -95,26 +98,59 @@ Item {
   readonly property var tomorrowEvent: ready
     ? Model.nextDayEvent(calendar.events, nowMs, 1, showAllDay) : null
 
-  // The tomorrow line, in the card's own words: "Tomorrow", then the clock's
-  // time of it (none for an all-day), then what it is.
+  // The earliest thing on any day after today. Tomorrow is the usual answer,
+  // but a calendar with nothing on tomorrow must still have a bottom line:
+  // the slot is for what is coming next, not a ledger that must be written
+  // day by day, so when tomorrow is bare it reads the next event instead.
+  readonly property var awayEvent: ready
+    ? Model.nextAwayEvent(calendar.events, nowMs, 60, showAllDay) : null
+
+  // The bottom line, in the card's own words: "Tomorrow" (or the day when
+  // the next event is further out), then the clock's time of it (none for
+  // an all-day), then what it is.
   readonly property string bottomText: {
-    if (!root.tomorrowEvent) return ""
-    var time = root.tomorrowEvent.allDay
-      ? "" : Model.eventTimeLabel(root.tomorrowEvent, root.twelveHour)
-    var label = "Tomorrow"
+    var entry = root.tomorrowEvent || (root.awayEvent ? root.awayEvent.event : null)
+    if (!entry) return ""
+    var when = root.tomorrowEvent
+      ? "Tomorrow" : Model.dayHeading(entry.start, root.nowMs)
+    var time = entry.allDay
+      ? "" : Model.eventTimeLabel(entry, root.twelveHour)
+    var label = when
     if (time !== "") label += "  ·  " + time
-    return label + "  ·  " + root.rowTitle(root.tomorrowEvent)
+    return label + "  ·  " + root.rowTitle(entry)
   }
 
-  // How much of the card's floor the footer claims, so the hero, the day bar
-  // and the tall list all stop short of it instead of running under it.
-  readonly property real footerSpace: bottomLine.visible
-    ? bottomLine.height + Math.round(root.unit * 0.03) : 0
+  // The card's vertical room splits into two, with the bar as the seam
+  // between them: the current-time section above -- the head, the hero, and
+  // on the tall size the list -- and the tomorrow line claiming the floor.
+  // The bar sits directly above that line, a deliberate gap away from it,
+  // and the list stops a little pad above the bar, so the separator's margin
+  // is even on both sides. Whatever the sections leave is the content's, never
+  // the bar's: it stays the seam between two sections, not a line drawn at
+  // random in the void.
+  //
+  // Every number here is in the body's own coordinates, measuring outwards
+  // from what is painted rather than from the card's edge, so they stay
+  // right as text wraps or the footprint changes size.
 
-  // How much of the card's floor the footer *and* the timeline claim, so the
-  // tall list stops short of both instead of running under them.
-  readonly property real barFloor: root.footerSpace
-    + (timeline.visible ? timeline.height + Math.round(root.unit * 0.06) : 0)
+  // The top of the tomorrow line, or the card's floor when there is none.
+  readonly property real footerTop: bottomLine.visible
+    ? body.height + root.pad
+      - Math.max(6, Math.round(root.pad - 4)) - bottomLine.height
+    : body.height
+
+  readonly property real timelineH: Math.max(6, Math.round(root.unit * 0.05))
+  // The pad below the bar, a touch larger than the one above it (barPad), so
+  // the seam reads as belonging to the tomorrow line it sits just over.
+  readonly property real barPad: Math.max(3, Math.round(root.unit * 0.025))
+  readonly property real barGap: Math.max(6, Math.round(root.unit * 0.05))
+
+  // The bar's top edge: directly above the tomorrow line, one gap away.
+  readonly property real barY: root.footerTop - root.timelineH - root.barGap
+
+  // Where the tall list stops: one pad above the bar, so the seam has an
+  // even margin on each side and a full list never runs under it.
+  readonly property real listFloor: root.barY - root.barPad
 
   // The rows under the hero, as one flat list so the drawing does not have to
   // know where today stops. Tomorrow is the footer's job now, on every size,
@@ -333,11 +369,11 @@ Item {
 
       anchors.left: parent.left
       anchors.right: parent.right
-      anchors.bottom: parent.bottom
-      // Half of the footer's drop, so the bar follows tomorrow's line down a
-      // couple of pixels and the two keep their offset.
-      anchors.bottomMargin: Math.max(0, root.footerSpace - 2)
-      height: Math.max(6, Math.round(root.unit * 0.05))
+      // The seam between the current-time section and the tomorrow line:
+      // directly above it, one pad away, so it reads as the boundary rather
+      // than a line floating in whatever free space the content left.
+      y: root.barY
+      height: root.timelineH
       visible: root.nextEvent !== null
 
       Rectangle {
@@ -401,7 +437,7 @@ Item {
       anchors.top: heroTitle.bottom
       anchors.topMargin: Math.round(root.unit * 0.06)
       anchors.bottom: parent.bottom
-      anchors.bottomMargin: root.barFloor
+      anchors.bottomMargin: Math.max(0, body.height - root.listFloor)
       visible: root.tall && root.agenda.length > 0
       spacing: Math.round(root.unit * 0.025)
 

@@ -100,7 +100,7 @@ Item {
       anchors.top: parent.top
       textFormat: Text.PlainText
       text: root.place
-      color: root.foreground
+      color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Math.max(9, Math.round(root.unit * 0.085))
       // The eyebrow, in the same letterspaced voice as the calendar's head

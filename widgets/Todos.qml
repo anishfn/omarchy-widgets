@@ -279,7 +279,7 @@ Item {
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: root.bigSize
-      font.weight: Font.Light
+      font.weight: Font.Bold
       renderType: Text.NativeRendering
     }
 

@@ -100,9 +100,12 @@ Item {
       anchors.top: parent.top
       textFormat: Text.PlainText
       text: root.place
-      color: root.foreground
+      color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Math.max(9, Math.round(root.unit * 0.085))
+      // The eyebrow, in the same letterspaced voice as the calendar's head
+      // and the clock's label: small, upper row, tracked out a touch.
+      font.letterSpacing: Math.round(Math.max(9, Math.round(root.unit * 0.085)) * 0.1)
       elide: Text.ElideRight
       renderType: Text.NativeRendering
     }
@@ -119,7 +122,10 @@ Item {
       renderType: Text.NativeRendering
     }
 
-    // The number, big, and hard against the left edge.
+    // The number, big, and hard against the left edge. The headline of the
+    // card, in the same weight as the calendar's time and the clock's time --
+    // a big number that floats thin next to two bold ones would be a
+    // different design system, not a sibling card.
     Text {
       id: temperatureText
       anchors.left: parent.left
@@ -129,8 +135,10 @@ Item {
       text: root.temperature
       color: root.foreground
       font.family: root.fontFamily
-      font.pixelSize: Math.max(14, Math.round(root.unit * 0.24))
-      font.weight: Font.Light
+      // One step under the clock's headline, so the two cards read as a
+      // ladder of one rather than two headlines disagreeing about size.
+      font.pixelSize: Math.max(14, Math.round(root.unit * 0.22))
+      font.weight: Font.Bold
       renderType: Text.NativeRendering
     }
 

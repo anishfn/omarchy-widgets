@@ -50,13 +50,12 @@ Item {
   readonly property real gap: Math.round(unit * 0.04)
 
   readonly property real smallSize: Math.max(8, Math.round(unit * 0.068))
-  readonly property real titleSize: Math.max(9, Math.round(unit * 0.082))
-  readonly property real timeSize: Math.max(16, Math.round(unit * 0.23))
+  readonly property real titleSize: Math.max(10, Math.round(unit * 0.085))
+  readonly property real timeSize: Math.max(18, Math.round(unit * 0.24))
 
-  // Which composition this footprint gets. Both are questions about the
-  // card's own rectangle rather than about the numbers in the config, so a
-  // card resized in the editor changes drawing as you drag it.
-  readonly property bool wide: spanCols > 1
+  // Which composition this footprint gets -- a question about the card's own
+  // rectangle rather than about the numbers in the config, so a card resized
+  // in the editor changes drawing as you drag it.
   readonly property bool tall: spanRows > 1
 
   // --------------------------------------------------------------- the data
@@ -65,7 +64,11 @@ Item {
   readonly property bool configured: Model.isSafeIcsUrl(icsUrl)
   readonly property bool showAllDay: settings.showAllDay !== false
   readonly property bool showLocation: settings.showLocation === true
-  readonly property bool twelveHour: String(settings.format || "24h") === "12h"
+  // The clock widget owns the time format -- there is no calendar-specific
+  // choice left to make -- so the calendar reads whether it is a twelve-hour
+  // clock off the layout's clock, and switches the moment that clock does.
+  readonly property bool twelveHour: service && service.config
+    ? Model.clockTwelveHour(service.config) : false
 
   readonly property var calendar: service && service.calendars && configured
     ? service.calendars[icsUrl] : null
@@ -89,21 +92,73 @@ Item {
   readonly property var nextEvent: events.length > 0 ? events[0] : null
   readonly property bool empty: events.length === 0
 
-  // What tomorrow opens with, for the line the tall card ends on. Exactly one
-  // day ahead: the rest of tomorrow can wait until it is today.
+  // What tomorrow opens with. One line under the card on every footprint,
+  // so a 1x1 knows what is coming next too -- the tall card used to claim
+  // it for its list, but it is the one fact worth keeping on all sizes.
   readonly property var tomorrowEvent: ready
     ? Model.nextDayEvent(calendar.events, nowMs, 1, showAllDay) : null
 
+  // The earliest thing on any day after today. Tomorrow is the usual answer,
+  // but a calendar with nothing on tomorrow must still have a bottom line:
+  // the slot is for what is coming next, not a ledger that must be written
+  // day by day, so when tomorrow is bare it reads the next event instead.
+  readonly property var awayEvent: ready
+    ? Model.nextAwayEvent(calendar.events, nowMs, 60, showAllDay) : null
+
+  // The bottom line, in the card's own words: "Tomorrow" (or the day when
+  // the next event is further out), then the clock's time of it (none for
+  // an all-day), then what it is.
+  readonly property string bottomText: {
+    var entry = root.tomorrowEvent || (root.awayEvent ? root.awayEvent.event : null)
+    if (!entry) return ""
+    var when = root.tomorrowEvent
+      ? "Tomorrow" : Model.dayHeading(entry.start, root.nowMs)
+    var time = entry.allDay
+      ? "" : Model.eventTimeLabel(entry, root.twelveHour)
+    var label = when
+    if (time !== "") label += "  ·  " + time
+    return label + "  ·  " + root.rowTitle(entry)
+  }
+
+  // The card's vertical room splits into two, with the bar as the seam
+  // between them: the current-time section above -- the head, the hero, and
+  // on the tall size the list -- and the tomorrow line claiming the floor.
+  // The bar sits directly above that line, a deliberate gap away from it,
+  // and the list stops a little pad above the bar, so the separator's margin
+  // is even on both sides. Whatever the sections leave is the content's, never
+  // the bar's: it stays the seam between two sections, not a line drawn at
+  // random in the void.
+  //
+  // Every number here is in the body's own coordinates, measuring outwards
+  // from what is painted rather than from the card's edge, so they stay
+  // right as text wraps or the footprint changes size.
+
+  // The top of the tomorrow line, or the card's floor when there is none.
+  readonly property real footerTop: bottomLine.visible
+    ? body.height + root.pad
+      - Math.max(6, Math.round(root.pad - 4)) - bottomLine.height
+    : body.height
+
+  readonly property real timelineH: Math.max(6, Math.round(root.unit * 0.05))
+  // The pad below the bar, a touch larger than the one above it (barPad), so
+  // the seam reads as belonging to the tomorrow line it sits just over.
+  readonly property real barPad: Math.max(3, Math.round(root.unit * 0.025))
+  readonly property real barGap: Math.max(6, Math.round(root.unit * 0.05))
+
+  // The bar's top edge: directly above the tomorrow line, one gap away.
+  readonly property real barY: root.footerTop - root.timelineH - root.barGap
+
+  // Where the tall list stops: one pad above the bar, so the seam has an
+  // even margin on each side and a full list never runs under it.
+  readonly property real listFloor: root.barY - root.barPad
+
   // The rows under the hero, as one flat list so the drawing does not have to
-  // know where today stops and tomorrow starts -- a heading is just a row
-  // that happens to be a date.
+  // know where today stops. Tomorrow is the footer's job now, on every size,
+  // so the tall card's list is today alone -- the line ends the card either
+  // way, just from a place that does not double it up.
   readonly property var agenda: {
     var out = []
     for (var i = 1; i < events.length; i++) out.push({ heading: "", event: events[i] })
-    if (tomorrowEvent) {
-      out.push({ heading: Model.dayHeading(tomorrowEvent.start, root.nowMs), event: null })
-      out.push({ heading: "", event: tomorrowEvent })
-    }
     return out
   }
 
@@ -116,11 +171,13 @@ Item {
   }
 
   // Which nothing the card is saying: unset, unreachable, still loading, or
-  // genuinely a clear day.
+  // a day that is genuinely clear. Events ending do not earn a sentence of
+  // their own -- the card says "Nothing scheduled" whether the day
+  // never had a plan or simply ran out of one.
   readonly property string emptyText: {
     if (!configured) return icsUrl === "" ? "Add your calendar" : "That is not an iCal address"
     if (!ready) return error === "unavailable" ? "Calendar unavailable" : "Loading…"
-    return "Nothing left today"
+    return "Nothing scheduled"
   }
 
   // ------------------------------------------------------------ the day bar
@@ -182,16 +239,47 @@ Item {
       renderType: Text.NativeRendering
     }
 
-    Text {
+    // A genuinely clear day gets the card's one accent: a vertical hairline
+    // the sentence leans on. A card that cannot answer yet -- unpublished,
+    // unreachable, still loading -- stays the plain sentence, because the
+    // hairline is the answer's, not the question's.
+    Item {
       width: parent.width
-      textFormat: Text.PlainText
-      text: root.emptyText
-      color: root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: root.titleSize
-      wrapMode: Text.Wrap
-      maximumLineCount: 2
-      renderType: Text.NativeRendering
+      height: emptyText.implicitHeight
+
+      Rectangle {
+        id: emptyBar
+
+        anchors.left: parent.left
+        anchors.verticalCenter: emptyText.verticalCenter
+        visible: root.ready
+        width: Math.max(4, Math.round(root.unit * 0.04))
+        // A couple of pixels taller than the sentence, so the hairline pokes out
+        // past it top and bottom instead of ending exactly where it does.
+        height: emptyText.height + Math.round(root.unit * 0.01)
+        radius: width / 2
+        color: root.accent
+      }
+
+      Text {
+        id: emptyText
+
+        anchors.left: parent.left
+        anchors.leftMargin: emptyBar.visible
+          ? emptyBar.width + Math.round(root.unit * 0.045) : 0
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: Math.round(root.unit * 0.03)
+        textFormat: Text.PlainText
+        text: root.emptyText
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Math.max(12, Math.round(root.unit * 0.13))
+        font.weight: Font.Bold
+        wrapMode: Text.Wrap
+        maximumLineCount: 2
+        renderType: Text.NativeRendering
+      }
     }
   }
 
@@ -256,7 +344,9 @@ Item {
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.top: headLine.bottom
-      anchors.topMargin: root.gap
+      // Half the gap, so the time and the title sit a few pixels higher and
+      // the timeline at the card's floor gets room to stay a drawing.
+      anchors.topMargin: Math.round(root.gap * 0.5)
       textFormat: Text.PlainText
       text: root.nextEvent
         ? (root.nextEvent.allDay ? "All day"
@@ -271,7 +361,7 @@ Item {
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: root.timeSize
-      font.weight: Font.Light
+      font.weight: Font.Bold
       renderType: Text.NativeRendering
     }
 
@@ -287,33 +377,36 @@ Item {
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: root.titleSize
+      font.weight: Font.Bold
       wrapMode: Text.Wrap
-      // Two lines at a single cell, one when there is a list underneath that
-      // has more claim on the room.
-      maximumLineCount: root.tall ? 1 : 2
+      // Two lines at a single cell, one when there is a list (or the
+      // tomorrow footer or the timeline) underneath that has more claim on
+      // the room.
+      maximumLineCount: (root.tall || bottomLine.visible || timeline.visible) ? 1 : 2
       elide: Text.ElideRight
       renderType: Text.NativeRendering
     }
 
-    // ------------------------------------------------------------- the day
+    // ----------------------------------------------------------- the timeline
     //
     // Midnight to midnight as a hairline, with the event drawn on it and a
-    // mark where the clock is. Only on the wide sizes: at one cell the whole
-    // day is 150 pixels and an hour of it is six, which is a texture rather
-    // than a reading.
+    // dot where the clock is. On every footprint, so a 1x1 still says where
+    // in the day the next thing is -- a day is 24 hours across and a meeting
+    // is one of them, which is a reading at any width. An all-day event
+    // draws no block: it runs midnight to midnight, so it would fill the bar
+    // end to end and the day would stop being a reading.
 
     Item {
-      id: dayBar
+      id: timeline
 
       anchors.left: parent.left
       anchors.right: parent.right
-      anchors.top: heroTitle.bottom
-      anchors.topMargin: Math.round(root.unit * 0.05)
-      height: Math.max(4, Math.round(root.unit * 0.035))
-      // Dropped rather than crowded when the hero has taken the room, which
-      // is the rule the weather card set.
-      visible: root.wide && root.nextEvent !== null
-        && y + height < parent.height
+      // The seam between the current-time section and the tomorrow line:
+      // directly above it, one pad away, so it reads as the boundary rather
+      // than a line floating in whatever free space the content left.
+      y: root.barY
+      height: root.timelineH
+      visible: root.nextEvent !== null
 
       Rectangle {
         id: track
@@ -328,17 +421,10 @@ Item {
 
       // The event, as a block along the day. Never thinner than it is tall,
       // so a half-hour meeting is a mark you can see rather than a hairline
-      // crossing a hairline.
-      //
-      // Not drawn at all for an all-day event, which is the one case where
-      // the block has nothing to say: it runs midnight to midnight, so it
-      // fills the bar end to end and the day becomes a solid accent rule --
-      // which is both a slab of the one colour the card is allowed to spend
-      // once, and an answer to "where in the day" of "everywhere". The track
-      // and the mark stay, so the bar still says how much of the day has
-      // gone, which is the part that is still true.
+      // crossing a hairline. Drawn only for a timed event: an all-day one is
+      // everywhere on the day, which a solid slab would shout.
       Rectangle {
-        id: block
+        id: evBlock
 
         readonly property real span: Math.max(0, root.eventTo - root.eventFrom)
 
@@ -351,35 +437,39 @@ Item {
         color: root.accent
       }
 
-      // The clock, riding the same day toward the block it is counting down
-      // to. Drawn over the block rather than under it: when the event is
-      // happening now, where you are in it is the more interesting fact.
+      // The clock, as a dot riding the same day toward the block it is
+      // counting down to. Drawn over the block rather than under it: when the
+      // event is happening now, where you are in it is the more interesting
+      // fact.
       Rectangle {
-        id: nowMark
+        id: nowDot
 
         x: Math.round(Math.min(parent.width - width, root.nowFraction * parent.width))
-        width: Math.max(1, Math.round(root.unit * 0.008))
         anchors.verticalCenter: parent.verticalCenter
-        height: parent.height
-        radius: width / 2
-        color: root.foreground
+        width: Math.max(5, Math.round(root.unit * 0.04))
+        height: width
+        radius: height / 2
+        color: root.accent
       }
     }
 
     // ------------------------------------------------------------ the list
     //
-    // The rest of the day, and what tomorrow opens with. Only on the tall
-    // size, and only as many rows as actually fit -- a card that elided its
-    // last row into nothing would be worse than a card that drew one fewer.
+    // The rest of today. Only on the tall size, and only as many rows as
+    // actually fit -- a card that elided its last row into nothing would be
+    // worse than a card that drew one fewer. Tomorrow is the footer's job,
+    // the timeline's is where the next thing sits in the day, so neither is
+    // repeated here.
 
     Column {
       id: list
 
       anchors.left: parent.left
       anchors.right: parent.right
-      anchors.top: dayBar.visible ? dayBar.bottom : heroTitle.bottom
+      anchors.top: heroTitle.bottom
       anchors.topMargin: Math.round(root.unit * 0.06)
       anchors.bottom: parent.bottom
+      anchors.bottomMargin: Math.max(0, body.height - root.listFloor)
       visible: root.tall && root.agenda.length > 0
       spacing: Math.round(root.unit * 0.025)
 
@@ -456,5 +546,29 @@ Item {
         }
       }
     }
+  }
+
+  // Tomorrow, on the floor. One line on every footprint -- 1x1, 2x1, 2x2 --
+  // because "what opens tomorrow" is worth keeping however small the card
+  // gets. The hero, the day bar and the list all stop before it.
+  Text {
+    id: bottomLine
+
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    anchors.leftMargin: root.pad
+    anchors.rightMargin: root.pad
+    // A few pixels closer to the floor than the card's other margins, so
+    // tomorrow's line reads as the card's bottom-most fact.
+    anchors.bottomMargin: Math.max(6, Math.round(root.pad - 4))
+    visible: root.bottomText !== ""
+    textFormat: Text.PlainText
+    text: root.bottomText
+    color: root.foreground
+    font.family: root.fontFamily
+    font.pixelSize: root.smallSize
+    elide: Text.ElideRight
+    renderType: Text.NativeRendering
   }
 }

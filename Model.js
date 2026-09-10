@@ -354,16 +354,6 @@ function catalog() {
           defaultValue: ""
         },
         {
-          key: "format",
-          type: "choice",
-          label: "Clock",
-          defaultValue: "24h",
-          options: [
-            { value: "24h", label: "14:30" },
-            { value: "12h", label: "2:30 PM" }
-          ]
-        },
-        {
           key: "showAllDay",
           type: "boolean",
           label: "All-day events",
@@ -3110,18 +3100,78 @@ function nextDayEvent(events, nowMs, daysAhead, includeAllDay) {
   return null
 }
 
+// The earliest thing on any day ahead, and which day it is on. Where
+// nextDayEvent asks about one specific day, this walks until it finds a day
+// that has one, so the card's bottom line never sits over a day that the
+// calendar simply has nothing on -- it reads the next real event, and says
+// when that is.
+function nextAwayEvent(events, nowMs, maxDays, includeAllDay) {
+  for (var d = 1; d <= maxDays; d++) {
+    var ev = nextDayEvent(events, nowMs, d, includeAllDay)
+    if (ev) return { event: ev, days: d }
+  }
+  return null
+}
+
 function padTwo(n) { return n < 10 ? "0" + n : String(n) }
 
-// "14:30", or "2:30 PM" on a twelve-hour clock.
-function clockLabel(ms, twelveHour) {
+// The one place a format's habits are decided. A format that asks for a
+// meridian ("PM") must also show a twelve-hour hour; Qt's format language
+// renders "hh" as twenty-four-hour once the AP token is gone from the
+// string, which is how a clock learns to say "19:24 PM". The bar to the
+// calendar and the clock card both know about the same format either way,
+// so neither can ever disagree with the other about what "the time" looks
+// like.
+function clockFormatMeridian(format) {
+  var fmt = String(format || "HH:mm")
+  return fmt.replace(/\s?[Aa]P?/g, "").trim() !== fmt
+}
+
+// The clock's digital face, split so the card can draw the digits and the
+// meridian as two pieces. The hour always agrees with the meridian: a
+// twelve-hour hour runs 1-12 with no leading zero, a twenty-four-hour one
+// stays 00-23.
+function clockFace(ms, format) {
   var d = new Date(Number(ms))
-  if (isNaN(d.getTime())) return ""
+  if (isNaN(d.getTime())) return { digits: "", meridian: false, meridianText: "" }
+  var fmt = String(format || "HH:mm")
+  var digitsFmt = fmt.replace(/\s?[Aa]P?/g, "").trim()
+  var meridian = clockFormatMeridian(fmt)
   var h = d.getHours()
   var m = d.getMinutes()
-  if (!twelveHour) return padTwo(h) + ":" + padTwo(m)
-  var suffix = h < 12 ? "AM" : "PM"
-  var hour = h % 12
-  return (hour === 0 ? 12 : hour) + ":" + padTwo(m) + " " + suffix
+  var sep = digitsFmt.indexOf(" ") !== -1 ? " " : ":"
+  var hour = meridian ? (h % 12 || 12) : h
+  var digits = (meridian ? String(hour) : padTwo(hour))
+    + sep + padTwo(m)
+  if (digitsFmt.indexOf("s") !== -1) digits += sep + padTwo(d.getSeconds())
+  return {
+    digits: digits,
+    meridian: meridian,
+    meridianText: meridian ? (h < 12 ? "AM" : "PM") : ""
+  }
+}
+
+// "14:30", or "2:30 PM" on a twelve-hour clock. The calendar's own way of
+// reading the same clock-face function the clock card uses, so the two can
+// never format an hour differently.
+function clockLabel(ms, twelveHour) {
+  var face = clockFace(ms, twelveHour ? "hh:mm AP" : "HH:mm")
+  return face.digits + (face.meridian ? " " + face.meridianText : "")
+}
+
+// Whether the calendar reads its times on a twelve-hour clock. The clock
+// widget owns the time format -- the calendar must not ask for its own -- so
+// the answer comes from the first clock in the layout, following the same
+// meridian decision the clock card itself uses.
+function clockTwelveHour(config) {
+  var widgets = config ? config.widgets : null
+  if (!widgets || !widgets.length) return false
+  for (var i = 0; i < widgets.length; i++) {
+    var w = widgets[i]
+    if (!w || w.type !== "clock" || w.enabled === false) continue
+    return clockFormatMeridian(w.settings ? w.settings.format : "")
+  }
+  return false
 }
 
 // The time column on a row: the clock, or the word for an event that has no
@@ -4363,8 +4413,12 @@ if (typeof module !== "undefined" && module.exports) {
     upcomingEvents: upcomingEvents,
     todayEvents: todayEvents,
     nextDayEvent: nextDayEvent,
+    nextAwayEvent: nextAwayEvent,
     clockLabel: clockLabel,
     eventTimeLabel: eventTimeLabel,
+    clockTwelveHour: clockTwelveHour,
+    clockFormatMeridian: clockFormatMeridian,
+    clockFace: clockFace,
     untilLabel: untilLabel,
     startOfDay: startOfDay,
     daysApart: daysApart,

@@ -196,7 +196,7 @@ Item {
       // size they would be the loudest thing on a card that has nothing to
       // say yet.
       font.pixelSize: root.ready ? root.valueSize : root.detailSize
-      font.weight: root.ready ? Font.Light : Font.Normal
+      font.weight: root.ready ? Font.Bold : Font.Normal
       // A long balance shrinks to fit rather than eliding: the digits before
       // the point are the ones that matter, and "0.4213" cut to "0.42…" is a
       // worse answer than the same number set smaller.

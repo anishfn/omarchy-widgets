@@ -7,9 +7,13 @@ import qs.Commons
 // the edge, which is what gives them their gradual slant through the sides
 // and corners.
 //
-// The path is walked analytically rather than dashed: four straight runs and
-// four quarter arcs, with a tick dropped every `perimeter / count` of the
-// true perimeter. Walked that way the ring closes on an even gap.
+// Positions are shared out by angle, not by arc length. Walking the true
+// perimeter in even steps would bunch the marks where an edge passes far from
+// the centre and pull them apart in the corners — the ring would read crooked,
+// like a clock whose minute marks wander. Instead each mark gets an exactly
+// even slice of 360°, placed where the ray from the centre at that angle meets
+// the card's rounded-rectangle edge, so the ring closes on a beat you can sweep
+// an eye around.
 Canvas {
   id: root
 
@@ -51,57 +55,58 @@ Canvas {
   onWidthChanged: requestPaint()
   onHeightChanged: requestPaint()
 
-  // Point at arc length `t` along the rounded rect, starting at the top-left
-  // corner's end and running clockwise. `t` is wrapped, so any non-negative
-  // length works and the ring closes.
-  function pointAt(t, w, h, r) {
-    var straightX = Math.max(0, w - r * 2)
-    var straightY = Math.max(0, h - r * 2)
-    var arc = (Math.PI / 2) * r
-    var perimeter = straightX * 2 + straightY * 2 + arc * 4
-    if (perimeter <= 0) return { x: 0, y: 0 }
-    var d = ((t % perimeter) + perimeter) % perimeter
+  // The point where the ray from the ring's centre at `angle` reaches the
+  // rounded rectangle: the straight runs are ray-vs-line, and the corners,
+  // where the runs' cut-offs cross, are ray-vs-circle with the hit kept only
+  // if it falls inside that corner's own quarter. The nearest hit wins, which
+  // for a convex shape is the one true exit from the centre.
+  function rayPoint(cx, cy, w, h, r, angle) {
+    var a = w / 2
+    var b = h / 2
+    var ai = Math.max(0, a - r)
+    var bi = Math.max(0, b - r)
+    var cosA = Math.cos(angle)
+    var sinA = Math.sin(angle)
+    var best = Infinity
+    var eps = 1e-10
 
-    // Top edge, left to right.
-    if (d < straightX) return { x: r + d, y: 0 }
-    d -= straightX
-
-    // Top-right corner, -90deg to 0deg.
-    if (d < arc) {
-      var a1 = -Math.PI / 2 + (arc > 0 ? d / r : 0)
-      return { x: (w - r) + Math.cos(a1) * r, y: r + Math.sin(a1) * r }
+    if (sinA < -eps) {
+      var t = -b / sinA
+      if (t > 0 && Math.abs(t * cosA) <= ai + eps) best = Math.min(best, t)
     }
-    d -= arc
-
-    // Right edge, top to bottom.
-    if (d < straightY) return { x: w, y: r + d }
-    d -= straightY
-
-    // Bottom-right corner, 0deg to 90deg.
-    if (d < arc) {
-      var a2 = arc > 0 ? d / r : 0
-      return { x: (w - r) + Math.cos(a2) * r, y: (h - r) + Math.sin(a2) * r }
+    if (sinA > eps) {
+      var t = b / sinA
+      if (t > 0 && Math.abs(t * cosA) <= ai + eps) best = Math.min(best, t)
     }
-    d -= arc
-
-    // Bottom edge, right to left.
-    if (d < straightX) return { x: (w - r) - d, y: h }
-    d -= straightX
-
-    // Bottom-left corner, 90deg to 180deg.
-    if (d < arc) {
-      var a3 = Math.PI / 2 + (arc > 0 ? d / r : 0)
-      return { x: r + Math.cos(a3) * r, y: (h - r) + Math.sin(a3) * r }
+    if (cosA < -eps) {
+      var t = -a / cosA
+      if (t > 0 && Math.abs(t * sinA) <= bi + eps) best = Math.min(best, t)
     }
-    d -= arc
+    if (cosA > eps) {
+      var t = a / cosA
+      if (t > 0 && Math.abs(t * sinA) <= bi + eps) best = Math.min(best, t)
+    }
 
-    // Left edge, bottom to top.
-    if (d < straightY) return { x: 0, y: (h - r) - d }
-    d -= straightY
+    var corners = [
+      { x: -ai, y: -bi, lo: Math.PI, hi: 1.5 * Math.PI },
+      { x: ai, y: -bi, lo: 1.5 * Math.PI, hi: 2 * Math.PI },
+      { x: ai, y: bi, lo: 0, hi: 0.5 * Math.PI },
+      { x: -ai, y: bi, lo: 0.5 * Math.PI, hi: Math.PI }
+    ]
+    for (var i = 0; i < 4; i++) {
+      var c = corners[i]
+      var dot = cosA * c.x + sinA * c.y
+      var disc = dot * dot - (c.x * c.x + c.y * c.y - r * r)
+      if (disc < 0) continue
+      var t = dot + Math.sqrt(disc)
+      if (t <= eps) continue
+      var hit = Math.atan2(t * sinA - c.y, t * cosA - c.x)
+      if (hit < 0) hit += 2 * Math.PI
+      if (hit >= c.lo - eps && hit <= c.hi + eps) best = Math.min(best, t)
+    }
 
-    // Top-left corner, 180deg to 270deg.
-    var a4 = Math.PI + (arc > 0 ? d / r : 0)
-    return { x: r + Math.cos(a4) * r, y: r + Math.sin(a4) * r }
+    if (best === Infinity) return { x: cx, y: cy }
+    return { x: cx + best * cosA, y: cy + best * sinA }
   }
 
   onPaint: {
@@ -112,11 +117,6 @@ Canvas {
     var w = root.ringWidth
     var h = root.ringHeight
     var r = root.ringRadius
-    var straightX = Math.max(0, w - r * 2)
-    var straightY = Math.max(0, h - r * 2)
-    var arc = (Math.PI / 2) * r
-    var perimeter = straightX * 2 + straightY * 2 + arc * 4
-    if (perimeter <= 0) return
 
     // Exactly the requested positions: a multiple of `majorEvery`, so a major
     // lands on the first tick too and the ring never ends on a short gap.
@@ -124,42 +124,53 @@ Canvas {
     if (root.majorEvery > 0) {
       count = Math.max(root.majorEvery, Math.round(count / root.majorEvery) * root.majorEvery)
     }
-    var step = perimeter / count
+
+    var cx = w / 2
+    var cy = h / 2
 
     ctx.save()
     ctx.translate(root.inset, root.inset)
     ctx.strokeStyle = root.tickColor
     ctx.lineCap = "butt"
 
-    var cx = w / 2
-    var cy = h / 2
-
+    // Each mark owns an even slice of the circle: one twelfth of the ring is
+    // twelve marks, a quarter is eleven. The first sits at twelve o'clock, so
+    // the four majors fall on the card's cardinal points. Ticks are grouped by
+    // width so the whole ring strokes twice instead of once per mark.
+    var minor = []
+    var major = []
+    // The first tick sits at the top-left corner (≈10:30), rotating the ring
+    // so the four majors land on the card's own corners rather than the
+    // centre of each edge.
+    var offset = Math.PI / 4
     for (var i = 0; i < count; i++) {
-      var p = root.pointAt(i * step, w, h, r)
-      var major = root.majorEvery > 0 && (i % root.majorEvery) === 0
-      var length = major ? root.majorTickLength : root.tickLength
-
-      // Inward, toward the card's centre, rather than perpendicular to the
-      // edge — the slant through the corners is the point of this ring.
+      var angle = -Math.PI / 2 + offset + i * 2 * Math.PI / count
+      var p = root.rayPoint(cx, cy, w, h, r, angle)
       var dx = cx - p.x
       var dy = cy - p.y
       var distance = Math.sqrt(dx * dx + dy * dy)
       if (distance <= 0) continue
       var dirX = dx / distance
       var dirY = dy / distance
+      var isMajor = root.majorEvery > 0 && (i % root.majorEvery) === 0
+      var length = isMajor ? root.majorTickLength : root.tickLength
+      var tick = isMajor ? major : minor
+      tick.push(p.x, p.y, p.x + dirX * length, p.y + dirY * length)
+    }
 
-      ctx.lineWidth = major ? root.majorTickWidth : root.tickWidth
-
-      // Half a pixel off the grid keeps a straight 1px stroke on one row of
-      // pixels instead of smeared across two. Diagonal ticks are left alone.
-      var x0 = p.x + (Math.abs(dirX) < 0.01 ? 0.5 : 0)
-      var y0 = p.y + (Math.abs(dirY) < 0.01 ? 0.5 : 0)
-
+    function drawRing(width, ticks) {
+      if (ticks.length === 0) return
+      ctx.lineWidth = width
       ctx.beginPath()
-      ctx.moveTo(x0, y0)
-      ctx.lineTo(x0 + dirX * length, y0 + dirY * length)
+      for (var k = 0; k < ticks.length; k += 4) {
+        ctx.moveTo(ticks[k], ticks[k + 1])
+        ctx.lineTo(ticks[k + 2], ticks[k + 3])
+      }
       ctx.stroke()
     }
+
+    drawRing(root.tickWidth, minor)
+    drawRing(root.majorTickWidth, major)
 
     ctx.restore()
   }
